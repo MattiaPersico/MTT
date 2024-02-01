@@ -37,6 +37,14 @@ require(mtt_audioguide_paths)
 local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_global_functions")
 local magf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_audioguide_functions")
 
+--[[
+local ok, lanes = pcall(require, "/usr/local/lib/lua/5.4/lanes")
+if ok then
+    reaper.ShowMessageBox("Lua Lanes è stato installato correttamente!", 'Evviva', 0)
+else
+  reaper.ShowMessageBox(lanes, 'Problemi', 0)
+end
+]]
 
 -- Segmentation Arguments
 local seg_threshold = -45
@@ -131,6 +139,7 @@ function areAGandPythonSet()
  return true
 end
 
+
 function onLoadCorpusPressed()
 
   if not areAGandPythonSet() then
@@ -160,6 +169,7 @@ function onLoadCorpusPressed()
   end
 
 end
+
 
 function onMatchTargetPressed()
 
