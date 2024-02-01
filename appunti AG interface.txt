@@ -1,0 +1,17 @@
+
+
+ 
+valutare se inserire le versioni dei descriptors perception
+
+valutare se inserire ratio-limit negli spass
+
+inserire posto-process sensati sull rpp (normalizzazione? match rms del target? taglio dell rpp se dura meno di target?)
+
+capire se e come gestire il fatto che i proxy degli rpp non piacciono in input ad audioguide
+
+
+
+valutare se rendere alcuni processi multi-thread (luarocks - lanes), in caso va sia implementato sia installato nell installer
+
+
+
