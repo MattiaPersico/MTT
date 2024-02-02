@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<reapack name="Esempio di Repository" version="1">
-  <category name="My Example Scripts">
+<reapack name=" ReAG_Interface" version="1">
+  <category name="mtt_AudioGuide_Interface">
     <reascript name="mtt_AudioGuide_Interface" author="Mattia Persico" version="1.0" provides="mtt_AudioGuide_Interface.lua">
       <description>Questa è la descrizione.</description>
       <link>https://github.com/MattiaPersico/ReAG_Interface</link>
