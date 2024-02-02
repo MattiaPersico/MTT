@@ -41,6 +41,7 @@ agDefaultsFile = AG_path .. '/audioguide/defaults.py'
 option_file = AG_path .. '/reaper_ag_options.py'
 concatenate_path = AG_path .. '/agConcatenate.py'
 
+NUMBER_OF_SEGMENTS = 0
 
 local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_global_functions")
 
@@ -995,12 +996,14 @@ end
 
 function magf.segmentation(selected_items, seg_threshold, seg_offset_rise, seg_multirise, debug_mode) -- Avvia la segmentazione tramite CL 
 
-  local numer_of_segments = 0
+  NUMBER_OF_SEGMENTS = 0
+
+  local AFs_path = {}
 
   for i = 1, #selected_items do
     source = reaper.GetMediaItemTake_Source(reaper.GetActiveTake(selected_items[i]))
-  
-    AF_path = reaper.GetMediaSourceFileName(source)
+    
+    AFs_path[i] = reaper.GetMediaSourceFileName(source)
 
     local arguments_string = ' '
 
@@ -1010,23 +1013,26 @@ function magf.segmentation(selected_items, seg_threshold, seg_offset_rise, seg_m
 
     if seg_multirise == true then arguments_string = arguments_string .. ' -m ' end
   
-    command = python .. ' ' .. agSegmentationFile .. arguments_string ..'"' .. AF_path .. '"'
+    command = python .. ' ' .. agSegmentationFile .. arguments_string ..'"' .. AFs_path[i] .. '"'
 
     if debug_mode then
       reaper.ShowMessageBox(command, 'Segmentation Command', 0)
     else
-      return_string = reaper.ExecProcess(command, 0)
+      return_string = os.execute(command .. " &")
+      if (i == #selected_items) then
+        return_string = os.execute(command .. " && echo 'done' > /tmp/segmentation_signal_file &")
+      end
     end
 
-    numer_of_segments = numer_of_segments + mgf.countTextFileLines(AF_path .. '.txt')
+    --NUMBER_OF_SEGMENTS = NUMBER_OF_SEGMENTS + mgf.countTextFileLines(AF_path .. '.txt')
 
   end
 
-  --reaper.ShowMessageBox('Segmenti Rilevati', tostring(numer_of_segments), 0)
-  return numer_of_segments
-
+  return AFs_path
+  --reaper.ShowMessageBox('Segmenti Rilevati', tostring(NUMBER_OF_SEGMENTS), 0)
 end
 
+-- && 
 
 -- CONCATENAZIONE
 
@@ -1121,9 +1127,9 @@ command = python .. ' ' .. concatenate_path .. ' ' .. option_file
 
 
 if debug_mode then
-reaper.ShowMessageBox(command, 'Concatenation Command', 0)
+  reaper.ShowMessageBox(command, 'Concatenation Command', 0)
 else
-os.execute(command)
+  os.execute(command .. " && echo 'done' > /tmp/concatenation_signal_file &")
 end
 
 return rpp_path

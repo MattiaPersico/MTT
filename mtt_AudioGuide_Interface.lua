@@ -1,6 +1,6 @@
 -- Script Name and Version
 local major_version = 0
-local minor_version = 11
+local minor_version = 12
 
 local name = 'AudioGuide Interface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 -- Reaper ImGui Stuff
@@ -37,14 +37,17 @@ require(mtt_audioguide_paths)
 local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_global_functions")
 local magf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_audioguide_functions")
 
---[[
-local ok, lanes = pcall(require, "/usr/local/lib/lua/5.4/lanes")
+
+--[[ local ok, lanes = pcall(require, "lanes")
 if ok then
     reaper.ShowMessageBox("Lua Lanes è stato installato correttamente!", 'Evviva', 0)
 else
   reaper.ShowMessageBox(lanes, 'Problemi', 0)
-end
-]]
+end ]]
+
+REAPER_CLI_PATH = reaper.GetExePath() .. '/REAPER.app/Contents/MacOS/REAPER'
+CONCATENATION_IN_PROGRESS = false
+SEGMENTATION_IN_PROGRESS = false
 
 -- Segmentation Arguments
 local seg_threshold = -45
@@ -91,8 +94,10 @@ local si_max_overlap_enabled = false
 -- Items che compongono il CORPUS
 
 local CORPUS_ITEMS = {}
+local CORPUS_AFs = {}
 local is_corpus_ready = false
 local number_of_segments = 0
+
 
 -- Init Spass Array and Descriptor Matrix
 search_mode_list = search_mode_list or {}
@@ -125,6 +130,31 @@ local preferencesWindowState = false
 local debug_mode = false
 
 ---------------------------------------------------------------------------------------------------------------------------------------
+function Spinner(radius, thickness, color)
+  local center = {reaper.ImGui_GetCursorScreenPos(ctx)}
+  center[1] = center[1] + radius
+  center[2] = center[2] + radius
+  local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+  local num_segments = 3
+  local start = os.clock() * 8 % num_segments
+  for i = 0, num_segments do
+      local a = (i + start) / num_segments * math.pi * 2
+      local b = (i + 1 + start) / num_segments * math.pi * 2
+      local xa = center[1] + math.cos(a) * radius
+      local ya = center[2] + math.sin(a) * radius
+      local xb = center[1] + math.cos(b) * radius
+      local yb = center[2] + math.sin(b) * radius
+      local col = reaper.ImGui_ColorConvertDouble4ToU32(color[1], color[2], color[3], color[4])
+      reaper.ImGui_DrawList_AddLine(draw_list, xa, ya, xb, yb, col, thickness)
+  end
+end
+
+function drawSpinner(x,y)
+  reaper.ImGui_SetCursorPosX(ctx, x) -- Posizione X della rotella
+  reaper.ImGui_SetCursorPosY(ctx, y) -- Posizione Y della rotella
+  Spinner(8, 2, {1.0, 1.0, 1.0, 1.0}) -- Chiamata a Spinner
+end
+
 
 function areAGandPythonSet()
   if not is_AudioGuide_folder_set then
@@ -140,6 +170,27 @@ function areAGandPythonSet()
 end
 
 
+function checkSegmentationSignalFile()
+  local signalfile
+
+  signalfile = io.open("/tmp/segmentation_signal_file", "r")
+  if signalfile then
+      signalfile:close()
+      os.remove("/tmp/segmentation_signal_file")
+
+    for i = 1, #CORPUS_AFs do
+      number_of_segments = number_of_segments + mgf.countTextFileLines(CORPUS_AFs[i] .. '.txt')
+    end
+
+    is_corpus_ready = true
+    SEGMENTATION_IN_PROGRESS = false
+
+  else
+      reaper.defer(checkSegmentationSignalFile)
+  end
+end
+
+
 function onLoadCorpusPressed()
 
   if not areAGandPythonSet() then
@@ -149,6 +200,8 @@ function onLoadCorpusPressed()
   selected_item_number = reaper.CountSelectedMediaItems(0)
   
   if selected_item_number > 0 then
+
+    is_corpus_ready = false
 
     if #CORPUS_ITEMS > 0 then
       magf.clearArtifacts(CORPUS_ITEMS)
@@ -161,15 +214,30 @@ function onLoadCorpusPressed()
     end
 
     is_corpus_ready = false
-
-    number_of_segments = magf.segmentation(CORPUS_ITEMS, seg_threshold, seg_offset_rise, seg_multirise, debug_mode)
-
-    is_corpus_ready = true
-
+    number_of_segments = 0
+    CORPUS_AFs = magf.segmentation(CORPUS_ITEMS, seg_threshold, seg_offset_rise, seg_multirise, debug_mode)
+    SEGMENTATION_IN_PROGRESS = true
+    reaper.defer(checkSegmentationSignalFile)
   end
 
 end
 
+function checkConcatenationSignalFile()
+  local signalfile
+
+  signalfile = io.open("/tmp/concatenation_signal_file", "r")
+  if signalfile then
+      signalfile:close()
+      os.remove("/tmp/concatenation_signal_file")
+      
+      magf.import_rpp(concatenation_selected_item, concatenation_rpp_path, concatenation_target_position, REAPER_CLI_PATH)
+      CONCATENATION_IN_PROGRESS = false
+      -- codice post comando di segmentazione
+
+  else
+      reaper.defer(checkConcatenationSignalFile)
+  end
+end
 
 function onMatchTargetPressed()
 
@@ -184,16 +252,14 @@ function onMatchTargetPressed()
 
   if selected_item_number > 0 then
 
-    local selected_item = reaper.GetSelectedMediaItem(0,0)
+     concatenation_selected_item = reaper.GetSelectedMediaItem(0,0)
 
-    local target_filename = reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(reaper.GetActiveTake(selected_item)))
+     concatenation_target_filename = reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(reaper.GetActiveTake(concatenation_selected_item)))
   
-    local target_position = reaper.GetMediaItemInfo_Value(selected_item, 'D_POSITION')
+     concatenation_target_position = reaper.GetMediaItemInfo_Value(concatenation_selected_item, 'D_POSITION')
     
-    local reaper_cli_path = reaper.GetExePath() .. '/REAPER.app/Contents/MacOS/REAPER'
-
-    local rpp_path = magf.concatenation(  selected_item, CORPUS_ITEMS,
-                                          target_filename, 
+     concatenation_rpp_path = magf.concatenation(  concatenation_selected_item, CORPUS_ITEMS,
+                                          concatenation_target_filename, 
                                           tsf_threshold, 
                                           tsf_offset_rise, 
                                           tsf_min_seg_len, 
@@ -224,13 +290,26 @@ function onMatchTargetPressed()
                                           debug_mode
                                         )
       if not debug_mode then
-        magf.import_rpp(selected_item, rpp_path, target_position, reaper_cli_path)
+        CONCATENATION_IN_PROGRESS = true
+        reaper.defer(checkConcatenationSignalFile)
       end
   end
 end
 
 
-function initGUI()
+function initReAG()
+
+  signalfile = io.open("/tmp/concatenation_signal_file", "r")
+  if signalfile then
+      signalfile:close()
+      os.remove("/tmp/concatenation_signal_file")
+  end
+
+  signalfile = io.open("/tmp/segmentation_signal_file", "r")
+  if signalfile then
+      signalfile:close()
+      os.remove("/tmp/segmentation_signal_file")
+  end
 
   preferencesWindowState = false
 
@@ -526,9 +605,9 @@ function mainWindow()
 
   local window_height_increment = 0
 
-  reaper.ImGui_SetCursorPosX(ctx, 8);
+  reaper.ImGui_SetCursorPosX(ctx, 8)
 
-  if not is_corpus_ready then
+  if not is_corpus_ready or CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
     reaper.ImGui_BeginDisabled(ctx, true)
   else
     reaper.ImGui_BeginDisabled(ctx, false)
@@ -540,14 +619,28 @@ function mainWindow()
 
   reaper.ImGui_EndDisabled(ctx)
 
-  reaper.ImGui_SameLine(ctx);
+  reaper.ImGui_SameLine(ctx)
+
+  if CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
+    reaper.ImGui_BeginDisabled(ctx, true)
+  else
+    reaper.ImGui_BeginDisabled(ctx, false)
+  end
 
   if reaper.ImGui_Button(ctx, 'Build Corpus') then
     onLoadCorpusPressed()
   end
 
+  reaper.ImGui_EndDisabled(ctx)
+
   reaper.ImGui_SameLine(ctx);
   reaper.ImGui_Text(ctx, 'Corpus Segments: ' .. tostring(number_of_segments))
+
+  reaper.ImGui_SameLine(ctx);
+
+  if CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
+    drawSpinner(reaper.ImGui_GetCursorPosX(ctx) + 10 , reaper.ImGui_GetCursorPosY(ctx) + 4)
+  end
 
   reaper.ImGui_SameLine(ctx);
 
@@ -890,6 +983,6 @@ function onExit()
 end
 
 
-initGUI()
+initReAG()
 reaper.defer(loop)
 reaper.atexit(onExit)
