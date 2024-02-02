@@ -5,21 +5,25 @@
       <description>Global functions for ReAG Interface.</description>
       <version>1.0</version>
       <author>MattiaPersico</author>
+      <provides>mtt_global_functions.lua</provides>
     </reascript>
     <reascript file="mtt_audioguide_paths.lua">
       <description>Audio guide paths for ReAG Interface.</description>
       <version>1.0</version>
       <author>MattiaPersico</author>
+      <provides>mtt_audioguide_paths.lua</provides>
     </reascript>
     <reascript file="mtt_audioguide_functions.lua">
       <description>Audio guide functions for ReAG Interface.</description>
       <version>1.0</version>
       <author>MattiaPersico</author>
+      <provides>mtt_audioguide_functions.lua</provides>
     </reascript>
     <reascript file="mtt_AudioGuide_Interface.lua">
       <description>Main interface for the ReAG Audio Guide.</description>
       <version>1.0</version>
       <author>MattiaPersico</author>
+      <provides>mtt_AudioGuide_Interface.lua</provides>
     </reascript>
   </category>
 </reapack>
