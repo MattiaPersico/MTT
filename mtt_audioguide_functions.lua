@@ -1154,6 +1154,7 @@ function magf.import_rpp(target_item, target_filename, target_position, reaper_c
 end
 
 
+
 function magf.trim_result(mediaItem, reference_item) -- taglia in testa e coda il subproject in timeline in modo da farlo combaciare con il target
 
   local start_time = reaper.GetMediaItemTakeInfo_Value(reaper.GetActiveTake(reference_item),'D_STARTOFFS')
