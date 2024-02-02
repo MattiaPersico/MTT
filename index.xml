@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="0.12" name="ReAG_Interface">
+<index version="0.1" name="ReAG_Interface">
   <category name="ReaScript">
     <reapack name="mtt_global_functions.lua" type="script" desc="MTT global functions">
-      <version name="0.12" author="MattiaPersico">
+      <version name="0.1" author="MattiaPersico">
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_global_functions.lua</source>
       </version>
     </reapack>
     <reapack name="mtt_audioguide_paths.lua" type="script" desc="ReAG paths">
-      <version name="0.12" author="MattiaPersico">
+      <version name="0.1" author="MattiaPersico">
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_audioguide_paths.lua</source>
       </version>
     </reapack>
     <reapack name="mtt_audioguide_functions.lua" type="script" desc="ReAG functions">
-      <version name="0.12" author="MattiaPersico">
+      <version name="0.1" author="MattiaPersico">
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_audioguide_functions.lua</source>
       </version>
     </reapack>
     <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="AudioGuide Interface">
-      <version name="0.12" author="MattiaPersico">
+      <version name="0.1" author="MattiaPersico">
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_AudioGuide_Interface.lua</source>
       </version>
     </reapack>
