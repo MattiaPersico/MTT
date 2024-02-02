@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReAG_Interface">
-  <category name="ReaScript">
-    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Main interface for the ReAG Audio Guide">
+<index version="1">
+
+    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="MTT ReAG">
       <version name="1.0" author="MattiaPersico">
         <provides>
           mtt_AudioGuide_Interface.lua
@@ -12,5 +12,5 @@
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_AudioGuide_Interface.lua</source>
       </version>
     </reapack>
-  </category>
+
 </index>
