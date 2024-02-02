@@ -1,29 +1,25 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<reapack name="ReAG_Interface" version="1.0" author="MattiaPersico">
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="ReAG_Interface" commit="your_commit_id_here">
   <category name="ReaScript">
-    <reascript file="mtt_global_functions.lua">
-      <description>Global functions for ReAG Interface.</description>
-      <version>1.0</version>
-      <author>MattiaPersico</author>
-      <provides>mtt_global_functions.lua</provides>
-    </reascript>
-    <reascript file="mtt_audioguide_paths.lua">
-      <description>Audio guide paths for ReAG Interface.</description>
-      <version>1.0</version>
-      <author>MattiaPersico</author>
-      <provides>mtt_audioguide_paths.lua</provides>
-    </reascript>
-    <reascript file="mtt_audioguide_functions.lua">
-      <description>Audio guide functions for ReAG Interface.</description>
-      <version>1.0</version>
-      <author>MattiaPersico</author>
-      <provides>mtt_audioguide_functions.lua</provides>
-    </reascript>
-    <reascript file="mtt_AudioGuide_Interface.lua">
-      <description>Main interface for the ReAG Audio Guide.</description>
-      <version>1.0</version>
-      <author>MattiaPersico</author>
-      <provides>mtt_AudioGuide_Interface.lua</provides>
-    </reascript>
+    <reapack name="mtt_global_functions.lua" type="script" desc="Global functions for ReAG Interface">
+      <version name="1.0" author="MattiaPersico" time="your_timestamp_here">
+        <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_global_functions.lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt_audioguide_paths.lua" type="script" desc="Audio guide paths for ReAG Interface">
+      <version name="1.0" author="MattiaPersico" time="your_timestamp_here">
+        <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_audioguide_paths.lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt_audioguide_functions.lua" type="script" desc="Audio guide functions for ReAG Interface">
+      <version name="1.0" author="MattiaPersico" time="your_timestamp_here">
+        <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_audioguide_functions.lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Main interface for the ReAG Audio Guide">
+      <version name="1.0" author="MattiaPersico" time="your_timestamp_here">
+        <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_AudioGuide_Interface.lua</source>
+      </version>
+    </reapack>
   </category>
-</reapack>
+</index>
