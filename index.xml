@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="ReAG_Interface">
   
-    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="MTT ReAG">
+    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="MTT_ReAG">
       <version name="1.0" author="MattiaPersico">
         <provides>
           mtt_AudioGuide_Interface.lua
