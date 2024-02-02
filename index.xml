@@ -1,4 +1,4 @@
-<?xml version="0.12" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <index version="0.12" name="ReAG_Interface">
   <category name="ReaScript">
     <reapack name="mtt_global_functions.lua" type="script" desc="MTT global functions">
