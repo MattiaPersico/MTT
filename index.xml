@@ -1,10 +1,22 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<!-- <?xml version="1.0" encoding="UTF-8"?>
 <reapack name="Esempio di Repository" version="1">
   <category name="My Example Scripts">
     <reascript name="mtt_AudioGuide_Interface" author="Mattia Persico" version="1.0" provides="mtt_AudioGuide_Interface.lua">
       <description>Quest é la descrizione.</description>
       <link>https://github.com/MattiaPersico/ReAG_Interface.git</link>
       <source main="1">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface.git/main/mtt_AudioGuide_Interface.lua</source>
+    </reascript>
+  </category>
+</reapack> -->
+
+<?xml version="1.0" encoding="UTF-8"?>
+<reapack name="Esempio di Repository" version="1">
+  <category name="My Example Scripts">
+    <reascript name="mtt_AudioGuide_Interface" author="Mattia Persico" version="1.0" provides="mtt_AudioGuide_Interface.lua">
+      <description>Questa è la descrizione.</description>
+      <link>https://github.com/MattiaPersico/ReAG_Interface</link>
+      <!-- Attenzione: l'URL del raw file potrebbe richiedere autenticazione -->
+      <source main="1">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/mtt_AudioGuide_Interface.lua</source>
     </reascript>
   </category>
 </reapack>
