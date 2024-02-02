@@ -945,48 +945,16 @@ end
 
 -- PREPARAZIONE
 
-function magf.clearArtifacts(corpus_items) -- rimuove dalla directory specificata tutti i file txt e RPP
+function magf.clearArtifacts(corpus_audiofiles) -- rimuove dalla directory specificata tutti i file txt e RPP
   
+    for i = 1, #corpus_audiofiles do
 
-    for i = 1, #corpus_items do
-      -- Usa 'i-1' quando accedi a corpus_items per compensare l'inizio da 0.
-      local file_to_remove = reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(reaper.GetActiveTake(corpus_items[i]))) .. '.txt'
-      --reaper.ShowMessageBox(file_to_remove, 'file to remove', 0)
-      local command = 'rm ' .. mgf.insertBackslashBeforeSpaces(file_to_remove)
-      --reaper.ShowMessageBox(command, 'command', 0)
+      --local file_to_remove = reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(reaper.GetActiveTake(corpus_items[i]))) .. '.txt'
+
+      local command = 'rm ' .. mgf.insertBackslashBeforeSpaces(corpus_audiofiles[i] .. '.txt')
+
       os.execute(command)
     end
-
-
-  --[[
-
-  -- Assicurati che il percorso della directory termini con uno slash
-  if directory:sub(-1) ~= "/" then
-      directory = directory .. "/"
-  end
-  
-  -- Costruisci il comando per trovare ed eliminare tutti i file .txt
-  local command = 'rm ' .. directory .. '*.txt'
-  
-  -- Esegui il comando
-  local result = os.execute(command)
-  
-  -- Costruisci il comando per trovare ed eliminare tutti i file .txt
-  local command = 'rm ' .. directory .. '*.RPP'
-  
-  -- Esegui il comando
-  local result = os.execute(command)
-  
-  
-  -- Costruisci il comando per trovare ed eliminare tutti i file .txt
-  local command = 'rm ' .. directory .. '*.RPP-PROX'
-  
-  -- Esegui il comando
-  local result = os.execute(command)
-  --reaper.ShowMessageBox(command,command,0)
-
-  ]]
-
 end
 
 

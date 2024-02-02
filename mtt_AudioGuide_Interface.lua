@@ -1,3 +1,15 @@
+--[[ 
+  PROSSIME FEATURES
+  - protezione da src file che non sono .wav
+  - ratio limit per gli spass obj
+  - f0 come descriptor
+  - tooltips
+  - post-process su rpp generato
+  - finestra di gestione avanzata del corpus
+  - preset tramite option-files
+  - 
+]]
+
 -- Script Name and Version
 local major_version = 0
 local minor_version = 12
@@ -149,6 +161,7 @@ function Spinner(radius, thickness, color)
   end
 end
 
+
 function drawSpinner(x,y)
   reaper.ImGui_SetCursorPosX(ctx, x) -- Posizione X della rotella
   reaper.ImGui_SetCursorPosY(ctx, y) -- Posizione Y della rotella
@@ -204,7 +217,7 @@ function onLoadCorpusPressed()
     is_corpus_ready = false
 
     if #CORPUS_ITEMS > 0 then
-      magf.clearArtifacts(CORPUS_ITEMS)
+      magf.clearArtifacts(CORPUS_AFs)
     end
 
     CORPUS_ITEMS = {}
@@ -222,6 +235,7 @@ function onLoadCorpusPressed()
 
 end
 
+
 function checkConcatenationSignalFile()
   local signalfile
 
@@ -238,6 +252,7 @@ function checkConcatenationSignalFile()
       reaper.defer(checkConcatenationSignalFile)
   end
 end
+
 
 function onMatchTargetPressed()
 
@@ -978,7 +993,7 @@ end
 
 function onExit()
   if #CORPUS_ITEMS > 0 then
-    magf.clearArtifacts(CORPUS_ITEMS)
+    magf.clearArtifacts(CORPUS_AFs)
   end
 end
 
