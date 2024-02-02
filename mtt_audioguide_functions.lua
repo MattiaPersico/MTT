@@ -1133,21 +1133,23 @@ function magf.import_rpp(target_item, target_filename, target_position, reaper_c
 
   reaper.Main_OnCommand(40285,0)  -- go to next track
   
-  mediaItem = reaper.GetSelectedMediaItem(0,reaper.CountSelectedMediaItems(0)-1) 
+  rpp_item = reaper.GetSelectedMediaItem(0,reaper.CountSelectedMediaItems(0)-1) 
   
-  activeTake = reaper.GetActiveTake(mediaItem)
+  activeTake = reaper.GetActiveTake(rpp_item)
   
   reaper.SetMediaItemTakeInfo_Value(activeTake, 'I_CHANMODE', 2) -- mono mix the RPP Proxy
   
-  magf.trim_result(mediaItem, target_item) -- in sostituzione dei parametri start e end del tsf
+  magf.trim_result(rpp_item, target_item) -- in sostituzione dei parametri start e end del tsf
   
-  reaper.SetMediaItemPosition(mediaItem, target_position, true) -- move the RPP Proxy under the Target File
+  reaper.SetMediaItemPosition(rpp_item, target_position, true) -- move the RPP Proxy under the Target File
   
   reaper.Main_OnCommand(40289,0)  -- unselect all items
   
-  reaper.SetMediaItemSelected(mediaItem,true) -- select the new item
+  reaper.SetMediaItemSelected(rpp_item,true) -- select the new item
   
   reaper.SetEditCurPos(target_position, false, false)
+
+  magf.matchMaxPeak(rpp_item, target_item)
   
 end
 
@@ -1157,15 +1159,36 @@ function magf.trim_result(mediaItem, reference_item) -- taglia in testa e coda i
   local start_time = reaper.GetMediaItemTakeInfo_Value(reaper.GetActiveTake(reference_item),'D_STARTOFFS')
   
   reaper.SetMediaItemTakeInfo_Value(reaper.GetActiveTake(mediaItem), 'D_STARTOFFS', start_time)
+
+  --local lenght = reaper.GetMediaItemInfo_Value(reference_item, 'D_LENGTH')
   
-  local lenght = reaper.GetMediaItemInfo_Value(reference_item, 'D_LENGTH')
-  
-  reaper.SetMediaItemInfo_Value(mediaItem, 'D_LENGTH', lenght)
+  --local rpp_lenght = reaper.GetMediaSourceLength(reaper.GetMediaItemTake_Source(reaper.GetActiveTake(mediaItem)))
+
+  --reaper.SetMediaItemInfo_Value(mediaItem, 'D_LENGTH', lenght)
   
 end
 
+function magf.normalizeMediaItem(rpp_item)
 
+  for i = 1, reaper.CountSelectedMediaItems() do
+    reaper.SetMediaItemSelected(reaper.GetSelectedMediaItem(0,i - 1), false)
+  end
 
+  reaper.SetMediaItemSelected(rpp_item, true)
+
+  reaper.Main_OnCommand(40108, 0)
+
+end
+
+function magf.matchMaxPeak(mediaItem, reference_item)
+
+  local reference_item_peak = reaper.NF_GetMediaItemMaxPeak(reference_item)
+
+  local mediaItem_peak = reaper.NF_GetMediaItemMaxPeak(mediaItem)
+  
+  reaper.SetMediaItemTakeInfo_Value(reaper.GetActiveTake(mediaItem), 'D_VOL', mgf.dbToFloat(reference_item_peak - mediaItem_peak))
+
+end
 
 return magf
 

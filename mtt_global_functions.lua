@@ -142,6 +142,13 @@ function mgf.makeFile(file_name, content)
   --print("File '" .. file_name .. "' creato con successo.")
 end
 
+function mgf.dbToFloat(db)
+  if db <= -math.huge then
+      return 0
+  else
+      return 10 ^ (db / 20)
+  end
+end
 
 return mgf
 

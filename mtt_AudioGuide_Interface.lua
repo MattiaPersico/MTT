@@ -3,9 +3,10 @@
   - ratio limit per gli spass obj
   - f0 come descriptor
   - tooltips
-  - post-process su rpp generato
   - finestra di gestione avanzata del corpus
   - preset tramite option-files
+  - fare test con materiali stereo e piú
+  - trovare il modo per assicurarsi che il rendering dell rpp venga fatto a 32 bit float
 ]]
 
 -- Script Name and Version
