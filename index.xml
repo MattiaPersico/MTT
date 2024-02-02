@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<reapack name=" ReAG_Interface" version="1">
+<reapack name="ReAG_Interface" version="1">
   <category name="mtt_AudioGuide_Interface">
     <reascript name="mtt_AudioGuide_Interface" author="Mattia Persico" version="1.0" provides="mtt_AudioGuide_Interface.lua">
       <description>Questa è la descrizione.</description>
