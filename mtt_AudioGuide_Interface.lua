@@ -1,13 +1,11 @@
 --[[ 
   PROSSIME FEATURES
-  - protezione da src file che non sono .wav
   - ratio limit per gli spass obj
   - f0 come descriptor
   - tooltips
   - post-process su rpp generato
   - finestra di gestione avanzata del corpus
   - preset tramite option-files
-  - 
 ]]
 
 -- Script Name and Version
