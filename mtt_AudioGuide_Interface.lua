@@ -195,12 +195,54 @@ function checkSegmentationSignalFile()
       number_of_segments = number_of_segments + mgf.countTextFileLines(CORPUS_AFs[i] .. '.txt')
     end
 
-    is_corpus_ready = true
+    if number_of_segments > 0 then
+      is_corpus_ready = true
+    end
     SEGMENTATION_IN_PROGRESS = false
 
   else
       reaper.defer(checkSegmentationSignalFile)
   end
+end
+
+
+function validateSelectedMediaItems()
+
+  local selected_item_number = reaper.CountSelectedMediaItems(0)
+
+  for i = 1, selected_item_number do
+    local media_item = reaper.GetSelectedMediaItem(0, i - 1)
+    local media_item_take = reaper.GetActiveTake(media_item)
+
+    if media_item_take then
+      local file_extension = mgf.getFileExtension(reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(media_item_take)))
+      if file_extension ~= '.wav' and file_extension ~= '.aiff' then
+        return false
+      end
+    else
+      return false
+    end
+  end
+
+  return true
+end
+
+
+function validateSelectedMediaItem()
+
+  local media_item = reaper.GetSelectedMediaItem(0, 0)
+  local media_item_take = reaper.GetActiveTake(media_item)
+
+  if media_item_take then
+    local file_extension = mgf.getFileExtension(reaper.GetMediaSourceFileName(reaper.GetMediaItemTake_Source(media_item_take)))
+    if file_extension ~= '.wav' and file_extension ~= '.aiff' then
+      return false
+    end
+  else
+    return false
+  end
+
+  return true
 end
 
 
@@ -210,9 +252,14 @@ function onLoadCorpusPressed()
     return
   end
 
-  selected_item_number = reaper.CountSelectedMediaItems(0)
+  local selected_item_number = reaper.CountSelectedMediaItems(0)
   
   if selected_item_number > 0 then
+
+    if not validateSelectedMediaItems() then
+      reaper.ShowMessageBox('Source file type must be wav or aiff', 'Error', 0)
+      return
+    end
 
     is_corpus_ready = false
 
@@ -265,7 +312,14 @@ function onMatchTargetPressed()
     return
   end
 
+  local selected_item_number = reaper.CountSelectedMediaItems(0)
+
   if selected_item_number > 0 then
+
+    if not validateSelectedMediaItem() then
+      reaper.ShowMessageBox('Source file type must be wav or aiff', 'Error', 0)
+      return
+    end
 
      concatenation_selected_item = reaper.GetSelectedMediaItem(0,0)
 

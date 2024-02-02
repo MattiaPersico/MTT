@@ -41,6 +41,11 @@ function mgf.countTextFileLines(fileName)
 end
 
 
+function mgf.getFileExtension(filePath)
+  return filePath:match("^.+(%..+)$") or ""
+end
+
+
 function mgf.removeLastPathComponent(inputPath)
   -- Cerca tutto il testo che precede l'ultimo slash
   local outputPath = inputPath:match("(.+)/")
