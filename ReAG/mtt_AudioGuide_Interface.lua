@@ -574,6 +574,12 @@ function preferencesWindow()
   end
 
   reaper.ImGui_NewLine(ctx)
+
+  if reaper.ImGui_Button(ctx, 'Download Environment') then
+    os.execute("open " .. 'https://github.com/MattiaPersico/MTT/raw/main/Environment%20Installer/ReAG_Environment_Installer.pkg?download=')
+  end
+
+  reaper.ImGui_NewLine(ctx)
   
   if reaper.ImGui_Button(ctx, 'Override AudioGuide Path') then
     local retval, folder = reaper.JS_Dialog_BrowseForFolder('', os.getenv("HOME") .. "/Documents")
@@ -603,9 +609,6 @@ function preferencesWindow()
   end
 
 
-  if reaper.ImGui_Button(ctx, 'Download Environment') then
-    os.execute("open " .. 'https://github.com/MattiaPersico/MTT/raw/main/Environment%20Installer/ReAG_Environment_Installer.pkg?download=')
-  end
 
 --[[   reaper.ImGui_NewLine(ctx)
 
