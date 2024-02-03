@@ -1,5 +1,5 @@
 --[[ 
-  PROSSIME FEATURES
+  APPUNTI
   - ratio limit per gli spass obj
   - f0 come descriptor
   - tooltips
@@ -8,7 +8,7 @@
   - fare test con materiali stereo e piú
   - trovare il modo per assicurarsi che il rendering dell rpp venga fatto a 32 bit float
   - un giorno ripristinare la debug mode capendo perchè non funziona piu
-  
+
 ]]
 
 -- Script Name and Version
