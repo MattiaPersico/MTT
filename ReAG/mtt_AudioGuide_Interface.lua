@@ -7,6 +7,7 @@
   - preset tramite option-files
   - fare test con materiali stereo e piú
   - trovare il modo per assicurarsi che il rendering dell rpp venga fatto a 32 bit float
+  - un giorno ripristinare la debug mode capendo perchè non funziona piu
 ]]
 
 -- Script Name and Version
@@ -601,7 +602,12 @@ function preferencesWindow()
     end
   end
 
-  reaper.ImGui_NewLine(ctx)
+
+  if reaper.ImGui_Button(ctx, 'Download Environment') then
+    
+  end
+
+--[[   reaper.ImGui_NewLine(ctx)
 
   retval, debug_mode = reaper.ImGui_Checkbox(ctx,'debug_mode', debug_mode)
 
@@ -611,7 +617,7 @@ function preferencesWindow()
     else
       magf.setAudioguideVerbosity(agSegmentationFile, agDefaultsFile , false)
     end
-  end
+  end ]]
 
 end
 

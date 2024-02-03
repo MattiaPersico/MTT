@@ -12,9 +12,6 @@ CORPUS = [
 ]
 
 SEARCH = [
-spass('closest_percent', d('effDur-seg', norm=1), d('power', norm=2), percent=30),
-#spass('closest_percent', d('power', norm=2), percent=80),
-spass('closest', d('mfccs'))
 ]
 
 SUPERIMPOSE = si()
