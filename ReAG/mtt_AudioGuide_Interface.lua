@@ -604,7 +604,7 @@ function preferencesWindow()
 
 
   if reaper.ImGui_Button(ctx, 'Download Environment') then
-    os.execute("open " .. 'www.google.com')
+    os.execute("open " .. 'https://github.com/MattiaPersico/MTT/raw/main/Environment%20Installer/ReAG_Environment_Installer.pkg?download=')
   end
 
 --[[   reaper.ImGui_NewLine(ctx)
