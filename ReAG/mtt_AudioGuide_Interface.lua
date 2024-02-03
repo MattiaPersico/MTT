@@ -10,7 +10,6 @@
   - un giorno ripristinare la debug mode capendo perchè non funziona piu
 ]]
 
-
 -- Script Name and Version
 local major_version = 0
 local minor_version = 14

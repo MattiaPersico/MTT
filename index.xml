@@ -2,7 +2,7 @@
 <index version="1" name="MTT_Scripts">
   <category name="ReAG">
     <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="AudioGuide Interface">
-      <version name="." author="Mattia Persico" time="2024-02-03T17:09:47Z">
+      <version name="." author="Mattia Persico" time="2024-02-03T17:11:02Z">
           <source main="main" file="mtt_AudioGuide_Interface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_AudioGuide_Interface.lua</source>
           <source file="mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG//mtt_global_functions.lua</source>
           <source file="mtt_audioguide_paths.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_paths.lua</source>
