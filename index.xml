@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <index version="1" name="MTT_Scripts">
-  <category name="MTT_Scripts">
-    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Reaper AudioGuide Interface">
+  <category name="ReAG">
+    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="AudioGuide Interface">
       <version name="0.12" author="Mattia Persico">
           <source main="main" file="mtt_AudioGuide_Interface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_AudioGuide_Interface.lua</source>
           <source file="mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Global/mtt_global_functions.lua</source>

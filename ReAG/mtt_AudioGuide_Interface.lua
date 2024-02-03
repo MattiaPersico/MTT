@@ -43,18 +43,35 @@ reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
 
 -- include
-local mtt_audioguide_paths = reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths'
-require(mtt_audioguide_paths)
-local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/Global/mtt_global_functions")
-local magf = require(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_functions")
+--local mtt_audioguide_paths = reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths'
+--require(mtt_audioguide_paths)
 
-
---[[ local ok, lanes = pcall(require, "lanes")
-if ok then
-    reaper.ShowMessageBox("Lua Lanes è stato installato correttamente!", 'Evviva', 0)
+--retval, mtt_audioguide_paths = require(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths')
+--mtt_audioguide_paths = string.sub(string.sub(mtt_audioguide_paths, 4), 1, -5)
+mtt_audioguide_paths = ''
+if reaper.file_exists(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths.lua') then
+  retval, mtt_audioguide_paths = require(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths')
 else
-  reaper.ShowMessageBox(lanes, 'Problemi', 0)
-end ]]
+  retval, mtt_audioguide_paths = require(reaper.GetResourcePath()..'/Scripts/MTT_Scripts/ReAG/mtt_audioguide_paths')
+end
+mtt_audioguide_paths = string.sub(string.sub(mtt_audioguide_paths, 4), 1, -5)
+
+
+local mgf = {}
+if reaper.file_exists(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_global_functions.lua") then
+  mgf = require(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_global_functions")
+else
+  mgf = require(reaper.GetResourcePath().."/Scripts/MTT_Scripts/ReAG/mtt_global_functions")
+end
+
+
+local magf = {}
+if reaper.file_exists(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_functions.lua") then
+  magf = require(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_functions")
+else
+  magf = require(reaper.GetResourcePath().."/Scripts/MTT_Scripts/ReAG/mtt_audioguide_functions")
+end
+
 
 REAPER_CLI_PATH = reaper.GetExePath() .. '/REAPER.app/Contents/MacOS/REAPER'
 CONCATENATION_IN_PROGRESS = false
