@@ -1109,10 +1109,50 @@ end
 
 -- RENDER IMPORT E POST-PROCESS AUDIOGUIDE RPP
 
+function magf.setRPPRenderTo32bf(fileName)
+
+  local stringToInsert = '<RENDER_CFG\nZXZhdyAAAA==\n>'
+  -- Legge il contenuto del file originale
+  local lines = {}
+  for line in io.lines(fileName) do 
+      table.insert(lines, line)
+  end
+
+  -- Apre lo stesso file in scrittura
+  local file = io.open(fileName, "w")
+  
+  -- Controlla se il file è vuoto
+  if #lines == 0 then
+      file:write(stringToInsert .. "\n")
+  else
+      -- Scrive la prima riga
+      file:write(lines[1] .. "\n")
+
+      -- Inserisce la nuova stringa
+      file:write(stringToInsert .. "\n")
+
+      -- Scrive le restanti righe
+      for i = 2, #lines do
+          file:write(lines[i] .. "\n")
+      end
+  end
+
+  -- Chiude il file
+  file:close()
+end
+
+
 function magf.cl_render_rpp(project_path, file_name, reaper_cli_path) -- renderizza tramite reaper CLI l' RPP di output generato da Audioguide 
 
   local file_name_without_path = mgf.removeExtension(mgf.removePath(file_name))
   local subproject_path = project_path .. '/'..file_name_without_path..'.RPP'
+
+  -- parte da aggiungere all rpp per accertarsi che sia 32bf
+--[[   <RENDER_CFG
+  ZXZhdyAAAA==
+> ]]
+
+  magf.setRPPRenderTo32bf(subproject_path)
 
                   --reaper [options] [projectfile.rpp | mediafile.wav | scriptfile.lua [...]]
   local command = reaper_cli_path .. '  -renderproject "' .. subproject_path .. '"' 
