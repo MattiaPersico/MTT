@@ -3,16 +3,11 @@
   <category name="ReAG">
     <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Reaper AudioGuide Interface">
       <version name="0.12" author="MattiaPersico">
-        <provides>
-          ReAG/mtt_AudioGuide_Interface.lua
-          Global/mtt_global_functions.lua&gt;
-          ReAG/mtt_audioguide_paths.lua&gt;
-          ReAG/mtt_audioguide_functions.lua&gt;
         </provides>
         <source main="main">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_AudioGuide_Interface.lua</source>
-        <source file="Global/mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Global/mtt_global_functions.lua</source>
-        <source file="ReAG/mtt_audioguide_paths.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_paths.lua</source>
-        <source file="ReAG/mtt_audioguide_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_functions.lua</source>
+        <source file="../Global/mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Global/mtt_global_functions.lua</source>
+        <source file="mtt_audioguide_paths.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_paths.lua</source>
+        <source file="mtt_audioguide_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_functions.lua</source>
       </version>
     </reapack>
   </category>
