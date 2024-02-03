@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="MTT">
-  <category name="Example">
-    <reapack name="ReAG" type="script" desc="Reaper AudioGuide Interface">
+<index version="1" name="MTT_Scripts">
+  <category name="ReAG">
+    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Reaper AudioGuide Interface">
       <version name="0.12" author="MattiaPersico">
         <provides>
           ReAG/mtt_AudioGuide_Interface.lua
