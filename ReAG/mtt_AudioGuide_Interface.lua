@@ -400,7 +400,7 @@ function initReAG()
   preferencesWindowState = false
 
   if magf.validateAudioGuidePath(AG_path) then
-     --magf.setAudioguideVerbosity(agSegmentationFile, agDefaultsFile , false)
+     magf.setAudioguideVerbosity(agSegmentationFile, agDefaultsFile , false)
      magf.makeAgOptionFileIfNeeded(AG_path)
     --reaper.ShowMessageBox( 'ag','Success', 0)
      is_AudioGuide_folder_set = true
