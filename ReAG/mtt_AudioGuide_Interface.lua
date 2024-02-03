@@ -43,10 +43,10 @@ reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
 
 -- include
-local mtt_audioguide_paths = reaper.GetResourcePath()..'/Scripts/MTT/mtt_audioguide_paths'
+local mtt_audioguide_paths = reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths'
 require(mtt_audioguide_paths)
-local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_global_functions")
-local magf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_audioguide_functions")
+local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/Global/mtt_global_functions")
+local magf = require(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_functions")
 
 
 --[[ local ok, lanes = pcall(require, "lanes")

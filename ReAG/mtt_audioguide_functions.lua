@@ -43,7 +43,7 @@ concatenate_path = AG_path .. '/agConcatenate.py'
 
 NUMBER_OF_SEGMENTS = 0
 
-local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/mtt_global_functions")
+local mgf = require(reaper.GetResourcePath().."/Scripts/MTT/Global/mtt_global_functions")
 
 local magf = {}
 
