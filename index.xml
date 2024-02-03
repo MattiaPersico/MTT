@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="ReAG_Interface">
-  
-    <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="Reaper AudioGuide Interface">
-      <version name="1.0" author="MattiaPersico">
+<index version="1" name="MTT">
+  <category name="Example">
+    <reapack name="ReAG" type="script" desc="Reaper AudioGuide Interface">
+      <version name="0.12" author="MattiaPersico">
         <provides>
           ReAG/mtt_AudioGuide_Interface.lua
           Global/mtt_global_functions.lua&gt;
           ReAG/mtt_audioguide_paths.lua&gt;
           ReAG/mtt_audioguide_functions.lua&gt;
         </provides>
-        <source main="main">https://raw.githubusercontent.com/MattiaPersico/ReAG_Interface/main/ReAG/mtt_AudioGuide_Interface.lua</source>
+        <source main="main">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_AudioGuide_Interface.lua</source>
       </version>
     </reapack>
-  
+  </category>
 </index>
