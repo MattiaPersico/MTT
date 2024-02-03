@@ -604,7 +604,7 @@ function preferencesWindow()
 
 
   if reaper.ImGui_Button(ctx, 'Download Environment') then
-    
+    os.execute("open " .. 'www.google.com')
   end
 
 --[[   reaper.ImGui_NewLine(ctx)
