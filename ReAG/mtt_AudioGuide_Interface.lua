@@ -68,6 +68,13 @@ else
 end
 
 
+local magtooltips = {}
+if reaper.file_exists(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_tooltips.lua") then
+  magtooltips = require(reaper.GetResourcePath().."/Scripts/MTT/ReAG/mtt_audioguide_tooltips")
+else
+  magtooltips = require(reaper.GetResourcePath().."/Scripts/MTT_Scripts/ReAG/mtt_audioguide_tooltips")
+end
+
 REAPER_CLI_PATH = reaper.GetExePath() .. '/REAPER.app/Contents/MacOS/REAPER'
 CONCATENATION_IN_PROGRESS = false
 SEGMENTATION_IN_PROGRESS = false
@@ -567,10 +574,24 @@ function preferencesWindow()
     end
   end
 
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.PREF_SET_ENV_PATH)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
   reaper.ImGui_NewLine(ctx)
 
   if reaper.ImGui_Button(ctx, 'Download Environment') then
     os.execute("open " .. 'https://github.com/MattiaPersico/MTT/raw/main/Environment%20Installer/ReAG_Environment_Installer.pkg?download=')
+  end
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.PREF_DOWNLOAD_ENV)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
   end
 
   reaper.ImGui_NewLine(ctx)
@@ -589,6 +610,13 @@ function preferencesWindow()
     end
   end
   
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.PREF_OVERRIDE_AG_PATH)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
   if reaper.ImGui_Button(ctx, 'Override Python Path') then
     local retval, file = reaper.JS_Dialog_BrowseForOpenFiles('Select Python File', '/usr/local/bin', 'python3', '', false)
     if retval then
@@ -602,20 +630,12 @@ function preferencesWindow()
     end
   end
 
-
-
---[[   reaper.ImGui_NewLine(ctx)
-
-  retval, debug_mode = reaper.ImGui_Checkbox(ctx,'debug_mode', debug_mode)
-
-  if retval then
-    if debug_mode then
-      magf.setAudioguideVerbosity(agSegmentationFile, agDefaultsFile , true)
-    else
-      magf.setAudioguideVerbosity(agSegmentationFile, agDefaultsFile , false)
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.PREF_OVERRIDE_PYTHON_PATH)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
     end
-  end ]]
-
+  end
 end
 
 
@@ -628,12 +648,26 @@ function spassWindow()
 
     reaper.ImGui_SetNextItemWidth(ctx, 150)
     local retvalSearchMode, selectedSearchMode = reaper.ImGui_Combo(ctx, '##combo' .. tostring(i), search_mode_list[i], SPASS_STRING_LIST, 10)
-  
+    
+    if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+      reaper.ImGui_SetTooltip(ctx, magtooltips.SPASS_MODE)
+      if reaper.ImGui_BeginTooltip(ctx) then
+        reaper.ImGui_EndTooltip(ctx)
+      end
+    end
+
     if selectedSearchMode == 1 or selectedSearchMode == 3 then 
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_SetNextItemWidth(ctx, 40)
       local retvalDrag, search_mode_list_percentage_value = reaper.ImGui_DragInt(ctx, '##DragInt' .. tostring(i), search_mode_list_percentage[i], 0.3, 1, 100, "%d%%")
-  
+      
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SPASS_PERCENTAGE)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       if retvalDrag then
         search_mode_list_percentage[i] = search_mode_list_percentage_value
       end
@@ -648,7 +682,14 @@ function spassWindow()
         reaper.ImGui_SameLine(ctx);
         reaper.ImGui_SetNextItemWidth(ctx, 123)
         local retvalDesMatrix, selectedDescriptor = reaper.ImGui_Combo(ctx, '##comboD' .. tostring(i) .. tostring(c), descriptors_matrix[i][c], DESCRIPTORS_STRING_LIST, 10)
-    
+        
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.DESCRIPTOR)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
+
         if retvalDesMatrix then
            descriptors_matrix[i][c] = selectedDescriptor
         end
@@ -663,6 +704,13 @@ function spassWindow()
         table.insert(descriptors_matrix[i], 0)
       end
     end
+
+    if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+      reaper.ImGui_SetTooltip(ctx, magtooltips.ADD_DESCRIPTOR)
+      if reaper.ImGui_BeginTooltip(ctx) then
+        reaper.ImGui_EndTooltip(ctx)
+      end
+    end
     
     reaper.ImGui_SameLine(ctx);
     if reaper.ImGui_Button(ctx, '-##RemoveDescriptor'..tostring(i)..tostring(c)) then
@@ -670,6 +718,14 @@ function spassWindow()
         table.remove(descriptors_matrix[i], #descriptors_matrix[i])
       end
     end
+
+    if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+      reaper.ImGui_SetTooltip(ctx, magtooltips.REMOVE_DESCRIPTOR)
+      if reaper.ImGui_BeginTooltip(ctx) then
+        reaper.ImGui_EndTooltip(ctx)
+      end
+    end
+
   end
 
   if reaper.ImGui_Button(ctx, '+##AddSpassObj' ..tostring(i)) then
@@ -679,9 +735,23 @@ function spassWindow()
     descriptors_matrix[#descriptors_matrix][1] = descriptors_matrix[#descriptors_matrix][1] or 0
   end
 
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.ADD_SPASS)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
   reaper.ImGui_SameLine(ctx);
   if reaper.ImGui_Button(ctx, '-##RemoveSpassObj' ..tostring(i)) and #search_mode_list > 1 then
     table.remove(search_mode_list, #search_mode_list)
+  end
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.REMOVE_SPASS)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
   end
 
 end
@@ -698,14 +768,15 @@ function GUI_MatchTargetButton()
     onMatchTargetPressed()
   end
 
-  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal())then
-    reaper.ImGui_SetTooltip(ctx, 'Starts AudioGuide concatenation script with the selected item as target')
+  reaper.ImGui_EndDisabled(ctx)
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.MATCH_TARGET_BUTTON)
     if reaper.ImGui_BeginTooltip(ctx) then
       reaper.ImGui_EndTooltip(ctx)
     end
   end
 
-  reaper.ImGui_EndDisabled(ctx)
 end
 
 
@@ -722,6 +793,13 @@ function GUI_BuildCorpusButton()
   end
 
   reaper.ImGui_EndDisabled(ctx)
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.BUILD_CORPUS_BUTTON)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
 
 end
 
@@ -743,6 +821,14 @@ function GUI_MinimizeButton()
       MINIMIZED = true
     end
   end
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.MINMAXIMIZE)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
 end
 
 
@@ -752,6 +838,13 @@ function GUI_PreferencesButton()
 
   if reaper.ImGui_Button(ctx, 'Preferences') then
     preferencesWindowState = not preferencesWindowState
+  end
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.PREFERENCES)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
   end
 end
 
@@ -766,13 +859,41 @@ function GUI_TargetSoundFilesParameters()
 
 retval, tsf_threshold = reaper.ImGui_SliderInt(ctx,'tsf_threshold',tsf_threshold,-80,-3)
 
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.TSF_THRESHOLD)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, tsf_offset_rise = reaper.ImGui_SliderDouble(ctx,'tsf_offset_rise',tsf_offset_rise,1.0,2.0)
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.TSF_OFFSET_RISE)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
 
 retval, tsf_min_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_min_seg_len',tsf_min_seg_len,0.05,5)
 if tsf_max_seg_len <= tsf_min_seg_len then tsf_max_seg_len = tsf_min_seg_len + 0.05 end
 
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.TSF_MIN_SEG_LEN)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, tsf_max_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_max_seg_len',tsf_max_seg_len,0.1,5.05)
 if tsf_min_seg_len >= tsf_max_seg_len then tsf_min_seg_len = tsf_max_seg_len - 0.05 end
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.TSF_MAX_SEG_LEN)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
 
 return 120
 end
@@ -787,9 +908,30 @@ function GUI_SegmentationArguments()
 
   retval, seg_threshold = reaper.ImGui_SliderInt(ctx,'seg_threshold',seg_threshold,-80,-3)
 
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.SEG_THRESHOLD)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
   retval, seg_offset_rise = reaper.ImGui_SliderDouble(ctx,'seg_offset_rise',seg_offset_rise,1.0,2.0)
 
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.SEG_OFFSET_RISE)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
   retval, seg_multirise = reaper.ImGui_Checkbox(ctx,'seg_multirise', seg_multirise)
+
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+    reaper.ImGui_SetTooltip(ctx, magtooltips.SEG_MULTI_RISE)
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
 
   return 90
 end
@@ -804,10 +946,40 @@ function GUI_CorpusParameters()
 
 
 retval, cga_restrict_overlaps = reaper.ImGui_SliderInt(ctx,'cga_restrict_overlaps',cga_restrict_overlaps, 1, 100)
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_RESTRICT_OVERLAPS)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, cga_onset_len = reaper.ImGui_SliderInt(ctx,'cga_onset_len',cga_onset_len, 1, 100)
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_ONSET_LEN)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, cga_offset_len = reaper.ImGui_SliderInt(ctx,'cga_offset_len',cga_offset_len, 1, 100)
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_OFFSET_LEN)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, cga_limit_dur = reaper.ImGui_SliderDouble(ctx,'cga_limit_dur',cga_limit_dur,0.0,5.0)
 
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_LIMIT_DUR)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
 
 
 reaper.ImGui_PopFont(ctx)
@@ -819,6 +991,13 @@ reaper.ImGui_PushFont(ctx, comic_sans)
 
 retval, cga_allow_repetition = reaper.ImGui_Checkbox(ctx,'cga_allow_repetition', cga_allow_repetition)
 
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_ALLOW_REPETITION)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 if cga_allow_repetition == false then
   reaper.ImGui_BeginDisabled(ctx, true)
   retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
@@ -826,6 +1005,13 @@ if cga_allow_repetition == false then
 
 else
   retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
+end
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_RESTRICT_REPETITION)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
 end
 
 reaper.ImGui_PopFont(ctx)
@@ -837,7 +1023,21 @@ reaper.ImGui_PushFont(ctx, comic_sans)
 
 retval, cga_clip_duration_to_target = reaper.ImGui_Checkbox(ctx,'cga_clip_duration_to_target', cga_clip_duration_to_target)
 
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.CGA_CLIP_DUR_TO_TARGET)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
+
 retval, outputevent_align_peaks = reaper.ImGui_Checkbox(ctx,'align_peaks', outputevent_align_peaks)
+
+if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+  reaper.ImGui_SetTooltip(ctx, magtooltips.ALIGN_PEAKS)
+  if reaper.ImGui_BeginTooltip(ctx) then
+    reaper.ImGui_EndTooltip(ctx)
+  end
+end
 
 return 253
 
@@ -852,10 +1052,26 @@ function GUI_SuperimposeParameters()
       reaper.ImGui_PushFont(ctx, comic_sans)
   
       si_min_segment_enabled_retval, si_min_segment_enabled = reaper.ImGui_Checkbox(ctx,'##si_min_segment_enabled', si_min_segment_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MIN_SEG)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_min_segment_enabled)
       retval, si_min_segment = reaper.ImGui_SliderInt(ctx,'si_min_segment',si_min_segment, 0, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MIN_SEG)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
 
       if si_min_segment_enabled_retval and si_min_segment_enabled then 
         if si_max_segment < si_min_segment then si_min_segment = si_max_segment end
@@ -866,10 +1082,25 @@ function GUI_SuperimposeParameters()
       end
 
       si_max_segment_enabled_retval, si_max_segment_enabled = reaper.ImGui_Checkbox(ctx,'##si_max_segment_enabled', si_max_segment_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MAX_SEG)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_max_segment_enabled)
       retval, si_max_segment = reaper.ImGui_SliderInt(ctx,'si_max_segment',si_max_segment, 1, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MAX_SEG)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
 
       if si_max_segment_enabled_retval and si_max_segment_enabled then 
         if si_min_segment > si_max_segment then si_max_segment = si_min_segment end
@@ -886,10 +1117,25 @@ function GUI_SuperimposeParameters()
       
 
       si_min_frame_enabled_retval, si_min_frame_enabled = reaper.ImGui_Checkbox(ctx,'##si_min_frame_enabled', si_min_frame_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MIN_FRAME)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_min_frame_enabled)
       retval, si_min_frame = reaper.ImGui_SliderInt(ctx,'si_min_frame',si_min_frame, 0, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MIN_FRAME)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
 
       if si_min_frame_enabled_retval and si_min_frame_enabled then 
         if si_max_frame < si_min_frame then si_min_frame = si_max_frame end
@@ -900,10 +1146,25 @@ function GUI_SuperimposeParameters()
       end
 
       si_max_frame_enabled_retval, si_max_frame_enabled = reaper.ImGui_Checkbox(ctx,'##si_max_frame_enabled', si_max_frame_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MAX_FRAME)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_max_frame_enabled)
       retval, si_max_frame = reaper.ImGui_SliderInt(ctx,'si_max_frame',si_max_frame, 1, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MAX_FRAME)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
 
       if si_max_frame_enabled_retval and si_max_frame_enabled then 
         if si_min_frame > si_max_frame then si_max_frame = si_min_frame end
@@ -919,10 +1180,25 @@ function GUI_SuperimposeParameters()
       end
 
       si_min_overlap_enabled_retval, si_min_overlap_enabled = reaper.ImGui_Checkbox(ctx,'##si_min_overlap_enabled', si_min_overlap_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MIN_OVERLAP)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_min_overlap_enabled)
       retval, si_min_overlap = reaper.ImGui_SliderInt(ctx,'si_min_overlap',si_min_overlap, 0, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MIN_OVERLAP)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
 
       if si_min_overlap_enabled_retval and si_min_overlap_enabled then 
         if si_max_overlap < si_min_overlap then si_min_overlap = si_max_overlap end
@@ -933,10 +1209,25 @@ function GUI_SuperimposeParameters()
       end
 
       si_max_overlap_enabled_retval, si_max_overlap_enabled = reaper.ImGui_Checkbox(ctx,'##si_max_overlap_enabled', si_max_overlap_enabled)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_ENABLE_MAX_OVERLAP)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       reaper.ImGui_SameLine(ctx);
       reaper.ImGui_BeginDisabled(ctx, not si_max_overlap_enabled)
       retval, si_max_overlap = reaper.ImGui_SliderInt(ctx,'si_max_overlap',si_max_overlap, 0, 100)
       reaper.ImGui_EndDisabled(ctx)
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SI_MAX_OVERLAP)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
 
       if si_max_overlap_enabled_retval and si_max_overlap_enabled then 
         if si_min_overlap > si_max_overlap then si_max_overlap = si_min_overlap end
@@ -963,6 +1254,7 @@ function GUI_SearchPasses()
   reaper.ImGui_PushFont(ctx, comic_sans)
   reaper.ImGui_SetCursorPosX(ctx, 3);
   if reaper.ImGui_BeginChild(ctx, 'Spass Window', MAIN_WINDOW_WIDTH - 30, SPASS_WINDOW_HEIGHT, true, reaper.ImGui_WindowFlags_HorizontalScrollbar()) then
+
     spassWindow()
     reaper.ImGui_EndChild(ctx)
   end
@@ -1036,31 +1328,106 @@ function mainWindow()
       reaper.ImGui_SetCursorPosX(ctx, 0);
       
       if reaper.ImGui_CollapsingHeader(ctx, 'Target Sound File Parameters', false) then
+
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.TARGET_SF_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
+
           window_height_increment = window_height_increment + GUI_TargetSoundFilesParameters()
+      else
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.TARGET_SF_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
       end
 
       GUI_ParameterSeparatorMacro()
     
       if reaper.ImGui_CollapsingHeader(ctx, 'Segmentation Arguments') then
+
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.SEG_ARG_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
+
          window_height_increment = window_height_increment + GUI_SegmentationArguments()
+      else
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.SEG_ARG_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
       end
 
       GUI_ParameterSeparatorMacro()
 
       if reaper.ImGui_CollapsingHeader(ctx, 'Corpus Parameters') then
+
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.CORPUS_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
+
         window_height_increment = window_height_increment + GUI_CorpusParameters()
+      else
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.CORPUS_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
       end
 
       GUI_ParameterSeparatorMacro()
 
       if reaper.ImGui_CollapsingHeader(ctx, 'Superimpose Parameters') then
+
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.SUPERIMPOSE_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
+
         window_height_increment = window_height_increment + GUI_SuperimposeParameters()
+      else
+        if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+          reaper.ImGui_SetTooltip(ctx, magtooltips.SUPERIMPOSE_PARAMS_HEADER)
+          if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_EndTooltip(ctx)
+          end
+        end
       end
 
       GUI_ParameterSeparatorMacro()
 
     if reaper.ImGui_CollapsingHeader(ctx, 'Search Passes') then
+
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SEARCH_PASS_HEADER)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
+
       window_height_increment = window_height_increment + GUI_SearchPasses()
+    else
+      if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
+        reaper.ImGui_SetTooltip(ctx, magtooltips.SEARCH_PASS_HEADER)
+        if reaper.ImGui_BeginTooltip(ctx) then
+          reaper.ImGui_EndTooltip(ctx)
+        end
+      end
     end
       
       if MAIN_WINDOW_HEIGHT + window_height_increment > MAIN_WINDOW_MAX_HEIGHT then
