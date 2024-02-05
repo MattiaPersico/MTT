@@ -11,7 +11,7 @@
 
 -- Script Name and Version
 local major_version = 0
-local minor_version = 17
+local minor_version = 18
 
 local name = 'AudioGuide Interface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 -- Reaper ImGui Stuff
@@ -42,12 +42,7 @@ reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
 
--- include
---local mtt_audioguide_paths = reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths'
---require(mtt_audioguide_paths)
 
---retval, mtt_audioguide_paths = require(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths')
---mtt_audioguide_paths = string.sub(string.sub(mtt_audioguide_paths, 4), 1, -5)
 mtt_audioguide_paths = ''
 if reaper.file_exists(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths.lua') then
   retval, mtt_audioguide_paths = require(reaper.GetResourcePath()..'/Scripts/MTT/ReAG/mtt_audioguide_paths')
@@ -692,14 +687,7 @@ function spassWindow()
 end
 
 
-function mainWindow()
-
-  reaper.ImGui_PushFont(ctx, comic_sans)
-
-  local window_height_increment = 0
-
-  reaper.ImGui_SetCursorPosX(ctx, 8)
-
+function GUI_MatchTargetButton()
   if not is_corpus_ready or CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
     reaper.ImGui_BeginDisabled(ctx, true)
   else
@@ -710,9 +698,18 @@ function mainWindow()
     onMatchTargetPressed()
   end
 
-  reaper.ImGui_EndDisabled(ctx)
+  if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal())then
+    reaper.ImGui_SetTooltip(ctx, 'Starts AudioGuide concatenation script with the selected item as target')
+    if reaper.ImGui_BeginTooltip(ctx) then
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
 
-  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_EndDisabled(ctx)
+end
+
+
+function GUI_BuildCorpusButton()
 
   if CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
     reaper.ImGui_BeginDisabled(ctx, true)
@@ -726,18 +723,11 @@ function mainWindow()
 
   reaper.ImGui_EndDisabled(ctx)
 
-  reaper.ImGui_SameLine(ctx);
-  reaper.ImGui_Text(ctx, 'Corpus Segments: ' .. tostring(number_of_segments))
+end
 
-  reaper.ImGui_SameLine(ctx);
 
-  if CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
-    drawSpinner(reaper.ImGui_GetCursorPosX(ctx) + 10 , reaper.ImGui_GetCursorPosY(ctx) + 4)
-  end
-
-  reaper.ImGui_SameLine(ctx);
-
-  spazioSinistra = reaper.ImGui_GetWindowWidth(ctx) - 89 - 72;
+function GUI_MinimizeButton()
+  local spazioSinistra = reaper.ImGui_GetWindowWidth(ctx) - 89 - 72;
   reaper.ImGui_SetCursorPosX(ctx, spazioSinistra);
 
   local minimized_button_name = 'Minimize'
@@ -753,174 +743,109 @@ function mainWindow()
       MINIMIZED = true
     end
   end
+end
 
-  reaper.ImGui_SameLine(ctx);
 
-  spazioSinistra = reaper.ImGui_GetWindowWidth(ctx) - 89;
+function GUI_PreferencesButton()
+  local spazioSinistra = reaper.ImGui_GetWindowWidth(ctx) - 89;
   reaper.ImGui_SetCursorPosX(ctx, spazioSinistra);
 
   if reaper.ImGui_Button(ctx, 'Preferences') then
     preferencesWindowState = not preferencesWindowState
   end
-
-  --reaper.ImGui_PopFont(ctx)
-  --reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-  --reaper.ImGui_NewLine(ctx)
-  --reaper.ImGui_PopFont(ctx)
-  --reaper.ImGui_PushFont(ctx, comic_sans)
-   
-  if MINIMIZED == false then
-    
-    
-    --reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    --reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    --reaper.ImGui_Separator(ctx)
-    --reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Separator(), reaper.ImGui_ColorConvertDouble4ToU32(0.7, 0.7, 0.7, 2))
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_PopStyleColor(ctx)
-
-    reaper.ImGui_PopFont(ctx)
-    if reaper.ImGui_BeginChild(ctx, '##Test', CURRENT_WINDOW_WIDTH - 12, CURRENT_WINDOW_HEIGHT - 90, false) then
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_bigger)
-
-    
-    spazioSinistra = reaper.ImGui_GetWindowWidth(ctx) - 100;
-    reaper.ImGui_SetCursorPosX(ctx, spazioSinistra);
-
-    reaper.ImGui_SameLine(ctx);
-    reaper.ImGui_SetCursorPosX(ctx, 0);
-    if reaper.ImGui_CollapsingHeader(ctx, 'Target Sound File Parameters', false) then
-
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans)
-  
-  
-      retval, tsf_threshold = reaper.ImGui_SliderInt(ctx,'tsf_threshold',tsf_threshold,-80,-3)
-    
-      retval, tsf_offset_rise = reaper.ImGui_SliderDouble(ctx,'tsf_offset_rise',tsf_offset_rise,1.0,2.0)
-    
-      retval, tsf_min_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_min_seg_len',tsf_min_seg_len,0.05,5)
-      if tsf_max_seg_len <= tsf_min_seg_len then tsf_max_seg_len = tsf_min_seg_len + 0.05 end
-    
-      retval, tsf_max_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_max_seg_len',tsf_max_seg_len,0.1,5.05)
-      if tsf_min_seg_len >= tsf_max_seg_len then tsf_min_seg_len = tsf_max_seg_len - 0.05 end
-    
-      window_height_increment = window_height_increment + 120
-
-    end
-
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_bigger)
+end
 
 
-    reaper.ImGui_SetCursorPosX(ctx, 0);
-    if reaper.ImGui_CollapsingHeader(ctx, 'Segmentation Arguments') then
-      --reaper.ImGui_Text(ctx, 'Segmentation Arguments')
-        reaper.ImGui_PopFont(ctx)
-        reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-        reaper.ImGui_NewLine(ctx)
-        reaper.ImGui_PopFont(ctx)
-        reaper.ImGui_PushFont(ctx, comic_sans)
-      
-        retval, seg_threshold = reaper.ImGui_SliderInt(ctx,'seg_threshold',seg_threshold,-80,-3)
-      
-        retval, seg_offset_rise = reaper.ImGui_SliderDouble(ctx,'seg_offset_rise',seg_offset_rise,1.0,2.0)
-    
-        retval, seg_multirise = reaper.ImGui_Checkbox(ctx,'seg_multirise', seg_multirise)
-  
-        window_height_increment = window_height_increment + 90
-  
-      end
+function GUI_TargetSoundFilesParameters()
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans)
 
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_bigger)
 
-    reaper.ImGui_SetCursorPosX(ctx, 0);
+retval, tsf_threshold = reaper.ImGui_SliderInt(ctx,'tsf_threshold',tsf_threshold,-80,-3)
 
-    if reaper.ImGui_CollapsingHeader(ctx, 'Corpus Parameters') then
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans)
-  
-  
-      retval, cga_restrict_overlaps = reaper.ImGui_SliderInt(ctx,'cga_restrict_overlaps',cga_restrict_overlaps, 1, 100)
-      retval, cga_onset_len = reaper.ImGui_SliderInt(ctx,'cga_onset_len',cga_onset_len, 1, 100)
-      retval, cga_offset_len = reaper.ImGui_SliderInt(ctx,'cga_offset_len',cga_offset_len, 1, 100)
-      retval, cga_limit_dur = reaper.ImGui_SliderDouble(ctx,'cga_limit_dur',cga_limit_dur,0.0,5.0)
-  
-    
+retval, tsf_offset_rise = reaper.ImGui_SliderDouble(ctx,'tsf_offset_rise',tsf_offset_rise,1.0,2.0)
 
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans)
-  
-      retval, cga_allow_repetition = reaper.ImGui_Checkbox(ctx,'cga_allow_repetition', cga_allow_repetition)
-  
-      if cga_allow_repetition == false then
-        reaper.ImGui_BeginDisabled(ctx, true)
-        retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
-        reaper.ImGui_EndDisabled(ctx)
-  
-      else
-        retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
-      end
-    
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_NewLine(ctx)
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PushFont(ctx, comic_sans)
-    
-      retval, cga_clip_duration_to_target = reaper.ImGui_Checkbox(ctx,'cga_clip_duration_to_target', cga_clip_duration_to_target)
-    
-      retval, outputevent_align_peaks = reaper.ImGui_Checkbox(ctx,'align_peaks', outputevent_align_peaks)
+retval, tsf_min_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_min_seg_len',tsf_min_seg_len,0.05,5)
+if tsf_max_seg_len <= tsf_min_seg_len then tsf_max_seg_len = tsf_min_seg_len + 0.05 end
 
-      window_height_increment = window_height_increment + 253
+retval, tsf_max_seg_len = reaper.ImGui_SliderDouble(ctx,'tsf_max_seg_len',tsf_max_seg_len,0.1,5.05)
+if tsf_min_seg_len >= tsf_max_seg_len then tsf_min_seg_len = tsf_max_seg_len - 0.05 end
 
-    end
+return 120
+end
 
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_bigger)
 
-    reaper.ImGui_SetCursorPosX(ctx, 0);
+function GUI_SegmentationArguments()
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans)
 
-    if reaper.ImGui_CollapsingHeader(ctx, 'Superimpose Parameters') then
-      reaper.ImGui_PopFont(ctx)
+  retval, seg_threshold = reaper.ImGui_SliderInt(ctx,'seg_threshold',seg_threshold,-80,-3)
+
+  retval, seg_offset_rise = reaper.ImGui_SliderDouble(ctx,'seg_offset_rise',seg_offset_rise,1.0,2.0)
+
+  retval, seg_multirise = reaper.ImGui_Checkbox(ctx,'seg_multirise', seg_multirise)
+
+  return 90
+end
+
+
+function GUI_CorpusParameters()
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans)
+
+
+retval, cga_restrict_overlaps = reaper.ImGui_SliderInt(ctx,'cga_restrict_overlaps',cga_restrict_overlaps, 1, 100)
+retval, cga_onset_len = reaper.ImGui_SliderInt(ctx,'cga_onset_len',cga_onset_len, 1, 100)
+retval, cga_offset_len = reaper.ImGui_SliderInt(ctx,'cga_offset_len',cga_offset_len, 1, 100)
+retval, cga_limit_dur = reaper.ImGui_SliderDouble(ctx,'cga_limit_dur',cga_limit_dur,0.0,5.0)
+
+
+
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans)
+
+retval, cga_allow_repetition = reaper.ImGui_Checkbox(ctx,'cga_allow_repetition', cga_allow_repetition)
+
+if cga_allow_repetition == false then
+  reaper.ImGui_BeginDisabled(ctx, true)
+  retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
+  reaper.ImGui_EndDisabled(ctx)
+
+else
+  retval, cga_restrict_repetition = reaper.ImGui_SliderDouble(ctx,'cga_restrict_repetition',cga_restrict_repetition, 0.0, 5.0)
+end
+
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans)
+
+retval, cga_clip_duration_to_target = reaper.ImGui_Checkbox(ctx,'cga_clip_duration_to_target', cga_clip_duration_to_target)
+
+retval, outputevent_align_peaks = reaper.ImGui_Checkbox(ctx,'align_peaks', outputevent_align_peaks)
+
+return 253
+
+end
+
+
+function GUI_SuperimposeParameters()
+  reaper.ImGui_PopFont(ctx)
       reaper.ImGui_PushFont(ctx, comic_sans_smaller)
       reaper.ImGui_NewLine(ctx)
       reaper.ImGui_PopFont(ctx)
@@ -1026,35 +951,117 @@ function mainWindow()
           if si_min_overlap < 0 then si_min_overlap = 0 end
       end
 
-      window_height_increment = window_height_increment + 178
+      return 178
+end
 
-    end
 
-    reaper.ImGui_PopFont(ctx)
+function GUI_SearchPasses()
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans)
+  reaper.ImGui_SetCursorPosX(ctx, 3);
+  if reaper.ImGui_BeginChild(ctx, 'Spass Window', MAIN_WINDOW_WIDTH - 30, SPASS_WINDOW_HEIGHT, true, reaper.ImGui_WindowFlags_HorizontalScrollbar()) then
+    spassWindow()
+    reaper.ImGui_EndChild(ctx)
+  end
+
+  return 149
+
+end
+
+
+function GUI_ParameterSeparatorMacro()
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_NewLine(ctx)
+  reaper.ImGui_PopFont(ctx)
+  reaper.ImGui_PushFont(ctx, comic_sans_bigger)
+  reaper.ImGui_SetCursorPosX(ctx, 0);
+end
+
+
+function mainWindow()
+
+  local window_height_increment = 0
+
+  reaper.ImGui_PushFont(ctx, comic_sans)
+
+  reaper.ImGui_SetCursorPosX(ctx, 8)
+
+  GUI_MatchTargetButton()
+
+  reaper.ImGui_SameLine(ctx)
+
+  GUI_BuildCorpusButton()
+
+  reaper.ImGui_SameLine(ctx);
+  reaper.ImGui_Text(ctx, 'Corpus Segments: ' .. tostring(number_of_segments))
+
+  reaper.ImGui_SameLine(ctx);
+  if CONCATENATION_IN_PROGRESS or SEGMENTATION_IN_PROGRESS then
+    drawSpinner(reaper.ImGui_GetCursorPosX(ctx) + 10 , reaper.ImGui_GetCursorPosY(ctx) + 4)
+  end
+
+  reaper.ImGui_SameLine(ctx);
+  
+  GUI_MinimizeButton()
+
+  reaper.ImGui_SameLine(ctx);
+
+  GUI_PreferencesButton()
+  
+  if MINIMIZED == false then
+
     reaper.ImGui_PushFont(ctx, comic_sans_smaller)
     reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Separator(), reaper.ImGui_ColorConvertDouble4ToU32(0.7, 0.7, 0.7, 2))
     reaper.ImGui_Separator(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_PushFont(ctx, comic_sans_bigger)
 
-    reaper.ImGui_SetCursorPosX(ctx, 0);
-    if reaper.ImGui_CollapsingHeader(ctx, 'Search Passes') then
-        reaper.ImGui_PopFont(ctx)
-        reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-        reaper.ImGui_NewLine(ctx)
-        reaper.ImGui_PopFont(ctx)
-        reaper.ImGui_PushFont(ctx, comic_sans)
-        reaper.ImGui_SetCursorPosX(ctx, 3);
-        if reaper.ImGui_BeginChild(ctx, 'Spass Window', MAIN_WINDOW_WIDTH - 30, SPASS_WINDOW_HEIGHT, true, reaper.ImGui_WindowFlags_HorizontalScrollbar()) then
-          spassWindow()
-          reaper.ImGui_EndChild(ctx)
-        end
+    if reaper.ImGui_BeginChild(ctx, '##ParametersInvisibleWindow', CURRENT_WINDOW_WIDTH - 12, CURRENT_WINDOW_HEIGHT - 90, false) then
 
-        window_height_increment = window_height_increment + 149
-
+      reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+      reaper.ImGui_NewLine(ctx)
+      reaper.ImGui_NewLine(ctx)
+      reaper.ImGui_NewLine(ctx)
+      reaper.ImGui_PopFont(ctx)
+      reaper.ImGui_PushFont(ctx, comic_sans_bigger)
+      reaper.ImGui_SameLine(ctx);
+      reaper.ImGui_SetCursorPosX(ctx, 0);
+      
+      if reaper.ImGui_CollapsingHeader(ctx, 'Target Sound File Parameters', false) then
+          window_height_increment = window_height_increment + GUI_TargetSoundFilesParameters()
       end
+
+      GUI_ParameterSeparatorMacro()
+    
+      if reaper.ImGui_CollapsingHeader(ctx, 'Segmentation Arguments') then
+         window_height_increment = window_height_increment + GUI_SegmentationArguments()
+      end
+
+      GUI_ParameterSeparatorMacro()
+
+      if reaper.ImGui_CollapsingHeader(ctx, 'Corpus Parameters') then
+        window_height_increment = window_height_increment + GUI_CorpusParameters()
+      end
+
+      GUI_ParameterSeparatorMacro()
+
+      if reaper.ImGui_CollapsingHeader(ctx, 'Superimpose Parameters') then
+        window_height_increment = window_height_increment + GUI_SuperimposeParameters()
+      end
+
+      GUI_ParameterSeparatorMacro()
+
+    if reaper.ImGui_CollapsingHeader(ctx, 'Search Passes') then
+      window_height_increment = window_height_increment + GUI_SearchPasses()
+    end
       
       if MAIN_WINDOW_HEIGHT + window_height_increment > MAIN_WINDOW_MAX_HEIGHT then
         CURRENT_WINDOW_HEIGHT = MAIN_WINDOW_MAX_HEIGHT
