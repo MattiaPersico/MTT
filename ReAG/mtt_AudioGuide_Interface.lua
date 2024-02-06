@@ -1,7 +1,6 @@
 --[[ 
   APPUNTI
   - ratio limit per gli spass obj
-  - f0 come descriptor
   - finestra di gestione avanzata del corpus
   - preset tramite option-files
   - un giorno ripristinare la debug mode capendo perchè non funziona piu
