@@ -4,6 +4,7 @@
   - finestra di gestione avanzata del corpus
   - preset tramite option-files
   - un giorno ripristinare la debug mode capendo perchè non funziona piu
+  - aggiungere tooltip a transpose in global csf
 ]]
 
 -- Script Name and Version
