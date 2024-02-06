@@ -959,7 +959,20 @@ function magf.clearArtifacts(corpus_audiofiles) -- rimuove dalla directory speci
     end
 end
 
+function magf.deleteSegmentationSignalFiles(directory)
+  local command = 'ls "' .. directory .. '"'
+  local pfile = io.popen(command)
 
+  for filename in pfile:lines() do
+    --reaper.ShowMessageBox(filename,filename, 0)
+      if filename:sub(1, 24) == 'segmentation_signal_file' then
+        --reaper.ShowMessageBox('hey','hey', 0)
+          local filePath = directory .. '/' .. filename
+          os.execute('rm "' .. filePath .. '"')
+      end
+  end
+  pfile:close()
+end
 
 
 -- SEGMENTAZIONE
@@ -988,10 +1001,7 @@ function magf.segmentation(selected_items, seg_threshold, seg_offset_rise, seg_m
     if debug_mode then
       reaper.ShowMessageBox(command, 'Segmentation Command', 0)
     else
-      return_string = os.execute(command .. " &")
-      if (i == #selected_items) then
-        return_string = os.execute(command .. " && echo 'done' > /tmp/segmentation_signal_file &")
-      end
+      os.execute(command .. " && echo 'done' > /tmp/segmentation_signal_file_" .. tostring(i) .. " &")
     end
 
     --NUMBER_OF_SEGMENTS = NUMBER_OF_SEGMENTS + mgf.countTextFileLines(AF_path .. '.txt')

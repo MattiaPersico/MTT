@@ -202,25 +202,33 @@ end
 
 
 function checkSegmentationSignalFile()
+
   local signalfile
 
-  signalfile = io.open("/tmp/segmentation_signal_file", "r")
-  if signalfile then
-      signalfile:close()
-      os.remove("/tmp/segmentation_signal_file")
-
-    for i = 1, #CORPUS_AFs do
-      number_of_segments = number_of_segments + mgf.countTextFileLines(CORPUS_AFs[i] .. '.txt')
-    end
-
-    if number_of_segments > 0 then
-      is_corpus_ready = true
-    end
-    SEGMENTATION_IN_PROGRESS = false
-
-  else
+  for i = 1 , #CORPUS_ITEMS do
+    signalfile = io.open("/tmp/segmentation_signal_file_" .. tostring(i), "r")
+    if not signalfile then
       reaper.defer(checkSegmentationSignalFile)
+      return
+    else
+      signalfile:close()
+    end
   end
+
+  for i = 1 , #CORPUS_ITEMS do
+    --os.remove("/tmp/segmentation_signal_file_" .. tostring(i))
+  end
+
+  for i = 1, #CORPUS_AFs do
+    number_of_segments = number_of_segments + mgf.countTextFileLines(CORPUS_AFs[i] .. '.txt')
+  end
+
+  if number_of_segments > 0 then
+    is_corpus_ready = true
+  end
+
+  SEGMENTATION_IN_PROGRESS = false
+
 end
 
 
@@ -392,11 +400,7 @@ function initReAG()
       os.remove("/tmp/concatenation_signal_file")
   end
 
-  signalfile = io.open("/tmp/segmentation_signal_file", "r")
-  if signalfile then
-      signalfile:close()
-      os.remove("/tmp/segmentation_signal_file")
-  end
+  magf.deleteSegmentationSignalFiles("/private/tmp")
 
   preferencesWindowState = false
 
