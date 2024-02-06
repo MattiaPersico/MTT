@@ -1,11 +1,9 @@
 --[[ 
   APPUNTI
-  - BUG: a volte non vengono creati tutti i file di segmentazione, va fatto un controllo alla fine per vedere se ci sono tutti o va capito cosa va storto
   - ratio limit per gli spass obj
   - f0 come descriptor
   - finestra di gestione avanzata del corpus
   - preset tramite option-files
-  - fare test con materiali stereo e piú
   - un giorno ripristinare la debug mode capendo perchè non funziona piu
 ]]
 
