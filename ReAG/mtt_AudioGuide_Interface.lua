@@ -99,6 +99,10 @@ local cga_restrict_repetition = 0.5
 local cga_restrict_overlaps = 3
 local cga_clip_duration_to_target = false
 
+local cga_trans_method = 0
+local cga_trans_random_min = -3
+local cga_trans_random_max = 3
+
 -- Opzioni Generali Concatenazione
 local outputevent_align_peaks = false
 
@@ -214,7 +218,7 @@ function checkSegmentationSignalFile()
   end
 
   for i = 1 , #CORPUS_ITEMS do
-    --os.remove("/tmp/segmentation_signal_file_" .. tostring(i))
+    os.remove("/tmp/segmentation_signal_file_" .. tostring(i))
   end
 
   for i = 1, #CORPUS_AFs do
@@ -365,6 +369,9 @@ function onMatchTargetPressed()
                                           cga_restrict_repetition,
                                           cga_restrict_overlaps,
                                           cga_clip_duration_to_target,
+                                          cga_trans_method,
+                                          cga_trans_random_min,
+                                          cga_trans_random_max,
                                           search_mode_list,
                                           search_mode_list_percentage,
                                           descriptors_matrix,
@@ -1023,6 +1030,34 @@ reaper.ImGui_NewLine(ctx)
 reaper.ImGui_PopFont(ctx)
 reaper.ImGui_PushFont(ctx, comic_sans)
 
+reaper.ImGui_SetNextItemWidth(ctx, 100)
+local retvalTransMethod, selected_cga_trans_method = reaper.ImGui_Combo(ctx, 'cga_trans_method', cga_trans_method, TRANS_METHOD_LIST, 4)
+
+if retvalTransMethod then
+  cga_trans_method = selected_cga_trans_method
+end
+
+if cga_trans_method == 1 then
+  reaper.ImGui_BeginDisabled(ctx,false)
+else
+  reaper.ImGui_BeginDisabled(ctx,true)
+end
+
+reaper.ImGui_SetNextItemWidth(ctx, 100)
+
+local retvalDrag, ret_cga_trans_random_min, ret_cga_trans_random_max = reaper.ImGui_DragIntRange2(ctx, 'min/max_pitch', cga_trans_random_min, cga_trans_random_max, 0.3, -24, 24, "%d st", "%d st")
+cga_trans_random_max = ret_cga_trans_random_max
+cga_trans_random_min = ret_cga_trans_random_min
+
+reaper.ImGui_EndDisabled(ctx)
+
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_NewLine(ctx)
+reaper.ImGui_PopFont(ctx)
+reaper.ImGui_PushFont(ctx, comic_sans)
+
 retval, cga_clip_duration_to_target = reaper.ImGui_Checkbox(ctx,'cga_clip_duration_to_target', cga_clip_duration_to_target)
 
 if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled() |  reaper.ImGui_HoveredFlags_DelayNormal() | reaper.ImGui_HoveredFlags_NoSharedDelay())then
@@ -1041,7 +1076,7 @@ if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled()
   end
 end
 
-return 253
+return 322
 
 end
 

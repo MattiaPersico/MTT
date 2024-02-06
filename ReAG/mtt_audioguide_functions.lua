@@ -28,7 +28,8 @@ RPP_AUTOLAUNCH = False
 ]]
 
 SPASS_STRING_LIST = 'closest\0closest_percent\0farthest\0farthest_percent\0'
-DESCRIPTORS_STRING_LIST = 'effDur-seg\0power\0power-delta\0centroid\0centroid-delta\0mfccs\0mfccs-delta\0kurtosis\0kurtosis-delta\0'
+DESCRIPTORS_STRING_LIST = 'effDur-seg\0power\0power-delta\0centroid\0centroid-delta\0mfccs\0mfccs-delta\0kurtosis\0kurtosis-delta\0f0\0'
+TRANS_METHOD_LIST = 'None\0Random\0f0\0f0-chroma\0'
 
 -- Path Segmentazione
 agSegmentationFile = AG_path .. '/agSegmentSf.py'
@@ -691,7 +692,16 @@ function magf.build_corpus_section(corpus_items) -- Costruisce la stringa che co
 end
 
 
-function magf.build_corpus_global_attributes_section(cga_limit_dur, cga_onset_len, cga_offset_len, cga_allow_repetition, cga_restrict_repetition, cga_restrict_overlaps, cga_clip_duration_to_target) -- Costruisce la stringa che comporrà la sezione CORPUS GLOBAL ATTRIBUTES dell Option File di Audioguide
+function magf.build_corpus_global_attributes_section( cga_limit_dur, -- Costruisce la stringa che comporrà la sezione CORPUS GLOBAL ATTRIBUTES dell Option File di Audioguide
+                                                      cga_onset_len,
+                                                      cga_offset_len,
+                                                      cga_allow_repetition,
+                                                      cga_restrict_repetition,
+                                                      cga_restrict_overlaps,
+                                                      cga_clip_duration_to_target,
+                                                      cga_trans_method,
+                                                      cga_trans_random_min,
+                                                      cga_trans_random_max) 
 
   local corpus_global_attributes_section = '\n'
 
@@ -718,9 +728,25 @@ function magf.build_corpus_global_attributes_section(cga_limit_dur, cga_onset_le
   corpus_global_attributes_section = corpus_global_attributes_section .. '\'onsetLen\': \'' .. tostring(cga_onset_len) .. '%%\', \n'
 
   corpus_global_attributes_section = corpus_global_attributes_section .. '\'restrictOverlaps\': ' .. tostring(cga_restrict_overlaps) .. ', \n'
+  
+  corpus_global_attributes_section = corpus_global_attributes_section .. '\'restrictRepetition\': ' .. tostring(cga_restrict_repetition) .. ', \n'
 
-  corpus_global_attributes_section = corpus_global_attributes_section .. '\'restrictRepetition\': ' .. tostring(cga_restrict_repetition) .. '\n'
 
+  if cga_trans_method == 0 then
+    corpus_global_attributes_section = corpus_global_attributes_section .. '\'transMethod\': ' .. 'None' .. '\n'
+  end
+
+  if cga_trans_method == 1 then
+    corpus_global_attributes_section = corpus_global_attributes_section .. '\'transMethod\': ' .. '\'random '.. tostring(cga_trans_random_min) .. ' '.. tostring(cga_trans_random_max) ..'\'' .. '\n'
+  end
+
+  if cga_trans_method == 2 then
+    corpus_global_attributes_section = corpus_global_attributes_section .. '\'transMethod\': ' .. '\'f0\'' .. '\n'
+  end
+
+  if cga_trans_method == 3 then
+    corpus_global_attributes_section = corpus_global_attributes_section .. '\'transMethod\': ' .. '\'f0-chroma\'' .. '\n'
+  end
 
   return corpus_global_attributes_section
 
@@ -852,6 +878,10 @@ function magf.convertDescriptorsMatrixToString(descriptors_matrix) -- converte l
 
       if descriptors_matrix[i][j] == 8 then
         descriptors_string_matrix[i][j] = 'kurtosis-delta'
+      end
+
+      if descriptors_matrix[i][j] == 9 then
+        descriptors_string_matrix[i][j] = 'f0'
       end
 
     end
@@ -1030,6 +1060,9 @@ function magf.concatenation( target_item , corpus_items, -- Avvia la concatenazi
   cga_restrict_repetition,
   cga_restrict_overlaps,
   cga_clip_duration_to_target,
+  cga_trans_method,
+  cga_trans_random_min,
+  cga_trans_random_max,
   search_mode_list,
   search_mode_list_percentage,
   descriptors_matrix,
@@ -1061,7 +1094,17 @@ local rpp_path = reaper.GetProjectPath() .. '/'..mgf.removeExtension(mgf.removeP
 
 rpp_path = mgf.uniqueFilename(rpp_path)
 
-local corpus_global_attributes_section = magf.build_corpus_global_attributes_section(cga_limit_dur, cga_onset_len, cga_offset_len, cga_allow_repetition, cga_restrict_repetition, cga_restrict_overlaps, cga_clip_duration_to_target)
+local corpus_global_attributes_section = magf.build_corpus_global_attributes_section( cga_limit_dur,
+                                                                                      cga_onset_len,
+                                                                                      cga_offset_len,
+                                                                                      cga_allow_repetition,
+                                                                                      cga_restrict_repetition,
+                                                                                      cga_restrict_overlaps,
+                                                                                      cga_clip_duration_to_target,
+                                                                                      cga_trans_method,
+                                                                                      cga_trans_random_min,
+                                                                                      cga_trans_random_max
+                                                                                    )
 
 local target_section = magf.build_target_section(source_filename, start_time, end_time, tsf_threshold, tsf_offset_rise, tsf_min_seg_len, tsf_max_seg_len)
 
