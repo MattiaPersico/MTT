@@ -1179,7 +1179,7 @@ function magf.import_rpp(target_item, target_filename, target_position, reaper_c
   
   activeTake = reaper.GetActiveTake(rpp_item)
   
-  reaper.SetMediaItemTakeInfo_Value(activeTake, 'I_CHANMODE', 2) -- mono mix the RPP Proxy
+  --reaper.SetMediaItemTakeInfo_Value(activeTake, 'I_CHANMODE', 2) -- mono mix the RPP Proxy
   
   magf.trim_result(rpp_item, target_item) -- in sostituzione dei parametri start e end del tsf
   
