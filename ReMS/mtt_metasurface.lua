@@ -1,3 +1,8 @@
+-- Appunti:
+-- Ottimizza meglio l'array degli indici,
+-- ad ogni insert controlla se non è già salvato
+-- quell index del parametro
+
 -- Script Name and Version
 
 local major_version = 0
