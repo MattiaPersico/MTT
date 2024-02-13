@@ -5,6 +5,9 @@ local minor_version = 1
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
+local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
+local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
+
 local MAIN_WINDOW_WIDTH = 400
 local MAIN_WINDOW_HEIGHT = 400
 
@@ -19,6 +22,7 @@ local sizeConstraintsCallback = [=[
 a = 0
 ]=]
 
+local focused_window = reaper.JS_Window_GetFocus()
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 local ctx = reaper.ImGui_CreateContext(name)
@@ -509,7 +513,25 @@ function mainWindow()
 
     drawSnapshots()
 
-    onDragLeftMouse()
+    if reaper.ImGui_IsWindowHovered(ctx) then
+        onDragLeftMouse()
+    end
+    
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) then
+        isSpaceDown = true
+        --reaper.JS_Window_SetFocus( focused_window )
+
+        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
+            --reaper.ShowConsoleMsg('dino')
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_LOOP_COMMAND), 0)
+        else
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_COMMAND), 0)
+            --reaper.ShowConsoleMsg('dino')
+            --reaper.Main_OnCommand(0, 40697)
+        end
+    end
+
+
 
     reaper.ImGui_EndChild(ctx)
 end
