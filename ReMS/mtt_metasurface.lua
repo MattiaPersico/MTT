@@ -323,7 +323,12 @@ function drawSnapshots()
         if snapshot_list[s] then
             reaper.ImGui_SameLine(ctx)
             reaper.ImGui_SetNextItemWidth(ctx, 60)
-            reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 3, reaper.ImGui_GetCursorPosY(ctx) - 7)
+            if reaper.ImGui_GetCursorPosX(ctx) > ((MAIN_WINDOW_WIDTH / 3) * 2) then
+                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 65, reaper.ImGui_GetCursorPosY(ctx) - 7)
+            else
+                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 3, reaper.ImGui_GetCursorPosY(ctx) - 7)
+            end
+
             reaper.ImGui_Text(ctx, snapshot_list[s].name)
         end
 
@@ -484,17 +489,12 @@ function mainWindow()
     if reaper.ImGui_Button(ctx, 'Clear Snapshots', 110, 30) then
         for k in pairs (snapshot_list) do
             snapshot_list [k] = nil
-            snapshot_name_list [k] = nil
             snapshot_index_list [k] = nil
         end
 
         LAST_TOUCHED_BUTTON_INDEX = nil
     end
     
---[[     reaper.ImGui_SameLine(ctx)
-
-    reaper.ImGui_Text(ctx, 'X:' .. tostring(DRAG_X) .. '  Y:'.. tostring(DRAG_Y)) ]]
-
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 60)
     reaper.ImGui_Text(ctx, 'Name:')
@@ -503,6 +503,7 @@ function mainWindow()
         reaper.ImGui_SameLine(ctx)
         reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110)
         rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name)
+        is_name_edited = reaper.ImGui_IsItemFocused(ctx)
     end
     
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
@@ -517,21 +518,15 @@ function mainWindow()
         onDragLeftMouse()
     end
     
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) then
-        isSpaceDown = true
-        --reaper.JS_Window_SetFocus( focused_window )
+
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
 
         if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
-            --reaper.ShowConsoleMsg('dino')
             reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_LOOP_COMMAND), 0)
         else
             reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_COMMAND), 0)
-            --reaper.ShowConsoleMsg('dino')
-            --reaper.Main_OnCommand(0, 40697)
         end
     end
-
-
 
     reaper.ImGui_EndChild(ctx)
 end
