@@ -28,7 +28,7 @@ dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')(
 local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
 local comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
-local comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+local comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
 
 reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, comic_sans_bigger)
@@ -324,7 +324,9 @@ function drawSnapshots()
             reaper.ImGui_SameLine(ctx)
             reaper.ImGui_SetNextItemWidth(ctx, 60)
             if reaper.ImGui_GetCursorPosX(ctx) > ((MAIN_WINDOW_WIDTH / 3) * 2) then
-                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 65, reaper.ImGui_GetCursorPosY(ctx) - 7)
+                local str_len = string.len(snapshot_list[s].name)
+                local  w,  h = reaper.ImGui_CalcTextSize(ctx, snapshot_list[s].name, 60, 20)
+                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 25 - w, reaper.ImGui_GetCursorPosY(ctx) - 7)
             else
                 reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 3, reaper.ImGui_GetCursorPosY(ctx) - 7)
             end
@@ -510,6 +512,17 @@ function mainWindow()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse())
     
+
+
+    
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(0.25, 0.25, 0.25, 2))
+    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 75)
+    reaper.ImGui_SetCursorPosX(ctx, 10)
+    reaper.ImGui_Text(ctx, "Right-Click: add snapshot of current FX values\nShift + Left-Click: remove clicked snapshot\nLeft-Click: select a snapshot and load its FX values\nLeft-Drag: interpolate")
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+
     onRightClick()
 
     drawSnapshots()
@@ -517,7 +530,6 @@ function mainWindow()
     if reaper.ImGui_IsWindowHovered(ctx) then
         onDragLeftMouse()
     end
-    
 
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
 
