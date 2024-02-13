@@ -14,6 +14,12 @@ local HEIGHT_OFFSET = 74
 local ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
 local ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
 
+-- Funzione EEL per i Vincoli delle Dimensioni della Finestra
+local sizeConstraintsCallback = [=[
+a = 0
+]=]
+
+
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
@@ -24,13 +30,16 @@ reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
 
+local snapshot_name_list = {}
+
+local snapshot_index_list = {}
 
 local snapshot_list = {}
 
 local snapshot = {
     x = 0,
     y = 0,
-    name = '',
+    name,
     param_value_list = {}, -- i valori dei singoli parametri
     param_index_list = {}, -- lista parallela param_value_list
     track_GUID_list = {},  -- lista parallela a param_value_list
@@ -43,7 +52,7 @@ function snapshot:new(x, y, name)
     local instance = setmetatable({}, {__index = self})
     instance.x = x or 0
     instance.y = y or 0
-    instance.name = name or ''
+    instance.name = name
     instance.param_value_list = {}
     instance.param_index_list = {}
     instance.track_GUID_list = {}
@@ -97,7 +106,11 @@ function loop()
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
-  
+    
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGrip(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGripActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGripHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
+
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.14, 0.14, 0.14, 2)) 
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgCollapsed(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
@@ -124,21 +137,23 @@ function loop()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5) 
-    
-     
   
     reaper.ImGui_PushFont(ctx, comic_sans)
-    reaper.ImGui_SetNextWindowSize(ctx, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
-    local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, reaper.ImGui_WindowFlags_NoResize()  
-                                                                    | reaper.ImGui_WindowFlags_NoCollapse()
+
+    reaper.ImGui_SetNextWindowSizeConstraints(ctx, 400, 400, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
+
+    local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, --reaper.ImGui_WindowFlags_NoResize() |  
+                                                                     reaper.ImGui_WindowFlags_NoCollapse()
                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()  
                                                                     )
   
     
-  
-    main_window_x, main_window_y = reaper.ImGui_GetWindowPos(ctx)
-    main_window_w, main_window_h = reaper.ImGui_GetWindowSize(ctx)
+    
+
+    MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT = reaper.ImGui_GetWindowSize(ctx)
+    ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
+    ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
     
     
   
@@ -149,6 +164,9 @@ function loop()
       reaper.ImGui_End(ctx)
 
       reaper.ImGui_PopFont(ctx)
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_PopStyleColor(ctx)
       reaper.ImGui_PopStyleColor(ctx)
       reaper.ImGui_PopStyleColor(ctx)
       reaper.ImGui_PopStyleColor(ctx)
@@ -241,7 +259,7 @@ function onRightClick()
         local normalizedY = absY / ACTION_WINDOW_HEIGHT
 
         -- Crea un nuovo snapshot utilizzando le coordinate normalizzate
-        snapshot_list[#snapshot_list + 1] = snapshot:new(normalizedX, normalizedY, 'B')
+        snapshot_list[#snapshot_list + 1] = snapshot:new(normalizedX, normalizedY)
         LAST_TOUCHED_BUTTON_INDEX = #snapshot_list
 
         saveSelected()
@@ -250,7 +268,7 @@ end
 
 function drawSnapshots()
 
-    local num_selected_tracks = reaper.CountSelectedTracks(0)
+    local num_selected_tracks = reaper.CountTracks(0)
     
     for s = #snapshot_list, 1, -1 do
         -- Converti le coordinate normalizzate in coordinate assolute basate sulle dimensioni attuali della finestra
@@ -259,10 +277,10 @@ function drawSnapshots()
 
         reaper.ImGui_SetCursorPos(ctx, absoluteX, absoluteY)
 
-        local name = 'B'
+        --local name = 'B'
         if s == LAST_TOUCHED_BUTTON_INDEX or #snapshot_list == 1 then
             --LAST_TOUCHED_BUTTON_INDEX = s
-            name = 'S'
+            --name = 'S'
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.5, 0.0, 2))
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.6, 0.0, 2))
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.5, 0.0, 2))
@@ -273,9 +291,11 @@ function drawSnapshots()
         end
 
         if reaper.ImGui_Button(ctx,  '##' .. tostring(s), 12, 12) then
-            LAST_TOUCHED_BUTTON_INDEX = s
-
+            
             if not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
+
+                LAST_TOUCHED_BUTTON_INDEX = s
+
                 for i = 1, #snapshot_list[s].param_value_list do
                     local track = reaper.BR_GetMediaTrackByGUID(0, snapshot_list[s].track_GUID_list[i])
                     local param_index = snapshot_list[s].param_index_list[i]
@@ -290,8 +310,17 @@ function drawSnapshots()
                     end
                 end
             else
+                if LAST_TOUCHED_BUTTON_INDEX == #snapshot_list then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
                 table.remove(snapshot_list, s)
+                updateSnapshotIndexList()
             end
+        end
+        
+        if snapshot_list[s] then
+            reaper.ImGui_SameLine(ctx)
+            reaper.ImGui_SetNextItemWidth(ctx, 60)
+            reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 3, reaper.ImGui_GetCursorPosY(ctx) - 7)
+            reaper.ImGui_Text(ctx, snapshot_list[s].name)
         end
 
         reaper.ImGui_PopStyleColor(ctx)
@@ -326,10 +355,8 @@ function onDragLeftMouse()
     local isDragging = reaper.ImGui_IsMouseDragging(ctx, 0)
 
     if isDragging then
-
         -- Ottieni la posizione normalizzata del mouse
         local normalizedX, normalizedY = GetNormalizedMousePosition()
-
 
         -- Converti le coordinate normalizzate in posizione reale se necessario
         -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
@@ -338,11 +365,12 @@ function onDragLeftMouse()
 
         reaper.ImGui_SetCursorPos(ctx, DRAG_X - 12, DRAG_Y - 12)
         reaper.ImGui_Bullet(ctx)
-        -- Calcola i valori interpolati per ogni parametro di ogni snapshot
-        -- basandosi sulla posizione attuale del mouse
+
+        -- Calcola i valori interpolati solo per gli indici dei parametri diversi
         for i, snap in ipairs(snapshot_list) do
-            for j = 0, #snap.param_value_list do
+            for _, j in ipairs(snapshot_index_list) do
                 local points = {}
+
                 -- Costruisce i punti solo per il parametro corrente attraverso tutti i snapshot
                 for _, other_snap in ipairs(snapshot_list) do
                     if other_snap.param_value_list[j] then -- Assicura che il parametro esista
@@ -365,11 +393,8 @@ function onDragLeftMouse()
 
                 if track and fx_index and param_index then
                     local retval, current_fx_name = reaper.TrackFX_GetFXName(track, fx_index)
-                    --reaper.ShowMessageBox(fx_name, current_fx_name, 0)
                     if current_fx_name == fx_name then
                         reaper.TrackFX_SetParam(track, fx_index, param_index, interpolated_value)
-                       -- local retval, trackname = reaper.GetTrackName(track)
-                        --reaper.ShowConsoleMsg('Track: ' .. trackname .. '\n')
                     end
                 end
             end
@@ -377,8 +402,34 @@ function onDragLeftMouse()
     end
 end
 
+function updateSnapshotIndexList()
+
+    if #snapshot_list <= 1 then return end
+
+    snapshot_index_list = {}
+
+    for i = 1, #snapshot_list do
+        for j = 1, #snapshot_list do
+            if #snapshot_list[i].param_value_list == #snapshot_list[j].param_value_list then
+                for c = 1, #snapshot_list[i].param_value_list do
+                    if snapshot_list[i].track_GUID_list[c] == snapshot_list[j].track_GUID_list[c] then
+                        if snapshot_list[i].fx_index_list[c] == snapshot_list[j].fx_index_list[c] then
+                            if snapshot_list[i].fx_name[c] == snapshot_list[j].fx_name[c] then
+                                if snapshot_list[i].param_value_list[c] ~= snapshot_list[j].param_value_list[c] then
+                                    table.insert(snapshot_index_list, c)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+end
+
 function saveSelected()
-    local num_selected_tracks = reaper.CountSelectedTracks(0)
+    local num_selected_tracks = reaper.CountTracks(0)
 
         if LAST_TOUCHED_BUTTON_INDEX and num_selected_tracks > 0 then
 
@@ -387,21 +438,16 @@ function saveSelected()
             local temp_x = snapshot_list[s].x
             local temp_y = snapshot_list[s].y
 
-            snapshot_list[s] = snapshot:new(temp_x, temp_y, 'S')
+            local snap_name = snapshot_list[s].name or ('Snap ' .. tostring(s))
+
+            snapshot_list[s] = snapshot:new(temp_x, temp_y, snap_name)
 
             for t = 0, num_selected_tracks - 1 do
-                local selected_track = reaper.GetSelectedTrack(0, t)
-                local retval, selected_track_name = reaper.GetTrackName(selected_track)
+                local selected_track = reaper.GetTrack(0, t)
                 local num_track_fx = reaper.TrackFX_GetCount(selected_track)
-
-                local retval, trackname = reaper.GetTrackName(selected_track)
-                --reaper.ShowConsoleMsg('Track: ' .. trackname .. '\n')
 
                 for f = 0, num_track_fx - 1 do
                     local num_fx_param = reaper.TrackFX_GetNumParams(selected_track, f)
-
-                    --reaper.ShowConsoleMsg('Num Track FX: ' .. tostring(num_track_fx) .. '\n')
-                    --reaper.ShowConsoleMsg('Num Param: ' .. tostring(num_fx_param) .. '\n')
 
                     for p = 0, num_fx_param - 1 do
 
@@ -417,30 +463,43 @@ function saveSelected()
                     end
                 end
             end
+
+            updateSnapshotIndexList()
+
         end
 end
 
 function mainWindow()
     
-    if reaper.ImGui_Button(ctx, 'Save Selected', 130, 30) then
-
+    if reaper.ImGui_Button(ctx, 'Save Snapshot', 110, 30) then
         saveSelected()
     end
 
     reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, 'Clear Snapshots', 130, 30) then
+    if reaper.ImGui_Button(ctx, 'Clear Snapshots', 110, 30) then
         for k in pairs (snapshot_list) do
             snapshot_list [k] = nil
+            snapshot_name_list [k] = nil
+            snapshot_index_list [k] = nil
         end
 
         LAST_TOUCHED_BUTTON_INDEX = nil
     end
     
+--[[     reaper.ImGui_SameLine(ctx)
+
+    reaper.ImGui_Text(ctx, 'X:' .. tostring(DRAG_X) .. '  Y:'.. tostring(DRAG_Y)) ]]
+
     reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 60)
+    reaper.ImGui_Text(ctx, 'Name:')
 
-    reaper.ImGui_Text(ctx, 'X:' .. tostring(DRAG_X) .. '  Y:'.. tostring(DRAG_Y))
-
+    if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110)
+        rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name)
+    end
     
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
@@ -454,5 +513,6 @@ function mainWindow()
 
     reaper.ImGui_EndChild(ctx)
 end
+
 
 reaper.defer(loop)
