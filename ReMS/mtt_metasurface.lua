@@ -1,12 +1,10 @@
 -- Appunti:
--- Ottimizza meglio l'array degli indici,
--- ad ogni insert controlla se non è già salvato
--- quell index del parametro
+-- aggiungere sistema per gestire situazione dove il progetto non é ancora stato salvato e quindi non ha directory e crea problemi con file salvataggio
 
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 1
+local minor_version = 2
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -91,6 +89,68 @@ LAST_TOUCHED_BUTTON_INDEX = nil
 
 DRAG_X = 0
 DRAG_Y = 0
+
+-- Funzione per scrivere l'array su un file
+function writeSnapshotsToFile(snapshots, filename)
+    local file = io.open(filename, "w")
+    if not file then
+        error("Failed to open file for writing")
+    end
+
+    for _, snapshot in ipairs(snapshots) do
+        file:write(snapshot.x, "\n")
+        file:write(snapshot.y, "\n")
+        file:write(snapshot.name or "", "\n")
+        for i, value in ipairs(snapshot.param_value_list) do
+            file:write(value, ",", snapshot.param_index_list[i], ",", snapshot.track_GUID_list[i], ",", snapshot.fx_index_list[i], ",", (snapshot.fx_name[i] or ""), "\n")
+        end
+        file:write("END_SNAPSHOT\n")
+    end
+
+    file:close()
+end
+
+function readSnapshotsFromFile(filename)
+    local file = io.open(filename, "r")
+    if not file then
+        return nil -- oppure error("Failed to open file for reading")
+    end
+
+    local snapshots = {}
+    local snapshot = nil
+    local line = file:read("*line")
+
+    while line do
+        if line == "END_SNAPSHOT" then
+            if snapshot then
+                table.insert(snapshots, snapshot)
+                snapshot = nil
+            end
+        else
+            if not snapshot then
+                snapshot = {x = tonumber(line), y = tonumber(file:read("*line")), name = file:read("*line"),param_value_list = {}, param_index_list = {}, track_GUID_list = {}, fx_index_list = {}, fx_name = {}, assigned = false}
+                --snapshot.x = tonumber(line) -- Legge il valore di x
+                --snapshot.y = tonumber(file:read("*line")) -- Legge il valore di y sulla prossima riga
+                --snapshot.name = file:read("*line") -- Legge il nome sulla riga successiva
+            else
+                local value, pIndex, guid, fxIndex, fxName = line:match("^(.-)%,(.-)%,(.-)%,(.-)%,(.-)$")
+                if value and pIndex and guid and fxIndex and fxName then
+                    table.insert(snapshot.param_value_list, value)
+                    table.insert(snapshot.param_index_list, tonumber(pIndex))
+                    table.insert(snapshot.track_GUID_list, guid)
+                    table.insert(snapshot.fx_index_list, tonumber(fxIndex))
+                    table.insert(snapshot.fx_name, fxName)
+                else
+                    error("Errore nel formato dei dati del parametro.")
+                end
+            end
+        end
+        line = file:read("*line")
+    end
+
+    file:close()
+    return snapshots
+end
 
 function GetNormalizedMousePosition()
     local mouseX, mouseY = GetMouseCursorPositionInWindow() -- Usa la tua funzione esistente
@@ -432,7 +492,15 @@ function updateSnapshotIndexList()
                         if snapshot_list[i].fx_index_list[c] == snapshot_list[j].fx_index_list[c] then
                             if snapshot_list[i].fx_name[c] == snapshot_list[j].fx_name[c] then
                                 if snapshot_list[i].param_value_list[c] ~= snapshot_list[j].param_value_list[c] then
-                                    table.insert(snapshot_index_list, c)
+
+                                    local needToAdd = true
+
+                                    for sil = 1, #snapshot_index_list do
+                                        if snapshot_index_list[sil] == c then needToAdd = false end
+                                    end
+
+                                    if needToAdd then table.insert(snapshot_index_list, c) end
+
                                 end
                             end
                         end
@@ -467,15 +535,20 @@ function saveSelected()
 
                     for p = 0, num_fx_param - 1 do
 
-                        local val, min, max = reaper.TrackFX_GetParam(selected_track, f, p)
+                        local retval, param_name = reaper.TrackFX_GetParamName(selected_track, f, p)
 
-                        table.insert(snapshot_list[s].param_value_list, val)
-                        table.insert(snapshot_list[s].param_index_list, p)
-                        table.insert(snapshot_list[s].track_GUID_list, reaper.BR_GetMediaTrackGUID(selected_track))
-                        table.insert(snapshot_list[s].fx_index_list, f)
-                        local retval, fx_name = reaper.TrackFX_GetFXName(selected_track, f)
-                        table.insert(snapshot_list[s].fx_name, fx_name)
-                        snapshot_list[s].assigned = true
+                        if containsAnyFormOfMIDI(param_name) == false then
+
+                            local val, min, max = reaper.TrackFX_GetParam(selected_track, f, p)
+
+                            table.insert(snapshot_list[s].param_value_list, val)
+                            table.insert(snapshot_list[s].param_index_list, p)
+                            table.insert(snapshot_list[s].track_GUID_list, reaper.BR_GetMediaTrackGUID(selected_track))
+                            table.insert(snapshot_list[s].fx_index_list, f)
+                            local retval, fx_name = reaper.TrackFX_GetFXName(selected_track, f)
+                            table.insert(snapshot_list[s].fx_name, fx_name)
+                            snapshot_list[s].assigned = true
+                        end
                     end
                 end
             end
@@ -483,6 +556,13 @@ function saveSelected()
             updateSnapshotIndexList()
 
         end
+end
+
+function containsAnyFormOfMIDI(s)
+    -- Rimuovi gli spazi per gestire concatenazioni come "NoteMidiCC"
+    local compactS = s:gsub("%s+", ""):lower()
+    -- Cerca "midi" in qualsiasi punto della stringa
+    return string.find(compactS, "midi") ~= nil
 end
 
 function mainWindow()
@@ -500,6 +580,8 @@ function mainWindow()
         end
 
         LAST_TOUCHED_BUTTON_INDEX = nil
+
+        --os.remove(reaper.GetProjectPath() .. '/ms_save')
     end
     
     reaper.ImGui_SameLine(ctx)
@@ -548,5 +630,14 @@ function mainWindow()
     reaper.ImGui_EndChild(ctx)
 end
 
+function onExit()
+    writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+end
 
+snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+
+
+if snapshot_list == nil then snapshot_list = {} end
+updateSnapshotIndexList()
 reaper.defer(loop)
+reaper.atexit(onExit)
