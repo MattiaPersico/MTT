@@ -15,6 +15,9 @@ local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_
 local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 
+local MAX_MAIN_WINDOW_WIDTH = 600
+local MAX_MAIN_WINDOW_HEIGHT = 600
+
 local MAIN_WINDOW_WIDTH = 500
 local MAIN_WINDOW_HEIGHT = 500
 
@@ -225,7 +228,7 @@ function loop()
   
     reaper.ImGui_PushFont(ctx, comic_sans)
 
-    reaper.ImGui_SetNextWindowSizeConstraints(ctx, 500, 500, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
+    reaper.ImGui_SetNextWindowSizeConstraints(ctx, MAX_MAIN_WINDOW_WIDTH, MAX_MAIN_WINDOW_HEIGHT, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
 
     local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, --reaper.ImGui_WindowFlags_NoResize() |  
                                                                      reaper.ImGui_WindowFlags_NoCollapse()
@@ -342,6 +345,8 @@ function onRightClick()
     if reaper.ImGui_IsMouseClicked(ctx, 1, false) then
         -- Ottieni la posizione del click del mouse come coordinate assolute
         local absX, absY = GetMouseClickPositionInWindow(ctx, 1)
+
+        if not absX or not absY then return end
 
         -- Converti le coordinate assolute in coordinate normalizzate
         local normalizedX = absX / ACTION_WINDOW_WIDTH
@@ -677,9 +682,11 @@ function mainWindow()
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
     reaper.ImGui_Text(ctx, 'Name:')
 
+    local textEditWidth = MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85 - 100
+
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
-        reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85)
+        reaper.ImGui_SetNextItemWidth(ctx, textEditWidth)
         local rv
         rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
@@ -690,9 +697,18 @@ function mainWindow()
         if reaper.ImGui_IsItemActivated(ctx) then
             is_name_edited = true
         end
-
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 10)
+    else
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + textEditWidth + 18)
     end
     
+
+    if reaper.ImGui_Button(ctx, 'Preferences', 82, 30) then
+        reaper.ShowConsoleMsg('Prefs')
+    end
+
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse())
