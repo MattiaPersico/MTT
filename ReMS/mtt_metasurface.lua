@@ -3,7 +3,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 2
+local minor_version = 3
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -98,6 +98,8 @@ local lastUpdateTime = reaper.time_precise()
 local needToInitSmoothing = true
 local CURRENT_DRAG_X = 0
 local CURRENT_DRAG_Y = 0
+
+is_name_edited = false
 
 -- Funzione per scrivere l'array su un file
 function writeSnapshotsToFile(snapshots, filename)
@@ -275,6 +277,12 @@ function loop()
       reaper.ImGui_PopStyleVar(ctx)
   
     end
+
+    if reaper.GetProjectPath() ~= PROJECT_NAME then
+        onExit()
+        initMS()
+    end
+
     if mw_open then
         reaper.defer(loop)
       end
@@ -667,8 +675,17 @@ function mainWindow()
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
         reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85)
-        rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name)
-        is_name_edited = reaper.ImGui_IsItemFocused(ctx)
+        local rv
+        rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+        if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+            is_name_edited = false
+        end
+
+        if reaper.ImGui_IsItemActivated(ctx) then
+            is_name_edited = true
+        end
+
     end
     
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
@@ -683,6 +700,9 @@ function mainWindow()
     reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 75)
     reaper.ImGui_SetCursorPosX(ctx, 10)
     reaper.ImGui_Text(ctx, "Right-Click: add snapshot of current FX values\nShift + Left-Click: remove clicked snapshot\nLeft-Click: select a snapshot and load its FX values\nLeft-Drag: interpolate")
+    reaper.ImGui_SetCursorPosX(ctx, 8)
+    reaper.ImGui_SetCursorPosY(ctx, 4)
+    reaper.ImGui_Text(ctx,string.sub(reaper.GetProjectName(0, ""), 1, -5))
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_PopStyleColor(ctx)
 
@@ -693,6 +713,8 @@ function mainWindow()
     if reaper.ImGui_IsWindowHovered(ctx) then
         onDragLeftMouse()
     end
+
+    --if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) then  is_name_edited = false reaper.ShowConsoleMsg('enter') end
 
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
 
@@ -731,17 +753,34 @@ function drawDot(x, y, raggio)
 end
 
 function onExit()
+    
     if reaper.GetProjectName(0, "") ~= '' then
-        writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+        if PROJECT_NAME == reaper.GetProjectName(0, "") then
+            writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+        end
     end
 end
 
-if reaper.GetProjectName(0, "") ~= '' then
-    snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+function initMS()
+
+    PROJECT_NAME = reaper.GetProjectName(0, "")
+
+    snapshot_list = {}
+
+    if PROJECT_NAME ~= '' then
+        --name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
+        snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+    else
+        --name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
+    end
+    
+    if snapshot_list == nil then snapshot_list = {} end
+    
+    updateSnapshotIndexList()
 end
 
+initMS()
 
-if snapshot_list == nil then snapshot_list = {} end
-updateSnapshotIndexList()
 reaper.defer(loop)
+
 reaper.atexit(onExit)
