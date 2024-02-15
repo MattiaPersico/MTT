@@ -1,5 +1,10 @@
 -- Appunti:
-
+-- aggiungere menu dei settings
+-- inserire filtri esclusione parametri personalizzabili 
+-- inserire filtri esclusione tracce personalizzabili
+-- inserire filtri esclusione effetti personalizzabili
+-- salvare i filtri nel save file oppure in un foglio di salvataggio globale
+-- 
 -- Script Name and Version
 
 local major_version = 0
@@ -697,9 +702,9 @@ function mainWindow()
     
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(0.25, 0.25, 0.25, 2))
     reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 75)
-    reaper.ImGui_SetCursorPosX(ctx, 10)
-    reaper.ImGui_Text(ctx, "Right-Click: add snapshot of current FX values\nShift + Left-Click: remove clicked snapshot\nLeft-Click: select a snapshot and load its FX values\nLeft-Drag: interpolate")
+    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 90)
+    reaper.ImGui_SetCursorPosX(ctx, 9)
+    reaper.ImGui_Text(ctx, "Right-Click: add snapshot of current FX values\nShift + Left-Click: remove clicked snapshot\nLeft-Click: select a snapshot and load its FX values\nMouse-Wheel: adjust Smoothing\nLeft-Drag: interpolate")
     reaper.ImGui_SetCursorPosX(ctx, 8)
     reaper.ImGui_SetCursorPosY(ctx, 4)
     reaper.ImGui_Text(ctx,string.sub(reaper.GetProjectName(0, ""), 1, -5))
@@ -726,6 +731,12 @@ function mainWindow()
     end
 
     
+    if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
+        smoothing_fader_value = smoothing_fader_value + 0.02
+    elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
+        smoothing_fader_value = smoothing_fader_value - 0.02
+        if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
+    end
 
     reaper.ImGui_EndChild(ctx)
 end
