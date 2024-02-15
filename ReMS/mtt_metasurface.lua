@@ -15,6 +15,9 @@ local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_
 local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 
+local PREF_WINDOW_WIDTH = 200
+local PREF_WINDOW_HEIGHT = 400
+
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
 
@@ -27,6 +30,7 @@ local HEIGHT_OFFSET = 74
 local ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
 local ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
 
+local IGNORE_STRING = 'midi'
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
 local sizeConstraintsCallback = [=[
 a = 0
@@ -107,7 +111,11 @@ local needToInitSmoothing = true
 local CURRENT_DRAG_X = 0
 local CURRENT_DRAG_Y = 0
 
-is_name_edited = false
+local is_name_edited = false
+local preferencesWindowState = false
+
+local PROJECT_NAME = reaper.GetProjectName(0)
+local PROJECT_PATH = reaper.GetProjectPath(0)
 
 -- Funzione per scrivere l'array su un file
 function writeSnapshotsToFile(snapshots, filename)
@@ -241,13 +249,32 @@ function loop()
     ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
     ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
     
-    
+    main_window_x, main_window_y = reaper.ImGui_GetWindowPos(ctx)
+    main_window_w, main_window_h = reaper.ImGui_GetWindowSize(ctx)
   
   
     if mw_visible then
       mainWindow()
 
       reaper.ImGui_End(ctx)
+
+
+      pref_window_x = main_window_x + main_window_w
+      pref_window_y = main_window_y
+  
+      if preferencesWindowState then
+  
+        reaper.ImGui_SetNextWindowPos(ctx, pref_window_x, pref_window_y)
+        reaper.ImGui_SetNextWindowSize(ctx, PREF_WINDOW_WIDTH, PREF_WINDOW_HEIGHT)--, reaper.ImGui_Cond_FirstUseEver())
+  
+        local pw_visible, pw_open = reaper.ImGui_Begin(ctx, 'Preferences',false, reaper.ImGui_WindowFlags_NoResize() | reaper.ImGui_WindowFlags_NoCollapse())
+  
+        if pw_visible then
+          preferencesWindow()
+          reaper.ImGui_End(ctx)
+          
+        end
+      end
 
       reaper.ImGui_PopFont(ctx)
       reaper.ImGui_PopStyleColor(ctx)
@@ -286,12 +313,12 @@ function loop()
   
     end
 
-    if reaper.GetProjectPath() ~= PROJECT_NAME then
+    if reaper.GetProjectName(0) ~= PROJECT_NAME then
         onExit()
         initMS()
     end
 
-    if mw_open then
+    if mw_open and PROJECT_NAME ~= '' then
         reaper.defer(loop)
       end
 end
@@ -621,7 +648,7 @@ function saveSelected()
 
                         local retval, param_name = reaper.TrackFX_GetParamName(selected_track, f, p)
 
-                        if containsAnyFormOfMIDI(param_name) == false then
+                        if containsAnyFormOf(param_name, IGNORE_STRING) == false then
 
                             local val, min, max = reaper.TrackFX_GetParam(selected_track, f, p)
 
@@ -638,15 +665,15 @@ function saveSelected()
             end
 
             updateSnapshotIndexList()
-
         end
+        PROJECT_PATH = reaper.GetProjectPath(0)
 end
 
-function containsAnyFormOfMIDI(s)
+function containsAnyFormOf(s, ref_string)
     -- Rimuovi gli spazi per gestire concatenazioni come "NoteMidiCC"
     local compactS = s:gsub("%s+", ""):lower()
     -- Cerca "midi" in qualsiasi punto della stringa
-    return string.find(compactS, "midi") ~= nil
+    return string.find(compactS, ref_string) ~= nil
 end
 
 function mainWindow()
@@ -706,7 +733,7 @@ function mainWindow()
     
 
     if reaper.ImGui_Button(ctx, 'Preferences', 82, 30) then
-        reaper.ShowConsoleMsg('Prefs')
+        preferencesWindowState = not preferencesWindowState
     end
 
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
@@ -757,6 +784,22 @@ function mainWindow()
     reaper.ImGui_EndChild(ctx)
 end
 
+function preferencesWindow()
+    local rv, rs = reaper.ImGui_InputText(ctx, 'Ignore', IGNORE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+    if rv then IGNORE_STRING = rs end
+
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+
+
+end
+
 function drawCircle(x, y, raggio)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
     local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
@@ -782,8 +825,8 @@ end
 function onExit()
     
     if reaper.GetProjectName(0, "") ~= '' then
-        if PROJECT_NAME == reaper.GetProjectName(0, "") then
-            writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+        if PROJECT_NAME ~= '' then
+            writeSnapshotsToFile(snapshot_list, PROJECT_PATH .. '/ms_save')
         end
     end
 end
@@ -791,6 +834,9 @@ end
 function initMS()
 
     PROJECT_NAME = reaper.GetProjectName(0, "")
+    PROJECT_PATH = reaper.GetProjectPath(0)
+
+    if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Metasurface.', 'Metasurface Error', 0) return false end
 
     snapshot_list = {}
 
@@ -804,10 +850,13 @@ function initMS()
     if snapshot_list == nil then snapshot_list = {} end
     
     updateSnapshotIndexList()
+
+    return true
 end
 
-initMS()
 
-reaper.defer(loop)
+if initMS() then
+    reaper.defer(loop)
+end
 
 reaper.atexit(onExit)
