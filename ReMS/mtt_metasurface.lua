@@ -1,5 +1,4 @@
 -- Appunti:
--- aggiungere sistema per gestire situazione dove il progetto non é ancora stato salvato e quindi non ha directory e crea problemi con file salvataggio
 
 -- Script Name and Version
 
@@ -11,8 +10,8 @@ local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_
 local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 
-local MAIN_WINDOW_WIDTH = 400
-local MAIN_WINDOW_HEIGHT = 400
+local MAIN_WINDOW_WIDTH = 500
+local MAIN_WINDOW_HEIGHT = 500
 
 local WIDTH_OFFSET = 16
 local HEIGHT_OFFSET = 74
@@ -89,6 +88,16 @@ LAST_TOUCHED_BUTTON_INDEX = nil
 
 DRAG_X = 0
 DRAG_Y = 0
+
+-- Variabili per lo smoothing
+local smoothing = 5
+local smoothing_max_value = 20
+local smoothing_fader_value = 0.3
+local targetX, targetY = 0, 0 -- Coordinate target
+local lastUpdateTime = reaper.time_precise()
+local needToInitSmoothing = true
+local CURRENT_DRAG_X = 0
+local CURRENT_DRAG_Y = 0
 
 -- Funzione per scrivere l'array su un file
 function writeSnapshotsToFile(snapshots, filename)
@@ -209,15 +218,13 @@ function loop()
   
     reaper.ImGui_PushFont(ctx, comic_sans)
 
-    reaper.ImGui_SetNextWindowSizeConstraints(ctx, 400, 400, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
+    reaper.ImGui_SetNextWindowSizeConstraints(ctx, 500, 500, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
 
     local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, --reaper.ImGui_WindowFlags_NoResize() |  
                                                                      reaper.ImGui_WindowFlags_NoCollapse()
                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()  
                                                                     )
-  
-    
     
 
     MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT = reaper.ImGui_GetWindowSize(ctx)
@@ -427,10 +434,49 @@ function inverseDistanceWeighting(points, x, y, power)
     return numerator / denominator
 end
 
+function initSmoothing(x, y)
+    CURRENT_DRAG_X, CURRENT_DRAG_Y = x, y -- Imposta le coordinate iniziali
+    targetX, targetY = x, y -- Sincronizza il target con la posizione iniziale
+    lastUpdateTime = reaper.time_precise()
+    needToInitSmoothing = false
+end
+
+function updateSmoothingTarget(x, y)
+    targetX, targetY = x, y -- Aggiorna il target con le nuove coordinate
+end
+
+function updateSmoothingPosition()
+    local currentTime = reaper.time_precise()
+    local deltaTime = currentTime - lastUpdateTime
+    local smooth_multiplier
+
+    if smoothing > 0 then smooth_multiplier = smoothing else smooth_multiplier = 0.3 end
+
+    
+    local smoothingFactor = deltaTime * smooth_multiplier -- Regola questo valore per modificare la "velocità" di smoothing
+
+    CURRENT_DRAG_X = CURRENT_DRAG_X + (targetX - CURRENT_DRAG_X) * smoothingFactor
+    CURRENT_DRAG_Y = CURRENT_DRAG_Y + (targetY - CURRENT_DRAG_Y) * smoothingFactor
+
+    lastUpdateTime = currentTime
+end
+
+function windowToScreenCoordinates(xRelativo, yRelativo)
+    -- Ottieni la posizione della finestra ImGui
+    local posXFinestra, posYFinestra = reaper.ImGui_GetWindowPos(ctx)
+
+    -- Calcola le coordinate assolute aggiungendo le coordinate relative della finestra
+    local xSchermo = posXFinestra + xRelativo
+    local ySchermo = posYFinestra + yRelativo
+
+    return xSchermo, ySchermo
+end
+
 function onDragLeftMouse()
     local isDragging = reaper.ImGui_IsMouseDragging(ctx, 0)
-
+    
     if isDragging then
+        reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
         local normalizedX, normalizedY = GetNormalizedMousePosition()
 
@@ -439,8 +485,25 @@ function onDragLeftMouse()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        reaper.ImGui_SetCursorPos(ctx, DRAG_X - 12, DRAG_Y - 12)
-        reaper.ImGui_Bullet(ctx)
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 4)
+        drawDot(dot_x,dot_y, 2)
+        --reaper.ImGui_SetCursorPos(ctx, DRAG_X - 12, DRAG_Y - 12)
+        --reaper.ImGui_Bullet(ctx)
 
         -- Calcola i valori interpolati solo per gli indici dei parametri diversi
         for i, snap in ipairs(snapshot_list) do
@@ -459,7 +522,7 @@ function onDragLeftMouse()
                 end
 
                 -- Applica l'IDW per calcolare il valore interpolato basato sulla posizione del mouse
-                local interpolated_value = inverseDistanceWeighting(points, DRAG_X, DRAG_Y, 2) -- power = 2 come esempio
+                local interpolated_value = inverseDistanceWeighting(points, CURRENT_DRAG_X, CURRENT_DRAG_Y, 2) -- power = 2 come esempio
 
                 -- Applica il valore interpolato direttamente all'effetto sulla traccia corrispondente
                 local track = reaper.BR_GetMediaTrackByGUID(0, snap.track_GUID_list[j])
@@ -475,6 +538,9 @@ function onDragLeftMouse()
                 end
             end
         end
+    else
+        needToInitSmoothing = true
+        reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Arrow())
     end
 end
 
@@ -567,30 +633,40 @@ end
 
 function mainWindow()
     
-    if reaper.ImGui_Button(ctx, 'Save Snapshot', 110, 30) then
+    if reaper.ImGui_Button(ctx, 'Save Selected', 100, 30) then
         saveSelected()
     end
 
     reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, 'Clear Snapshots', 110, 30) then
+    if reaper.ImGui_Button(ctx, 'Clear', 45, 30) then
         for k in pairs (snapshot_list) do
             snapshot_list [k] = nil
             snapshot_index_list [k] = nil
         end
 
         LAST_TOUCHED_BUTTON_INDEX = nil
-
-        --os.remove(reaper.GetProjectPath() .. '/ms_save')
     end
+
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
+    reaper.ImGui_Text(ctx, 'Smoothing')
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 40)
+    local retval = false
+    retval, smoothing_fader_value = reaper.ImGui_DragDouble(ctx, '##SmoothingValue', smoothing_fader_value, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
+    smoothing = (1 - smoothing_fader_value) * smoothing_max_value
+   
+
     
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 60)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
     reaper.ImGui_Text(ctx, 'Name:')
 
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
-        reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110)
+        reaper.ImGui_SetNextItemWidth(ctx, MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85)
         rv, snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name = reaper.ImGui_InputText(ctx, '##ti'.. tostring(LAST_TOUCHED_BUTTON_INDEX), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].name)
         is_name_edited = reaper.ImGui_IsItemFocused(ctx)
     end
@@ -627,14 +703,42 @@ function mainWindow()
         end
     end
 
+    
+
     reaper.ImGui_EndChild(ctx)
 end
 
-function onExit()
-    writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+function drawCircle(x, y, raggio)
+    -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
+    local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
+    
+    -- Definisce il colore verde nel formato RGBA (R, G, B, A)
+    local coloreVerde = reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1) -- Verde puro con opacità completa
+    
+    -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
+    reaper.ImGui_DrawList_AddCircle(draw_list, x, y, raggio, coloreVerde, 0, 1)
 end
 
-snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+function drawDot(x, y, raggio)
+    -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
+    local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
+    
+    -- Definisce il colore verde nel formato RGBA (R, G, B, A)
+    local coloreVerde = reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1) -- Verde puro con opacità completa
+    
+    -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
+    reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, coloreVerde, 0)
+end
+
+function onExit()
+    if reaper.GetProjectName(0, "") ~= '' then
+        writeSnapshotsToFile(snapshot_list, reaper.GetProjectPath(0) .. '/ms_save')
+    end
+end
+
+if reaper.GetProjectName(0, "") ~= '' then
+    snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+end
 
 
 if snapshot_list == nil then snapshot_list = {} end
