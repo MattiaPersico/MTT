@@ -8,7 +8,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 5
+local minor_version = 6
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -824,11 +824,11 @@ end
 
 function onExit()
     
-    if reaper.GetProjectName(0, "") ~= '' then
+    --if reaper.GetProjectName(0, "") ~= '' then
         if PROJECT_NAME ~= '' then
             writeSnapshotsToFile(snapshot_list, PROJECT_PATH .. '/ms_save')
         end
-    end
+    --end
 end
 
 function initMS()
