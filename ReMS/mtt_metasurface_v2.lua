@@ -1,8 +1,5 @@
 -- Appunti:
 
--- RIADATTARE SALVATAGGIO E CARICAMENTO
--- ATTENZIONE RIAPRIRE QUESTA IN INIT A REWORK FINITO updateSnapshotIndexList() e writeSnapshotsToFile() in exit
-
 -- aggiungere menu dei settings
 -- inserire filtri esclusione parametri personalizzabili 
 -- inserire filtri esclusione tracce personalizzabili
@@ -12,12 +9,13 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 8
+local minor_version = 9
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
 local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
+local SAVE_PROJECT_COMMAND = '40026'
 
 local PREF_WINDOW_WIDTH = 200
 local PREF_WINDOW_HEIGHT = 400
@@ -40,8 +38,6 @@ local sizeConstraintsCallback = [=[
 a = 0
 ]=]
 
-local focused_window = reaper.JS_Window_GetFocus()
-
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
@@ -56,16 +52,19 @@ local grouped_parameters = {}
 local points_list = {}
 local snapshot_list = {}
 
+--local is_new_value,filename,sectionID,cmdID,mode,resolution,val,contextstr = reaper.get_action_context()
 
 local fx_snapshot = {
     guid = 0,
-    param_list = {}
+    param_list = {},
+    param_index_list = {}
 }
 
 function fx_snapshot:new(guid)
     local instance = setmetatable({}, {__index = self})
     instance.param_list = {}
     instance.guid = guid or 0
+    instance.param_index_list = {}
     return instance
 end
 
@@ -98,7 +97,6 @@ function proj_snapshot:new(x, y, name)
     instance.assigned = false
     return instance
 end
-
 
 local parameter = {
     track = nil,
@@ -140,66 +138,67 @@ local preferencesWindowState = false
 local PROJECT_NAME = reaper.GetProjectName(0)
 local PROJECT_PATH = reaper.GetProjectPath(0)
 
--- Funzione per scrivere l'array su un file
-function writeSnapshotsToFile(snapshots, filename)
-    local file = io.open(filename, "w")
-    if not file then
-        error("Failed to open file for writing")
-    end
+local need_to_save = false
+local isDragging = false
+local quit = false
 
-    for _, snapshot in ipairs(snapshots) do
-        file:write(snapshot.x, "\n")
-        file:write(snapshot.y, "\n")
-        file:write(snapshot.name or "", "\n")
-        for i, value in ipairs(snapshot.param_value_list) do
-            file:write(value, ",", snapshot.param_index_list[i], ",", snapshot.track_GUID_list[i], ",", snapshot.fx_GUID_list[i], ",", (snapshot.fx_name[i] or ""), "\n")
+function serialize(obj)
+    local luaType = type(obj)
+    if luaType == "number" or luaType == "boolean" then
+        return tostring(obj)
+    elseif luaType == "string" then
+        return string.format("%q", obj)
+    elseif luaType == "table" then
+        local isList = true
+        local elements = {}
+        for k, v in pairs(obj) do
+            if type(k) ~= "number" then isList = false end -- Semplice verifica per distinguere le liste dalle mappe
+            local serializedValue = serialize(v)
+            if isList then
+                table.insert(elements, serializedValue)
+            else
+                local key = type(k) == "string" and string.format("%q", k) or tostring(k)
+                table.insert(elements, "[" .. key .. "] = " .. serializedValue)
+            end
         end
-        file:write("END_SNAPSHOT\n")
+        if isList then
+            return "{" .. table.concat(elements, ", ") .. "}"
+        else
+            return "{ " .. table.concat(elements, ", ") .. " }"
+        end
+    else
+        return "\"[unsupported type]\""
     end
+end
 
-    file:close()
+function saveToFile(filePath, data)
+    local file, err = io.open(filePath, "w") -- Apre il file in modalità scrittura
+    if not file then
+        error("Non è stato possibile aprire il file: " .. err)
+    end
+    file:write(data) -- Scrive i dati serializzati nel file
+    file:close() -- Chiude il file
+end
+
+function writeSnapshotsToFile(filename)
+    local data = serialize(snapshot_list)
+    saveToFile(filename, data)
 end
 
 function readSnapshotsFromFile(filename)
-    local file = io.open(filename, "r")
+    local file, err = io.open(filename, "r") -- Apre il file in modalità lettura
     if not file then
-        return nil -- oppure error("Failed to open file for reading")
+        return
     end
+    local dataString = file:read("*a") -- Legge tutto il contenuto del file come stringa
+    file:close() -- Chiude il file
 
-    local snapshots = {}
-    local snapshot = nil
-    local line = file:read("*line")
-
-    while line do
-        if line == "END_SNAPSHOT" then
-            if snapshot then
-                table.insert(snapshots, snapshot)
-                snapshot = nil
-            end
-        else
-            if not snapshot then
-                snapshot = {x = tonumber(line), y = tonumber(file:read("*line")), name = file:read("*line"),param_value_list = {}, param_index_list = {}, track_GUID_list = {}, fx_GUID_list = {}, fx_name = {}, assigned = false}
-                --snapshot.x = tonumber(line) -- Legge il valore di x
-                --snapshot.y = tonumber(file:read("*line")) -- Legge il valore di y sulla prossima riga
-                --snapshot.name = file:read("*line") -- Legge il nome sulla riga successiva
-            else
-                local value, pIndex, track_guid, fx_guid, fxName = line:match("^(.-)%,(.-)%,(.-)%,(.-)%,(.-)$")
-                if value and pIndex and track_guid and fx_guid and fxName then
-                    table.insert(snapshot.param_value_list, value)
-                    table.insert(snapshot.param_index_list, tonumber(pIndex))
-                    table.insert(snapshot.track_GUID_list, track_guid)
-                    table.insert(snapshot.fx_GUID_list, fx_guid)
-                    table.insert(snapshot.fx_name, fxName)
-                else
-                    error("Errore nel formato dei dati del parametro.")
-                end
-            end
-        end
-        line = file:read("*line")
+    local projects = load("return " .. dataString) -- Deserializza la stringa in dati Lua
+    if projects then
+        return projects() -- Esegue la funzione deserializzata per ottenere i dati
+    else
+        error("Errore durante la deserializzazione dei dati")
     end
-
-    file:close()
-    return snapshots
 end
 
 function GetNormalizedMousePosition()
@@ -209,8 +208,8 @@ function GetNormalizedMousePosition()
     return normalizedX, normalizedY
 end
 
-function loop()
-  
+function gui_loop()
+
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.1, 0.1, 0.1, 1))
   
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), reaper.ImGui_ColorConvertDouble4ToU32(0.45, 0.45, 0.45, 2)) 
@@ -336,14 +335,32 @@ function loop()
   
     end
 
-    if reaper.GetProjectName(0) ~= PROJECT_NAME then
-        onExit()
-        initMS()
+    if mw_open and PROJECT_NAME ~= '' and quit == false then
+        reaper.defer(loop)
     end
 
-    if mw_open and PROJECT_NAME ~= '' then
-        reaper.defer(loop)
-      end
+end
+
+function loop()
+    
+    --reaper.ShowConsoleMsg(contextstr .. '\n')
+
+    gui_loop()
+    
+    if not isDragging then
+        if reaper.GetProjectName(0) ~= PROJECT_NAME then
+            onExit()
+            initMS()
+        end
+
+        if reaper.IsProjectDirty(0) == 1 then need_to_save = true end
+
+        if reaper.IsProjectDirty(0) == 0 and need_to_save == true then
+            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            need_to_save = false
+        end
+    end
+
 end
 
 function GetMouseClickPositionInWindow(ctx, button)
@@ -547,7 +564,7 @@ function windowToScreenCoordinates(xRelativo, yRelativo)
 end
 
 function onDragLeftMouse()
-    local isDragging = reaper.ImGui_IsMouseDragging(ctx, 0)
+    isDragging = reaper.ImGui_IsMouseDragging(ctx, 0)
     
     if isDragging then
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
@@ -587,7 +604,7 @@ function onDragLeftMouse()
         
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index - 1, interpolatedValue)
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
         end
     else
@@ -626,7 +643,7 @@ function updateSnapshotIndexList()
                                         if fx_index_retval then
                                             local parameter_index = fx_parameter_indexes[p]
 
-                                            local new_parameter = parameter:new(track, fx, parameter_index, snapshot_list[s1].track_list[t].fx_list[f].param_list[parameter_index], s1)
+                                            local new_parameter = parameter:new(track, fx, snapshot_list[s1].track_list[t].fx_list[f].param_index_list[parameter_index], snapshot_list[s1].track_list[t].fx_list[f].param_list[parameter_index], s1)
                                             --reaper.ShowConsoleMsg(tostring(param_value) .. '\n')
                                             table.insert(parameters_to_be_updated, new_parameter)
                                         end
@@ -710,9 +727,13 @@ function saveSelected()
                 table.insert(snapshot_list[s].track_list[i+1].fx_list, new_fx_snapshot)
 
                 for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) do
-                    local retval, minval, maxval
-                    retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
-                    table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
+                    local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
+                    if not containsAnyFormOf(p_name, IGNORE_STRING) then
+                        local retval, minval, maxval
+                        retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
+                        table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
+                        table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_index_list, z)
+                    end
                     --local retnameval, name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
                     --reaper.MB(tostring(retval), name, 0)
                 end
@@ -725,8 +746,9 @@ function saveSelected()
 
         updateSnapshotIndexList()
     end
-    printProjectSnapshotOnFile()
-    printSnapIndexListOnFile()
+
+    reaper.MarkProjectDirty(0)
+
     PROJECT_PATH = reaper.GetProjectPath(0)
 end
 
@@ -773,10 +795,12 @@ function checkIfSameFxExists(fx, fx_list)
 end
 
 function containsAnyFormOf(s, ref_string)
-    -- Rimuovi gli spazi per gestire concatenazioni come "NoteMidiCC"
+    -- Rimuovi gli spazi per gestire concatenazioni come "NoteMidiCC" e converti in minuscolo
     local compactS = s:gsub("%s+", ""):lower()
-    -- Cerca "midi" in qualsiasi punto della stringa
-    return string.find(compactS, ref_string) ~= nil
+    local compactRef = ref_string:lower() -- Assicura che anche la stringa di riferimento sia in minuscolo
+    
+    -- Cerca la stringa di riferimento in qualsiasi punto della stringa
+    return string.find(compactS, compactRef) ~= nil
 end
 
 function mainWindow()
@@ -866,8 +890,6 @@ function mainWindow()
         onDragLeftMouse()
     end
 
-    --if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) then  is_name_edited = false reaper.ShowConsoleMsg('enter') end
-
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
 
         if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
@@ -876,8 +898,15 @@ function mainWindow()
             reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_COMMAND), 0)
         end
     end
-
     
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+        reaper.Main_OnCommand(reaper.NamedCommandLookup(SAVE_PROJECT_COMMAND), 0)
+    end
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
+        quit = true
+    end
+
     if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
         smoothing_fader_value = smoothing_fader_value + 0.02
     elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
@@ -930,7 +959,7 @@ function onExit()
     
     --if reaper.GetProjectName(0, "") ~= '' then
         if PROJECT_NAME ~= '' then
-            --writeSnapshotsToFile(snapshot_list, PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
         end
     --end
 end
@@ -951,7 +980,7 @@ function initMS()
     
     if snapshot_list == nil then snapshot_list = {} end
     
-    --updateSnapshotIndexList()
+    updateSnapshotIndexList()
 
     return true
 end
@@ -962,10 +991,8 @@ function getFxIndexByGUID(track, guid)
 
     if track then
         num_track_fx = reaper.TrackFX_GetCount(track)
-    --reaper.MB(guid,'guid', 0)
         for i = 0, num_track_fx - 1 do
             if guid == reaper.TrackFX_GetFXGUID(track, i) then
-                --reaper.MB('dioca', i, 0)
                 return true, i
             end
         end
@@ -1013,8 +1040,10 @@ function printSnapIndexListOnFile()
 end
 
 
+
 if initMS() then
     reaper.defer(loop)
 end
 
 reaper.atexit(onExit)
+
