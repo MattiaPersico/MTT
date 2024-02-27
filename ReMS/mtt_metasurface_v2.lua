@@ -9,7 +9,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 9
+local minor_version = 10
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -51,6 +51,13 @@ reaper.ImGui_Attach(ctx, comic_sans_smaller)
 local grouped_parameters = {}
 local points_list = {}
 local snapshot_list = {}
+local balls = {}
+
+local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.5,0.5, 1)
+local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.3,0.3, 1)
+
+local selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
+local selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
 
 --local is_new_value,filename,sectionID,cmdID,mode,resolution,val,contextstr = reaper.get_action_context()
 
@@ -139,7 +146,8 @@ local PROJECT_NAME = reaper.GetProjectName(0)
 local PROJECT_PATH = reaper.GetProjectPath(0)
 
 local need_to_save = false
-local isDragging = false
+local isInterpolating = false
+local DRAGGING_BALL = nil
 local quit = false
 
 function serialize(obj)
@@ -347,7 +355,7 @@ function loop()
 
     gui_loop()
     
-    if not isDragging then
+    if not isInterpolating then
         if reaper.GetProjectName(0) ~= PROJECT_NAME then
             onExit()
             initMS()
@@ -423,38 +431,92 @@ function onRightClick()
         snapshot_list[#snapshot_list + 1] = proj_snapshot:new(normalizedX, normalizedY)
         LAST_TOUCHED_BUTTON_INDEX = #snapshot_list
 
+        --local ball_x, ball_y = windowToScreenCoordinates((normalizedX * ACTION_WINDOW_WIDTH - 1), (normalizedY * ACTION_WINDOW_HEIGHT - 3))
+
+        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 7, color = ball_default_color, dragging = false })
+
         saveSelected()
     end
 end
 
+function isMouseOverBall(ball_x, ball_y, radius)
+    local mouse_x, mouse_y = reaper.ImGui_GetMousePos(ctx)
+    return ((mouse_x - ball_x) ^ 2 + (mouse_y - ball_y) ^ 2) <= radius ^ 2
+end
+
+function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
+end
+
 function drawSnapshots()
 
-    local num_selected_tracks = reaper.CountTracks(0)
-    
-    for s = #snapshot_list, 1, -1 do
-        -- Converti le coordinate normalizzate in coordinate assolute basate sulle dimensioni attuali della finestra
-        local absoluteX = snapshot_list[s].x * ACTION_WINDOW_WIDTH - 7
-        local absoluteY = snapshot_list[s].y * ACTION_WINDOW_HEIGHT - 9
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+    local window_x, window_y = reaper.ImGui_GetWindowPos(ctx)
+    local window_width, window_height = reaper.ImGui_GetWindowSize(ctx)
+    local mouse_x, mouse_y = reaper.ImGui_GetMousePos(ctx)
 
-        reaper.ImGui_SetCursorPos(ctx, absoluteX, absoluteY)
+    local mouse_x_rel = (mouse_x - window_x) / window_width
+    local mouse_y_rel = (mouse_y - window_y) / window_height
 
-        --local name = 'B'
-        if s == LAST_TOUCHED_BUTTON_INDEX or #snapshot_list == 1 then
-            --LAST_TOUCHED_BUTTON_INDEX = s
-            --name = 'S'
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.5, 0.0, 2))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.6, 0.0, 2))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.5, 0.0, 2))
+    for s, ball in ipairs(balls) do
+        
+        local ball_screen_pos_x = window_x + ball.pos_x * window_width
+        local ball_screen_pos_y = window_y + ball.pos_y * window_height
+
+        if s == LAST_TOUCHED_BUTTON_INDEX then
+            ball.color = selected_ball_default_color
         else
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.4, 0.4, 0.4, 2))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
+            ball.color = ball_default_color
         end
 
-        if reaper.ImGui_Button(ctx,  '##' .. tostring(s), 12, 12) then
-            
-            if not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
+        reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color)
+        
+        if snapshot_list[s] then
+            reaper.ImGui_SetNextItemWidth(ctx, 60)
+            if ball.pos_x * window_width > ((MAIN_WINDOW_WIDTH / 3) * 2) then
+                local str_len = string.len(snapshot_list[s].name)
+                local  w,  h = reaper.ImGui_CalcTextSize(ctx, snapshot_list[s].name, 60, 20)
+                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * window_width - 12 - w, ball.pos_y * window_height - 10)
+            else
+                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * window_width + 12, ball.pos_y * window_height - 10)
+            end
 
+            reaper.ImGui_Text(ctx, snapshot_list[s].name)
+        end
+
+        if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) or DRAGGING_BALL then
+            reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
+        end
+
+        -- DRAGGING
+        if DRAGGING_BALL == ball or (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating) then
+            if reaper.ImGui_IsMouseDown(ctx, 0) and not DRAGGING_BALL then
+
+                if s == LAST_TOUCHED_BUTTON_INDEX then
+                    ball.color = selected_ball_clicked_color
+                else
+                    ball.color = ball_clicked_color
+                end
+                
+                DRAGGING_BALL = ball
+                
+                ball.offset_x, ball.offset_y = mouse_x_rel - ball.pos_x, mouse_y_rel - ball.pos_y
+            end
+
+            if reaper.ImGui_IsMouseDragging(ctx, 0, 0.1) and DRAGGING_BALL == ball then
+                
+                ball.dragging = true
+                ball.pos_x = clamp(mouse_x_rel - ball.offset_x, 0, 1)
+                ball.pos_y = clamp(mouse_y_rel - ball.offset_y, 0, 1)
+                snapshot_list[s].x = ball.pos_x
+                snapshot_list[s].y = ball.pos_y
+
+            end
+        end
+
+        -- MOUSE RELEASE
+        if reaper.ImGui_IsMouseReleased(ctx, 0) and ball.dragging == false and not isInterpolating then
+            if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
                 LAST_TOUCHED_BUTTON_INDEX = s
 
                 for t = 1, #snapshot_list[s].track_list do
@@ -476,30 +538,37 @@ function drawSnapshots()
                         end
                     end
                 end
-            else
-                if LAST_TOUCHED_BUTTON_INDEX == #snapshot_list then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
-                table.remove(snapshot_list, s)
-                updateSnapshotIndexList()
             end
         end
-        
-        if snapshot_list[s] then
-            reaper.ImGui_SameLine(ctx)
-            reaper.ImGui_SetNextItemWidth(ctx, 60)
-            if reaper.ImGui_GetCursorPosX(ctx) > ((MAIN_WINDOW_WIDTH / 3) * 2) then
-                local str_len = string.len(snapshot_list[s].name)
-                local  w,  h = reaper.ImGui_CalcTextSize(ctx, snapshot_list[s].name, 60, 20)
-                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 25 - w, reaper.ImGui_GetCursorPosY(ctx) - 7)
-            else
-                reaper.ImGui_SetCursorPos(ctx, reaper.ImGui_GetCursorPosX(ctx)- 3, reaper.ImGui_GetCursorPosY(ctx) - 7)
-            end
 
-            reaper.ImGui_Text(ctx, snapshot_list[s].name)
+        if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
+
+            ball.dragging = false
+            DRAGGING_BALL = nil
+            
+            if s == LAST_TOUCHED_BUTTON_INDEX then
+                ball.color = selected_ball_default_color
+            else
+                ball.color = ball_default_color
+            end
         end
 
-        reaper.ImGui_PopStyleColor(ctx)
-        reaper.ImGui_PopStyleColor(ctx)
-        reaper.ImGui_PopStyleColor(ctx)
+        -- SHIFT-CLICK
+        if reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) and isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating then
+            if LAST_TOUCHED_BUTTON_INDEX == #snapshot_list then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
+            table.remove(snapshot_list, s)
+            table.remove(balls, s)
+            updateSnapshotIndexList()
+            break
+        end
+
+         -- RIGHT CLICK
+         if reaper.ImGui_IsMouseClicked(ctx, 0) then
+            if not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
+
+                
+            end
+        end
     end
 end
 
@@ -563,10 +632,21 @@ function windowToScreenCoordinates(xRelativo, yRelativo)
     return xSchermo, ySchermo
 end
 
+function screenToWindowCoordinates(xSchermo, ySchermo)
+    -- Ottieni la posizione della finestra ImGui
+    local posXFinestra, posYFinestra = reaper.ImGui_GetWindowPos(ctx)
+
+    -- Calcola le coordinate relative sottraendo la posizione della finestra dalle coordinate dello schermo
+    local xRelativo = xSchermo - posXFinestra
+    local yRelativo = ySchermo - posYFinestra
+
+    return xRelativo, yRelativo
+end
+
 function onDragLeftMouse()
-    isDragging = reaper.ImGui_IsMouseDragging(ctx, 0)
     
-    if isDragging then
+    if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL then
+        isInterpolating = true
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
         local normalizedX, normalizedY = GetNormalizedMousePosition()
@@ -590,6 +670,12 @@ function onDragLeftMouse()
             CURRENT_DRAG_Y = DRAG_Y
         end
 
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
@@ -608,8 +694,8 @@ function onDragLeftMouse()
             end
         end
     else
+        isInterpolating = false
         needToInitSmoothing = true
-        reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Arrow())
     end
 end
 
@@ -816,6 +902,7 @@ function mainWindow()
             snapshot_list = {}
             grouped_parameters = {}
             points_list = {}
+            balls = {}
         end
 
         LAST_TOUCHED_BUTTON_INDEX = nil
@@ -883,7 +970,6 @@ function mainWindow()
     reaper.ImGui_PopStyleColor(ctx)
 
     onRightClick()
-
     drawSnapshots()
 
     if reaper.ImGui_IsWindowHovered(ctx) then
@@ -964,6 +1050,22 @@ function onExit()
     --end
 end
 
+function initBalls()
+
+    balls = {}
+
+    for i = 1, #snapshot_list do
+        --reaper.ShowConsoleMsg('lamaladonna\n')
+        --local ball_x, ball_y = windowToScreenCoordinates((snapshot_list[i].x * ACTION_WINDOW_WIDTH - 1), (snapshot_list[i].y * ACTION_WINDOW_HEIGHT - 3))
+        table.insert(balls, { pos_x = snapshot_list[i].x, pos_y = snapshot_list[i].y, radius = 7, color = ball_default_color, dragging = false })
+        
+        --reaper.ShowConsoleMsg('ball_x: ' .. tostring(ACTION_WINDOW_WIDTH) .. '\n' .. 'ball_y: ' .. tostring(ACTION_WINDOW_HEIGHT) .. '\n')
+    end
+
+    return true
+
+end
+
 function initMS()
 
     PROJECT_NAME = reaper.GetProjectName(0, "")
@@ -979,7 +1081,8 @@ function initMS()
     end
     
     if snapshot_list == nil then snapshot_list = {} end
-    
+
+    initBalls()
     updateSnapshotIndexList()
 
     return true
