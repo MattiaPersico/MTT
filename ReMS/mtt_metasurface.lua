@@ -1,9 +1,11 @@
 -- Appunti:
 
+-- aggiungere supporto a fx dentro container
+
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 12
+local minor_version = 15
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -12,7 +14,7 @@ local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
 local PREF_WINDOW_WIDTH = 300
-local PREF_WINDOW_HEIGHT = 350
+local PREF_WINDOW_HEIGHT = 380
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -31,9 +33,27 @@ local IGNORE_PARAMS_POST_SAVE_STRING = ''
 local IGNORE_FXs_STRING = ''
 local IGNORE_TRACKS_STRING = ''
 
+local LINK_TO_CONTROLLER = false
+local CONTROL_TRACK = nil
+local CONTROL_FX_INDEX = nil
+
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
 local sizeConstraintsCallback = [=[
 a = 0
+]=]
+
+local CONTROLLER = [=[
+desc:mtt_metasurface_controller
+
+// Sliders
+slider1: 0.5 <0,1,0.0001>mtt_mc_x_pos
+slider2: 0.5 <0,1,0.0001>mtt_mc_y_pos
+// ... gli altri slider ...
+    
+@init
+    cursor_x = slider1 * gfx_w;
+    cursor_y = slider2 * gfx_h;
+
 ]=]
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
@@ -149,6 +169,7 @@ local need_to_save = false
 local isInterpolating = false
 local DRAGGING_BALL = nil
 local quit = false
+local PLAY_STATE = false
 
 
 function serializeSnapshots(obj)
@@ -189,6 +210,7 @@ function saveToFile(filePath, data)
     file:write("IGNORE_PARAMS_POST_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_POST_SAVE_STRING) .. "\n")
     file:write("IGNORE_FXs_STRING = " .. string.format("%q", IGNORE_FXs_STRING) .. "\n")
     file:write("IGNORE_TRACKS_STRING = " .. string.format("%q", IGNORE_TRACKS_STRING) .. "\n")
+    file:write("LINK_TO_CONTROLLER = " .. string.format("%q", LINK_TO_CONTROLLER) .. "\n")
     file:write(data) -- Scrive i dati serializzati nel file
     file:close() -- Chiude il file
 end
@@ -201,12 +223,13 @@ end
 function loadFromFile(filename)
     local file, err = io.open(filename, "r")
     if not file then
-        return
+        return nil, 'midi', '', '', '', false
     end
     local ignoreParamsPreSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
     local ignoreParamsPostSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
     local ignoreFxs = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
     local ignoreTracks = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+    local linkToController = file:read("*l")
     local dataString = file:read("*a") -- Legge il resto del file per i dati serializzati
     file:close()
 
@@ -230,18 +253,24 @@ function loadFromFile(filename)
         ignoreTracksString = load("return " .. ignoreTracksString)()
     end
 
+    local linkToControllerBool = linkToController:match("^LINK_TO_CONTROLLER = (.+)$")
+    if linkToControllerBool then
+        linkToControllerBool = load("return " .. linkToControllerBool)()
+    end
+
     local dataFunction = load("return " .. dataString)
     if not dataFunction then
         error("Errore durante la deserializzazione dei dati")
     end
     local data = dataFunction()
 
-    if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = '' end
+    if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = 'midi' end
     if not ignoreParamsPostSaveString then ignoreParamsPostSaveString = '' end
     if not ignoreFXsString then ignoreFXsString = '' end
     if not ignoreTracksString then ignoreTracksString = '' end
+    if not linkToControllerBool then linkToControllerBool = false end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString, linkToControllerBool
 end
 
 function GetNormalizedMousePosition()
@@ -563,9 +592,11 @@ function drawSnapshots()
                             for p = 1, #snapshot_list[s].track_list[t].fx_list[f].param_list do
 
                                 local param_value = snapshot_list[s].track_list[t].fx_list[f].param_list[p]
-
+                                
                                 if track then
+
                                     reaper.TrackFX_SetParam(track, fx_index, (p-1), param_value)
+
                                 end
                             end
                         end
@@ -678,7 +709,7 @@ end
 
 function onDragLeftMouse()
     
-    if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL then
+    if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
         isInterpolating = true
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
@@ -712,8 +743,75 @@ function onDragLeftMouse()
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 4)
-        drawDot(dot_x,dot_y, 2)
+        drawCircle(circle_x,circle_y, 4, reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1))
+        drawDot(dot_x,dot_y, 2, reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1))
+
+         for groupIndex, group in ipairs(grouped_parameters) do
+            local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
+        
+            -- Calcola il valore interpolato per questo gruppo di punti
+            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, 2) -- power = 2 come esempio
+        
+            -- Applica questo valore interpolato a tutti i parametri nel gruppo
+            for _, parameter in ipairs(group) do
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+            end
+        end
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function getControllerUpdate()
+
+    if not DRAGGING_BALL then
+        isInterpolating = true 
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = 0, 0
+
+        if reaper.ImGui_IsMouseDragging(ctx, 0) then
+            reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+            normalizedX, normalizedY = GetNormalizedMousePosition()
+            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
+            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
+        else
+            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+        end
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+                --reaper.ShowConsoleMsg('brodo' .. '\n')
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 4, reaper.ImGui_ColorConvertDouble4ToU32(1, 0, 0, 1))
+        drawDot(dot_x,dot_y, 2, reaper.ImGui_ColorConvertDouble4ToU32(1, 0, 0, 1))
 
          for groupIndex, group in ipairs(grouped_parameters) do
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
@@ -853,9 +951,10 @@ function saveSelected()
                 local new_fx_snapshot = fx_snapshot:new(reaper.TrackFX_GetFXGUID(current_track, j))
                 table.insert(snapshot_list[s].track_list[i+1].fx_list, new_fx_snapshot)
 
-                for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) do
+                for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) - 1 do
                     local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
-                    if not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING) then
+                    if not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_') then
+                        --reaper.ShowConsoleMsg(p_name .. '  gesucane\n')
                         local retval, minval, maxval
                         retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
                         table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
@@ -975,8 +1074,6 @@ function mainWindow()
     retval, smoothing_fader_value = reaper.ImGui_DragDouble(ctx, '##SmoothingValue', smoothing_fader_value, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
     smoothing = (1 - smoothing_fader_value) * smoothing_max_value
    
-
-    
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 60)
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
@@ -1030,8 +1127,32 @@ function mainWindow()
     onRightClick()
     drawSnapshots()
 
-    if reaper.ImGui_IsWindowHovered(ctx) then
+    if reaper.ImGui_IsWindowHovered(ctx) and LINK_TO_CONTROLLER == false then
         onDragLeftMouse()
+    end
+
+    if LINK_TO_CONTROLLER == true then
+        if reaper.GetPlayState() == 1 then
+            if PLAY_STATE == false then
+                CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+                needToInitSmoothing = true
+                updateSnapshotIndexList()
+                PLAY_STATE = true
+                --reaper.ShowConsoleMsg('PLAY\n')
+            end
+
+            getControllerUpdate()
+
+        end
+
+        if reaper.GetPlayState() == 0 then
+            if PLAY_STATE == true then
+                PLAY_STATE = false
+                isInterpolating = false
+                --reaper.ShowConsoleMsg('STOP\n')
+            end
+        end
+        
     end
 
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
@@ -1167,28 +1288,68 @@ function preferencesWindow()
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
 
+
+    local retval, link = reaper.ImGui_Checkbox(ctx, 'Link to Metasurface Controller', LINK_TO_CONTROLLER)
+    if retval then 
+        LINK_TO_CONTROLLER = link
+
+        if LINK_TO_CONTROLLER == true then
+            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+        end
+    end
+
 end
 
-function drawCircle(x, y, raggio)
-    -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
-    local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
-    
-    -- Definisce il colore verde nel formato RGBA (R, G, B, A)
-    local coloreVerde = reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1) -- Verde puro con opacità completa
-    
-    -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
-    reaper.ImGui_DrawList_AddCircle(draw_list, x, y, raggio, coloreVerde, 0, 1)
+function getControlTrack()
+
+    for t = 0, reaper.CountTracks(0) - 1 do
+        local current_track = reaper.GetTrack(0, t)
+        local retval, track_name = reaper.GetTrackName(current_track)
+        if retval then
+            if track_name == 'mtt_metasurface_controller' then
+                local n_fx = reaper.TrackFX_GetCount(current_track)
+                for f = 0, n_fx do
+                    
+                    local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
+                    
+                    if fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' then
+                        --reaper.ShowConsoleMsg('qui\n')
+                        --reaper.ShowConsoleMsg(fx_name .. '\n')
+                        return current_track, f
+                    end
+                end
+            end
+        end
+    end
+
+    reaper.InsertTrackAtIndex(reaper.CountTracks(0), 0)
+    local new_track = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+
+    local trackName = "mtt_metasurface_controller"
+    reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", trackName, true)
+
+    reaper.TrackFX_AddByName(new_track, 'JS: mtt_metasurface_controller', false, 1)
+
+    return new_track, 0
+
 end
 
-function drawDot(x, y, raggio)
+function drawCircle(x, y, raggio, color)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
     local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
-    
-    -- Definisce il colore verde nel formato RGBA (R, G, B, A)
-    local coloreVerde = reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1) -- Verde puro con opacità completa
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     
     -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
-    reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, coloreVerde, 0)
+    reaper.ImGui_DrawList_AddCircle(draw_list, x, y, raggio, color, 0, 1)
+end
+
+function drawDot(x, y, raggio, color)
+    -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
+    draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+    
+    -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
+    reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, color, 0)
 end
 
 function onExit()
@@ -1216,6 +1377,29 @@ function initBalls()
 
 end
 
+function ensureController(nomeFile, contenuto)
+    local path = string.match(nomeFile, "(.+)/[^/]*$")
+    if path then
+        -- Usa virgolette per gestire i percorsi con spazi su macOS
+        os.execute("mkdir -p \"" .. path .. "\"")
+        --reaper.ShowConsoleMsg("\"" .. path .. "\"")
+    end
+
+    local file = io.open(nomeFile, "r")
+
+    if file then
+        file:close()
+    else
+        file = io.open(nomeFile, "w")
+        if file then
+            file:write(contenuto)
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+end
+
 function initMS()
 
     PROJECT_NAME = reaper.GetProjectName(0, "")
@@ -1223,17 +1407,24 @@ function initMS()
 
     if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Metasurface.', 'Metasurface Error', 0) return false end
 
+    
+    ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_metasurface_controller', CONTROLLER)
+
     snapshot_list = {}
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_STRING, IGNORE_TRACKS_STRING = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_STRING, IGNORE_TRACKS_STRING, LINK_TO_CONTROLLER = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
 
     initBalls()
     updateSnapshotIndexList()
+
+    if LINK_TO_CONTROLLER == true then
+        CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+    end
 
     return true
 end
