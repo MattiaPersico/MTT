@@ -1,15 +1,9 @@
 -- Appunti:
 
--- aggiungere menu dei settings
--- inserire filtri esclusione parametri personalizzabili 
--- inserire filtri esclusione tracce personalizzabili
--- inserire filtri esclusione effetti personalizzabili
--- salvare i filtri nel save file oppure in un foglio di salvataggio globale
--- 
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 10
+local minor_version = 12
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -17,8 +11,8 @@ local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
-local PREF_WINDOW_WIDTH = 200
-local PREF_WINDOW_HEIGHT = 400
+local PREF_WINDOW_WIDTH = 300
+local PREF_WINDOW_HEIGHT = 350
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -32,7 +26,11 @@ local HEIGHT_OFFSET = 74
 local ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
 local ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
 
-local IGNORE_STRING = 'midi'
+local IGNORE_PARAMS_PRE_SAVE_STRING = 'midi'
+local IGNORE_PARAMS_POST_SAVE_STRING = ''
+local IGNORE_FXs_STRING = ''
+local IGNORE_TRACKS_STRING = ''
+
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
 local sizeConstraintsCallback = [=[
 a = 0
@@ -43,10 +41,12 @@ local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
 local comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
 local comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
+local new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
 
 reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
+reaper.ImGui_Attach(ctx, new_line_font)
 
 local grouped_parameters = {}
 local points_list = {}
@@ -150,7 +150,8 @@ local isInterpolating = false
 local DRAGGING_BALL = nil
 local quit = false
 
-function serialize(obj)
+
+function serializeSnapshots(obj)
     local luaType = type(obj)
     if luaType == "number" or luaType == "boolean" then
         return tostring(obj)
@@ -161,7 +162,7 @@ function serialize(obj)
         local elements = {}
         for k, v in pairs(obj) do
             if type(k) ~= "number" then isList = false end -- Semplice verifica per distinguere le liste dalle mappe
-            local serializedValue = serialize(v)
+            local serializedValue = serializeSnapshots(v)
             if isList then
                 table.insert(elements, serializedValue)
             else
@@ -184,29 +185,63 @@ function saveToFile(filePath, data)
     if not file then
         error("Non è stato possibile aprire il file: " .. err)
     end
+    file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
+    file:write("IGNORE_PARAMS_POST_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_POST_SAVE_STRING) .. "\n")
+    file:write("IGNORE_FXs_STRING = " .. string.format("%q", IGNORE_FXs_STRING) .. "\n")
+    file:write("IGNORE_TRACKS_STRING = " .. string.format("%q", IGNORE_TRACKS_STRING) .. "\n")
     file:write(data) -- Scrive i dati serializzati nel file
     file:close() -- Chiude il file
 end
 
 function writeSnapshotsToFile(filename)
-    local data = serialize(snapshot_list)
+    local data = serializeSnapshots(snapshot_list)
     saveToFile(filename, data)
 end
 
-function readSnapshotsFromFile(filename)
-    local file, err = io.open(filename, "r") -- Apre il file in modalità lettura
+function loadFromFile(filename)
+    local file, err = io.open(filename, "r")
     if not file then
         return
     end
-    local dataString = file:read("*a") -- Legge tutto il contenuto del file come stringa
-    file:close() -- Chiude il file
+    local ignoreParamsPreSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+    local ignoreParamsPostSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+    local ignoreFxs = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+    local ignoreTracks = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+    local dataString = file:read("*a") -- Legge il resto del file per i dati serializzati
+    file:close()
 
-    local projects = load("return " .. dataString) -- Deserializza la stringa in dati Lua
-    if projects then
-        return projects() -- Esegue la funzione deserializzata per ottenere i dati
-    else
+    local ignoreParamsPreSaveString = ignoreParamsPreSave:match("^IGNORE_PARAMS_PRE_SAVE_STRING = (.+)$")
+    if ignoreParamsPreSaveString then
+        ignoreParamsPreSaveString = load("return " .. ignoreParamsPreSaveString)()
+    end
+
+    local ignoreParamsPostSaveString = ignoreParamsPostSave:match("^IGNORE_PARAMS_POST_SAVE_STRING = (.+)$")
+    if ignoreParamsPostSaveString then
+        ignoreParamsPostSaveString = load("return " .. ignoreParamsPostSaveString)()
+    end
+
+    local ignoreFXsString = ignoreFxs:match("^IGNORE_FXs_STRING = (.+)$")
+    if ignoreFXsString then
+        ignoreFXsString = load("return " .. ignoreFXsString)()
+    end
+
+    local ignoreTracksString = ignoreTracks:match("^IGNORE_TRACKS_STRING = (.+)$")
+    if ignoreTracksString then
+        ignoreTracksString = load("return " .. ignoreTracksString)()
+    end
+
+    local dataFunction = load("return " .. dataString)
+    if not dataFunction then
         error("Errore durante la deserializzazione dei dati")
     end
+    local data = dataFunction()
+
+    if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = '' end
+    if not ignoreParamsPostSaveString then ignoreParamsPostSaveString = '' end
+    if not ignoreFXsString then ignoreFXsString = '' end
+    if not ignoreTracksString then ignoreTracksString = '' end
+
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString
 end
 
 function GetNormalizedMousePosition()
@@ -351,8 +386,6 @@ end
 
 function loop()
     
-    --reaper.ShowConsoleMsg(contextstr .. '\n')
-
     gui_loop()
     
     if not isInterpolating then
@@ -716,7 +749,7 @@ function updateSnapshotIndexList()
 
                     for f = 1, #snapshot_list[s1].track_list[t].fx_list do
                         local retval, fx_list_index = checkIfSameFxExists(snapshot_list[s1].track_list[t].fx_list[f], snapshot_list[s2].track_list[track_list_index].fx_list)
-                        
+                            
                         if retval then
                             local retval, fx_parameter_indexes = checkIfParametersHaveDifferentValues(snapshot_list[s1].track_list[t].fx_list[f].param_list, snapshot_list[s2].track_list[track_list_index].fx_list[fx_list_index].param_list)
                             
@@ -724,14 +757,22 @@ function updateSnapshotIndexList()
                                 for p = 1, #fx_parameter_indexes do
 
                                     if track then
+                                        local retval, track_name = reaper.GetTrackName(track)
                                         local fx_index_retval, fx = getFxIndexByGUID(track, snapshot_list[s1].track_list[t].fx_list[f].guid)
 
                                         if fx_index_retval then
-                                            local parameter_index = fx_parameter_indexes[p]
 
-                                            local new_parameter = parameter:new(track, fx, snapshot_list[s1].track_list[t].fx_list[f].param_index_list[parameter_index], snapshot_list[s1].track_list[t].fx_list[f].param_list[parameter_index], s1)
-                                            --reaper.ShowConsoleMsg(tostring(param_value) .. '\n')
-                                            table.insert(parameters_to_be_updated, new_parameter)
+                                            local retval, fx_name = reaper.TrackFX_GetFXName(track, fx)
+                                            local retval, param_name = reaper.TrackFX_GetParamName(track, fx, fx_parameter_indexes[p] - 1)
+
+                                            if  not containsAnyFormOf(track_name, IGNORE_TRACKS_STRING) and
+                                                not containsAnyFormOf(fx_name, IGNORE_FXs_STRING) and
+                                                not containsAnyFormOf(param_name, IGNORE_PARAMS_POST_SAVE_STRING) then
+ 
+                                                local parameter_index = fx_parameter_indexes[p]
+                                                local new_parameter = parameter:new(track, fx, snapshot_list[s1].track_list[t].fx_list[f].param_index_list[parameter_index], snapshot_list[s1].track_list[t].fx_list[f].param_list[parameter_index], s1)
+                                                table.insert(parameters_to_be_updated, new_parameter)
+                                            end
                                         end
                                     end
                                 end
@@ -814,7 +855,7 @@ function saveSelected()
 
                 for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) do
                     local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
-                    if not containsAnyFormOf(p_name, IGNORE_STRING) then
+                    if not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING) then
                         local retval, minval, maxval
                         retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
                         table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
@@ -881,12 +922,29 @@ function checkIfSameFxExists(fx, fx_list)
 end
 
 function containsAnyFormOf(s, ref_string)
-    -- Rimuovi gli spazi per gestire concatenazioni come "NoteMidiCC" e converti in minuscolo
+    -- Prepara s rimuovendo gli spazi superflui e convertendola in minuscolo
     local compactS = s:gsub("%s+", ""):lower()
-    local compactRef = ref_string:lower() -- Assicura che anche la stringa di riferimento sia in minuscolo
-    
-    -- Cerca la stringa di riferimento in qualsiasi punto della stringa
-    return string.find(compactS, compactRef) ~= nil
+
+    -- Divide ref_string in base alle virgole, gestendo spazi
+    for segment in ref_string:gmatch("[^,]+") do
+        -- Rimuove gli spazi all'inizio e alla fine di ogni segmento e controlla per corrispondenze esatte o generiche
+        local word = segment:match("^%s*(.-)%s*$")
+        local exactMatch = word:match('^"(.*)"$')
+        
+        if exactMatch then
+            -- Se la parola chiave è tra virgolette, cerca corrispondenza esatta in s senza rimuovere gli spazi e convertendo in minuscolo
+            if s:lower() == exactMatch:lower() then
+                return true
+            end
+        else
+            -- Altrimenti, cerca la parola chiave in qualsiasi punto della stringa compactS
+            if string.find(compactS, word:lower()) then
+                return true
+            end
+        end
+    end
+
+    return false
 end
 
 function mainWindow()
@@ -1004,9 +1062,17 @@ function mainWindow()
 end
 
 function preferencesWindow()
-    local rv, rs = reaper.ImGui_InputText(ctx, 'Ignore', IGNORE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
-    if rv then IGNORE_STRING = rs end
+    -- IGNORE PARAMETERS (PRE-SAVE)
+    reaper.ImGui_Text(ctx, 'Ignore Parameters (pre-save)')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+
+    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreParamsPreSave', IGNORE_PARAMS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+    if rv then IGNORE_PARAMS_PRE_SAVE_STRING = rs end
 
     if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
         is_name_edited = false
@@ -1016,6 +1082,90 @@ function preferencesWindow()
         is_name_edited = true
     end
 
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+
+
+    -- IGNORE PARAMETERS (POST-SAVE)
+    reaper.ImGui_Text(ctx, 'Ignore Parameters (post-save)')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+
+    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreParamsPostSave', IGNORE_PARAMS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+    if rv then IGNORE_PARAMS_POST_SAVE_STRING = rs end
+
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+
+
+    -- IGNORE FX
+    reaper.ImGui_Text(ctx, 'Ignore Fx')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+    
+    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreFXs', IGNORE_FXs_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    
+    if rv then IGNORE_FXs_STRING = rs end
+    
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+    
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+    
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)    
+
+
+
+    -- IGNORE TRACKS
+    reaper.ImGui_Text(ctx, 'Ignore Tracks')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+    
+    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreTracks', IGNORE_TRACKS_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    
+    if rv then IGNORE_TRACKS_STRING = rs end
+    
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+    
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+    
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
 
 end
 
@@ -1076,8 +1226,8 @@ function initMS()
     snapshot_list = {}
 
     if PROJECT_NAME ~= '' then
-        --name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
-        snapshot_list = readSnapshotsFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_STRING, IGNORE_TRACKS_STRING = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
@@ -1141,8 +1291,6 @@ function printSnapIndexListOnFile()
     file:close()
 
 end
-
-
 
 if initMS() then
     reaper.defer(loop)
