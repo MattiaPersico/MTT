@@ -642,7 +642,7 @@ function drawSnapshots()
 
         -- SHIFT-CLICK
         if reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) and isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating then
-            if LAST_TOUCHED_BUTTON_INDEX == #snapshot_list then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
+            --if LAST_TOUCHED_BUTTON_INDEX == s then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
             table.remove(snapshot_list, s)
             table.remove(balls, s)
             updateSnapshotIndexList()
@@ -741,7 +741,6 @@ function onDragLeftMouse()
             if needToInitSmoothing == true then
                 initSmoothing(DRAG_X, DRAG_Y)
                 updateSnapshotIndexList()
-                --reaper.ShowConsoleMsg('brodo' .. '\n')
             end
 
             updateSmoothingTarget(DRAG_X, DRAG_Y)
@@ -808,7 +807,6 @@ function getControllerUpdate()
             if needToInitSmoothing == true then
                 initSmoothing(DRAG_X, DRAG_Y)
                 updateSnapshotIndexList()
-                --reaper.ShowConsoleMsg('brodo' .. '\n')
             end
 
             updateSmoothingTarget(DRAG_X, DRAG_Y)
@@ -849,7 +847,11 @@ end
 
 function updateSnapshotIndexList()
 
-    if #snapshot_list <= 1 then return end
+    if #snapshot_list <= 1 then
+        grouped_parameters = {}
+        points_list = {}
+        return
+    end
 
     local parameters_to_be_updated = {}
 
@@ -971,18 +973,13 @@ function saveSelected()
                 for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) - 1 do
                     local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
                     if not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_') then
-                        --reaper.ShowConsoleMsg(p_name .. '  gesucane\n')
                         local retval, minval, maxval
                         retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
                         table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
                         table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_index_list, z)
                     end
-                    --local retnameval, name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
-                    --reaper.MB(tostring(retval), name, 0)
                 end
-
             end
-
         end
 
         snapshot_list[s].assigned = true
@@ -1156,7 +1153,6 @@ function mainWindow()
                 needToInitSmoothing = true
                 updateSnapshotIndexList()
                 PLAY_STATE = true
-                --reaper.ShowConsoleMsg('PLAY\n')
             end
 
             getControllerUpdate()
@@ -1167,7 +1163,6 @@ function mainWindow()
             if PLAY_STATE == true then
                 PLAY_STATE = false
                 isInterpolating = false
-                --reaper.ShowConsoleMsg('STOP\n')
             end
         end
         
@@ -1356,8 +1351,6 @@ function getControlTrack()
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
                     if fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' then
-                        --reaper.ShowConsoleMsg('qui\n')
-                        --reaper.ShowConsoleMsg(fx_name .. '\n')
                         return current_track, f
                     end
                 end
@@ -1409,11 +1402,7 @@ function initBalls()
     balls = {}
 
     for i = 1, #snapshot_list do
-        --reaper.ShowConsoleMsg('lamaladonna\n')
-        --local ball_x, ball_y = windowToScreenCoordinates((snapshot_list[i].x * ACTION_WINDOW_WIDTH - 1), (snapshot_list[i].y * ACTION_WINDOW_HEIGHT - 3))
         table.insert(balls, { pos_x = snapshot_list[i].x, pos_y = snapshot_list[i].y, radius = 7, color = ball_default_color, dragging = false })
-        
-        --reaper.ShowConsoleMsg('ball_x: ' .. tostring(ACTION_WINDOW_WIDTH) .. '\n' .. 'ball_y: ' .. tostring(ACTION_WINDOW_HEIGHT) .. '\n')
     end
 
     return true
@@ -1425,7 +1414,6 @@ function ensureController(nomeFile, contenuto)
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
         os.execute("mkdir -p \"" .. path .. "\"")
-        --reaper.ShowConsoleMsg("\"" .. path .. "\"")
     end
 
     local file = io.open(nomeFile, "r")
