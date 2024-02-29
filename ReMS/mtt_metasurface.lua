@@ -13,8 +13,8 @@ local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
 local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
-local PREF_WINDOW_WIDTH = 300
-local PREF_WINDOW_HEIGHT = 380
+local PREF_WINDOW_WIDTH = 350
+local PREF_WINDOW_HEIGHT = 410
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -30,12 +30,45 @@ local ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
 
 local IGNORE_PARAMS_PRE_SAVE_STRING = 'midi'
 local IGNORE_PARAMS_POST_SAVE_STRING = ''
-local IGNORE_FXs_STRING = ''
-local IGNORE_TRACKS_STRING = ''
+local IGNORE_FXs_PRE_SAVE_STRING = ''
+local IGNORE_FXs_POST_SAVE_STRING = ''
+local IGNORE_TRACKS_PRE_SAVE_STRING = ''
+local IGNORE_TRACKS_POST_SAVE_STRING = ''
 
 local LINK_TO_CONTROLLER = false
 local CONTROL_TRACK = nil
 local CONTROL_FX_INDEX = nil
+
+function ensureGlobalSettings()
+    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
+    local path = string.match(nomeFile, "(.+)/[^/]*$")
+    if path then
+        -- Usa virgolette per gestire i percorsi con spazi su macOS
+        os.execute("mkdir -p \"" .. path .. "\"")
+    end
+
+    local file = io.open(nomeFile, "r")
+
+    if file then
+        file:close()
+    else
+        file = io.open(nomeFile, "w")
+        if file then
+
+            file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
+            file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
+            file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
+
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+
+    return nomeFile
+end
+
+local GLOBAL_SETTINGS = ensureGlobalSettings()
 
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
 local sizeConstraintsCallback = [=[
@@ -45,15 +78,12 @@ a = 0
 local CONTROLLER = [=[
 desc:mtt_metasurface_controller
 
-// Sliders
 slider1: 0.5 <0,1,0.0001>mtt_mc_x_pos
 slider2: 0.5 <0,1,0.0001>mtt_mc_y_pos
-// ... gli altri slider ...
     
 @init
     cursor_x = slider1 * gfx_w;
     cursor_y = slider2 * gfx_h;
-
 ]=]
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
@@ -203,16 +233,25 @@ end
 
 function saveToFile(filePath, data)
     local file, err = io.open(filePath, "w") -- Apre il file in modalità scrittura
-    if not file then
-        error("Non è stato possibile aprire il file: " .. err)
+    if file then
+
+        file:write("IGNORE_PARAMS_POST_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_POST_SAVE_STRING) .. "\n")
+        file:write("IGNORE_FXs_POST_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_POST_SAVE_STRING) .. "\n")
+        file:write("IGNORE_TRACKS_POST_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_POST_SAVE_STRING) .. "\n")
+        file:write("LINK_TO_CONTROLLER = " .. string.format("%q", LINK_TO_CONTROLLER) .. "\n")
+        file:write(data) -- Scrive i dati serializzati nel file
+        file:close() -- Chiude il file
     end
-    file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
-    file:write("IGNORE_PARAMS_POST_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_POST_SAVE_STRING) .. "\n")
-    file:write("IGNORE_FXs_STRING = " .. string.format("%q", IGNORE_FXs_STRING) .. "\n")
-    file:write("IGNORE_TRACKS_STRING = " .. string.format("%q", IGNORE_TRACKS_STRING) .. "\n")
-    file:write("LINK_TO_CONTROLLER = " .. string.format("%q", LINK_TO_CONTROLLER) .. "\n")
-    file:write(data) -- Scrive i dati serializzati nel file
-    file:close() -- Chiude il file
+
+    local file, err = io.open(GLOBAL_SETTINGS, "w") -- Apre il file in modalità scrittura
+    if file then
+        
+        file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
+        file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
+        file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
+        file:write(data) -- Scrive i dati serializzati nel file
+        file:close() -- Chiude il file
+    end
 end
 
 function writeSnapshotsToFile(filename)
@@ -221,56 +260,94 @@ function writeSnapshotsToFile(filename)
 end
 
 function loadFromFile(filename)
-    local file, err = io.open(filename, "r")
-    if not file then
-        return nil, 'midi', '', '', '', false
-    end
-    local ignoreParamsPreSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
-    local ignoreParamsPostSave = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
-    local ignoreFxs = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
-    local ignoreTracks = file:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
-    local linkToController = file:read("*l")
-    local dataString = file:read("*a") -- Legge il resto del file per i dati serializzati
-    file:close()
 
-    local ignoreParamsPreSaveString = ignoreParamsPreSave:match("^IGNORE_PARAMS_PRE_SAVE_STRING = (.+)$")
-    if ignoreParamsPreSaveString then
-        ignoreParamsPreSaveString = load("return " .. ignoreParamsPreSaveString)()
+    local ignoreParamsPostSaveString = 'midi'
+    local ignorePostSaveFxsString = ''
+    local ignorePostSaveTracksString = ''
+    local linkToControllerBool = false
+    local data = nil
+
+    local ignoreParamsPreSaveString = ''
+    local ignorePreSaveFxsString = ''
+    local ignorePreSaveTracksString = ''
+
+    local local_settings, err = io.open(filename, "r")
+    
+    if local_settings then
+        local ignoreParamsPostSave = local_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local ignorePostSaveFxs = local_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local ignorePostSaveTracks = local_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local linkToController = local_settings:read("*l")
+        
+
+         ignoreParamsPostSaveString = ignoreParamsPostSave:match("^IGNORE_PARAMS_POST_SAVE_STRING = (.+)$")
+        if ignoreParamsPostSaveString then
+            ignoreParamsPostSaveString = load("return " .. ignoreParamsPostSaveString)()
+        end
+
+         ignorePostSaveFxsString = ignorePostSaveFxs:match("^IGNORE_FXs_POST_SAVE_STRING = (.+)$")
+        if ignorePostSaveFxsString then
+            ignorePostSaveFxsString = load("return " .. ignorePostSaveFxsString)()
+        end
+
+         ignorePostSaveTracksString = ignorePostSaveTracks:match("^IGNORE_TRACKS_POST_SAVE_STRING = (.+)$")
+        if ignorePostSaveTracksString then
+            ignorePostSaveTracksString = load("return " .. ignorePostSaveTracksString)()
+        end
+
+         linkToControllerBool = linkToController:match("^LINK_TO_CONTROLLER = (.+)$")
+        if linkToControllerBool then
+            linkToControllerBool = load("return " .. linkToControllerBool)()
+        end
+
+        local dataString = local_settings:read("*a") -- Legge il resto del file per i dati serializzati
+
+        local dataFunction = load("return " .. dataString)
+
+        if not dataFunction then
+            local_settings:close()
+            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            loadFromFile(filename)
+        else
+            data = dataFunction()
+        end
+
+        local_settings:close()
     end
 
-    local ignoreParamsPostSaveString = ignoreParamsPostSave:match("^IGNORE_PARAMS_POST_SAVE_STRING = (.+)$")
-    if ignoreParamsPostSaveString then
-        ignoreParamsPostSaveString = load("return " .. ignoreParamsPostSaveString)()
+    local global_settings, err = io.open(GLOBAL_SETTINGS, "r")
+    if global_settings then
+        local ignoreParamsPreSave = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local ignorePreSaveFxs = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local ignorePreSaveTracks = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        
+        global_settings:close()
+    
+         ignoreParamsPreSaveString = ignoreParamsPreSave:match("^IGNORE_PARAMS_PRE_SAVE_STRING = (.+)$")
+        if ignoreParamsPreSaveString then
+            ignoreParamsPreSaveString = load("return " .. ignoreParamsPreSaveString)()
+        end
+    
+         ignorePreSaveFxsString = ignorePreSaveFxs:match("^IGNORE_FXs_PRE_SAVE_STRING = (.+)$")
+        if ignorePreSaveFxsString then
+            ignorePreSaveFxsString = load("return " .. ignorePreSaveFxsString)()
+        end
+    
+         ignorePreSaveTracksString = ignorePreSaveTracks:match("^IGNORE_TRACKS_PRE_SAVE_STRING = (.+)$")
+        if ignorePreSaveTracksString then
+            ignorePreSaveTracksString = load("return " .. ignorePreSaveTracksString)()
+        end
     end
-
-    local ignoreFXsString = ignoreFxs:match("^IGNORE_FXs_STRING = (.+)$")
-    if ignoreFXsString then
-        ignoreFXsString = load("return " .. ignoreFXsString)()
-    end
-
-    local ignoreTracksString = ignoreTracks:match("^IGNORE_TRACKS_STRING = (.+)$")
-    if ignoreTracksString then
-        ignoreTracksString = load("return " .. ignoreTracksString)()
-    end
-
-    local linkToControllerBool = linkToController:match("^LINK_TO_CONTROLLER = (.+)$")
-    if linkToControllerBool then
-        linkToControllerBool = load("return " .. linkToControllerBool)()
-    end
-
-    local dataFunction = load("return " .. dataString)
-    if not dataFunction then
-        error("Errore durante la deserializzazione dei dati")
-    end
-    local data = dataFunction()
 
     if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = 'midi' end
     if not ignoreParamsPostSaveString then ignoreParamsPostSaveString = '' end
-    if not ignoreFXsString then ignoreFXsString = '' end
-    if not ignoreTracksString then ignoreTracksString = '' end
+    if not ignorePreSaveFxsString then ignorePreSaveFxsString = '' end
+    if not ignorePostSaveFxsString then ignorePostSaveFxsString = '' end
+    if not ignorePreSaveTracksString then ignorePreSaveTracksString = '' end
+    if not ignorePostSaveTracksString then ignorePostSaveTracksString = '' end
     if not linkToControllerBool then linkToControllerBool = false end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString, linkToControllerBool
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
 end
 
 function GetNormalizedMousePosition()
@@ -882,8 +959,8 @@ function updateSnapshotIndexList()
                                             local retval, fx_name = reaper.TrackFX_GetFXName(track, fx)
                                             local retval, param_name = reaper.TrackFX_GetParamName(track, fx, fx_parameter_indexes[p] - 1)
 
-                                            if  not containsAnyFormOf(track_name, IGNORE_TRACKS_STRING) and
-                                                not containsAnyFormOf(fx_name, IGNORE_FXs_STRING) and
+                                            if  not containsAnyFormOf(track_name, IGNORE_TRACKS_POST_SAVE_STRING) and
+                                                not containsAnyFormOf(fx_name, IGNORE_FXs_POST_SAVE_STRING) and
                                                 not containsAnyFormOf(param_name, IGNORE_PARAMS_POST_SAVE_STRING) then
  
                                                 local parameter_index = fx_parameter_indexes[p]
@@ -972,7 +1049,13 @@ function saveSelected()
 
                 for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) - 1 do
                     local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
-                    if not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_') then
+                    local retval, t_name = reaper.GetTrackName(current_track)
+                    local retval, fx_name = reaper.TrackFX_GetFXName(current_track, current_fx_index)
+
+                    if  not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_') and
+                        not containsAnyFormOf(t_name, IGNORE_TRACKS_PRE_SAVE_STRING) and
+                        not containsAnyFormOf(fx_name, IGNORE_FXs_PRE_SAVE_STRING) then
+                    
                         local retval, minval, maxval
                         retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
                         table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
@@ -1035,6 +1118,9 @@ function checkIfSameFxExists(fx, fx_list)
 end
 
 function containsAnyFormOf(s, ref_string)
+
+    if not ref_string then return false end
+
     -- Prepara s rimuovendo gli spazi superflui e convertendola in minuscolo
     local compactS = s:gsub("%s+", ""):lower()
 
@@ -1198,13 +1284,14 @@ end
 function preferencesWindow()
 
     -- IGNORE PARAMETERS (PRE-SAVE)
-    reaper.ImGui_Text(ctx, 'Ignore Parameters (pre-save)')
+    reaper.ImGui_Text(ctx, 'Ignore Parameters')
+    --reaper.ImGui_Text(ctx, 'Pre Save')
     reaper.ImGui_PushFont(ctx, new_line_font)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
 
-    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreParamsPreSave', IGNORE_PARAMS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreParamsPreSave', IGNORE_PARAMS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
     if rv then IGNORE_PARAMS_PRE_SAVE_STRING = rs end
 
@@ -1216,21 +1303,21 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
+    --reaper.ImGui_PushFont(ctx, new_line_font)
+    --reaper.ImGui_NewLine(ctx)
+    --reaper.ImGui_NewLine(ctx)
+    --reaper.ImGui_NewLine(ctx)
+    --reaper.ImGui_PopFont(ctx)
 
 
     -- IGNORE PARAMETERS (POST-SAVE)
-    reaper.ImGui_Text(ctx, 'Ignore Parameters (post-save)')
+    --reaper.ImGui_Text(ctx, 'Post Save')
     reaper.ImGui_PushFont(ctx, new_line_font)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
 
-    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreParamsPostSave', IGNORE_PARAMS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreParamsPostSave', IGNORE_PARAMS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
     if rv then IGNORE_PARAMS_POST_SAVE_STRING = rs end
 
@@ -1249,16 +1336,82 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
 
 
-    -- IGNORE FX
+    -- IGNORE FX PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Fx')
     reaper.ImGui_PushFont(ctx, new_line_font)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
     
-    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreFXs', IGNORE_FXs_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreFXsPreSave', IGNORE_FXs_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
     
-    if rv then IGNORE_FXs_STRING = rs end
+    if rv then IGNORE_FXs_PRE_SAVE_STRING = rs end
+    
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+    
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+    
+    
+    -- IGNORE FX POST-SAVE
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
+        
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreFXsPostSave', IGNORE_FXs_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+        
+    if rv then IGNORE_FXs_POST_SAVE_STRING = rs end
+        
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+        
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+
+
+    -- IGNORE TRACKS PRE-SAVE
+    reaper.ImGui_Text(ctx, 'Ignore Tracks')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
+    
+    
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreTracksPreSave', IGNORE_TRACKS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    
+    if rv then IGNORE_TRACKS_PRE_SAVE_STRING = rs end
+    
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+    
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+    
+
+
+    -- IGNORE TRACKS POST-SAVE
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
+    
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreTracksPostSave', IGNORE_TRACKS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    
+    if rv then IGNORE_TRACKS_POST_SAVE_STRING = rs end
     
     if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
         is_name_edited = false
@@ -1273,33 +1426,6 @@ function preferencesWindow()
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)    
-
-
-
-    -- IGNORE TRACKS
-    reaper.ImGui_Text(ctx, 'Ignore Tracks')
-    reaper.ImGui_PushFont(ctx, new_line_font)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 20)
-    
-    local rv, rs = reaper.ImGui_InputText(ctx, '##IgnoreTracks', IGNORE_TRACKS_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
-    
-    if rv then IGNORE_TRACKS_STRING = rs end
-    
-    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
-        is_name_edited = false
-    end
-    
-    if reaper.ImGui_IsItemActivated(ctx) then
-        is_name_edited = true
-    end
-    
-    reaper.ImGui_PushFont(ctx, new_line_font)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_NewLine(ctx)
-    reaper.ImGui_PopFont(ctx)
 
 
     local retval, link = reaper.ImGui_Checkbox(ctx, 'Link to Metasurface Controller', LINK_TO_CONTROLLER)
@@ -1444,8 +1570,8 @@ function initMS()
     snapshot_list = {}
 
     if PROJECT_NAME ~= '' then
-        --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignoreFXsString, ignoreTracksString
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_STRING, IGNORE_TRACKS_STRING, LINK_TO_CONTROLLER = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
