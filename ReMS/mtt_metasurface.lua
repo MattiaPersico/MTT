@@ -1471,7 +1471,12 @@ function initMS()
         selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
         selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
 
+    else
+        selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
+        selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
     end
+
+    LAST_TOUCHED_BUTTON_INDEX = nil
 
     return true
 end
