@@ -5,7 +5,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 15
+local minor_version = 16
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -495,7 +495,11 @@ function onRightClick()
 
         --local ball_x, ball_y = windowToScreenCoordinates((normalizedX * ACTION_WINDOW_WIDTH - 1), (normalizedY * ACTION_WINDOW_HEIGHT - 3))
 
-        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 7, color = ball_default_color, dragging = false })
+        for i, ball in ipairs(balls) do
+            ball.color = ball_default_color
+        end
+
+        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 7, color = selected_ball_default_color, dragging = false })
 
         saveSelected()
     end
@@ -525,12 +529,6 @@ function drawSnapshots()
         local ball_screen_pos_x = window_x + ball.pos_x * window_width
         local ball_screen_pos_y = window_y + ball.pos_y * window_height
 
-        if s == LAST_TOUCHED_BUTTON_INDEX then
-            ball.color = selected_ball_default_color
-        else
-            ball.color = ball_default_color
-        end
-
         reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color)
         
         if snapshot_list[s] then
@@ -555,6 +553,10 @@ function drawSnapshots()
             if reaper.ImGui_IsMouseDown(ctx, 0) and not DRAGGING_BALL then
 
                 if s == LAST_TOUCHED_BUTTON_INDEX then
+                    for i, sball in ipairs(balls) do
+                        sball.color = ball_default_color
+                    end
+
                     ball.color = selected_ball_clicked_color
                 else
                     ball.color = ball_clicked_color
@@ -565,7 +567,7 @@ function drawSnapshots()
                 ball.offset_x, ball.offset_y = mouse_x_rel - ball.pos_x, mouse_y_rel - ball.pos_y
             end
 
-            if reaper.ImGui_IsMouseDragging(ctx, 0, 0.1) and DRAGGING_BALL == ball then
+            if reaper.ImGui_IsMouseDragging(ctx, 0, 0.2) and DRAGGING_BALL == ball then
                 
                 ball.dragging = true
                 ball.pos_x = clamp(mouse_x_rel - ball.offset_x, 0, 1)
@@ -577,44 +579,65 @@ function drawSnapshots()
         end
 
         -- MOUSE RELEASE
-        if reaper.ImGui_IsMouseReleased(ctx, 0) and ball.dragging == false and not isInterpolating then
-            if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
-                LAST_TOUCHED_BUTTON_INDEX = s
-
-                for t = 1, #snapshot_list[s].track_list do
-                    local track = getTrackByGUID(0, snapshot_list[s].track_list[t].guid)
-
-                    for f = 1, #snapshot_list[s].track_list[t].fx_list do
-                        --reaper.MB(snapshot_list[s].track_list[t].fx_list[f].guid, '', 0)
-                        local retval, fx_index = getFxIndexByGUID(track, snapshot_list[s].track_list[t].fx_list[f].guid)
-
-                        if retval then
-                            for p = 1, #snapshot_list[s].track_list[t].fx_list[f].param_list do
-
-                                local param_value = snapshot_list[s].track_list[t].fx_list[f].param_list[p]
-                                
-                                if track then
-
-                                    reaper.TrackFX_SetParam(track, fx_index, (p-1), param_value)
-
+        if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
+        
+            local ballUnderMouse = nil
+            local ballUnderMouseIndex = nil
+            for i, otherBall in ipairs(balls) do
+                if isMouseOverBall(window_x + otherBall.pos_x * window_width, window_y + otherBall.pos_y * window_height, otherBall.radius) then
+                    if i ~= s then
+                        ballUnderMouse = otherBall
+                        ballUnderMouseIndex = i
+                        break
+                    end
+                end
+            end
+        
+            -- Se esiste una ball sotto il mouse e il suo index è maggiore di quello della ball rilasciata, non fare nulla
+            if ballUnderMouse and ballUnderMouseIndex ~= s then
+                -- Qui puoi decidere di non fare nulla o gestire in modo specifico questa situazione
+            else
+                if ball.dragging == false then
+                    if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
+                        LAST_TOUCHED_BUTTON_INDEX = s
+        
+                        for t = 1, #snapshot_list[s].track_list do
+                            local track = getTrackByGUID(0, snapshot_list[s].track_list[t].guid)
+        
+                            for f = 1, #snapshot_list[s].track_list[t].fx_list do
+                                --reaper.MB(snapshot_list[s].track_list[t].fx_list[f].guid, '', 0)
+                                local retval, fx_index = getFxIndexByGUID(track, snapshot_list[s].track_list[t].fx_list[f].guid)
+        
+                                if retval then
+                                    for p = 1, #snapshot_list[s].track_list[t].fx_list[f].param_list do
+        
+                                        local param_value = snapshot_list[s].track_list[t].fx_list[f].param_list[p]
+                                        
+                                        if track then
+        
+                                            reaper.TrackFX_SetParam(track, fx_index, (p-1), param_value)
+        
+                                        end
+                                    end
                                 end
                             end
                         end
                     end
                 end
             end
-        end
-
-        if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
 
             ball.dragging = false
-            DRAGGING_BALL = nil
-            
-            if s == LAST_TOUCHED_BUTTON_INDEX then
-                ball.color = selected_ball_default_color
-            else
-                ball.color = ball_default_color
-            end
+                DRAGGING_BALL = nil
+
+                if s == LAST_TOUCHED_BUTTON_INDEX then
+                    for i, sball in ipairs(balls) do
+                        sball.color = ball_default_color
+                    end
+                    ball.color = selected_ball_default_color
+                else
+                    ball.color = ball_default_color
+                end
+
         end
 
         -- SHIFT-CLICK
@@ -625,15 +648,9 @@ function drawSnapshots()
             updateSnapshotIndexList()
             break
         end
-
-         -- RIGHT CLICK
-         if reaper.ImGui_IsMouseClicked(ctx, 0) then
-            if not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
-
-                
-            end
-        end
     end
+
+    
 end
 
 function inverseDistanceWeighting(points, x, y, power)
@@ -1108,7 +1125,8 @@ function mainWindow()
 
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
-                                                                                                    | reaper.ImGui_WindowFlags_NoScrollWithMouse())
+                                                                                                    | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+                                                                                                    | reaper.ImGui_WindowFlags_TopMost())
     
 
 
@@ -1295,6 +1313,31 @@ function preferencesWindow()
 
         if LINK_TO_CONTROLLER == true then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+
+            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
+            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
+
+            
+            for i, ball in ipairs(balls) do
+                 ball.color = ball_default_color
+
+                 if i == LAST_TOUCHED_BUTTON_INDEX then
+                    ball.color = selected_ball_default_color
+                 end
+            end
+
+        else
+
+            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
+            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
+
+            for i, ball in ipairs(balls) do
+                ball.color = ball_default_color
+
+                if i == LAST_TOUCHED_BUTTON_INDEX then
+                   ball.color = selected_ball_default_color
+                end
+           end
         end
     end
 
@@ -1424,6 +1467,10 @@ function initMS()
 
     if LINK_TO_CONTROLLER == true then
         CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+
+        selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
+        selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
+
     end
 
     return true
