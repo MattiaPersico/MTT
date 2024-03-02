@@ -1,11 +1,14 @@
 -- Appunti:
 
+-- assicurarsi che si veda bene il puntatore di interpolazione
+-- assicurarsi che si vedano le varie info su come funziona e il nome del progetto
+-- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
 
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 16
+local minor_version = 17
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -14,7 +17,7 @@ local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 410
+local PREF_WINDOW_HEIGHT = 360
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -38,6 +41,10 @@ local IGNORE_TRACKS_POST_SAVE_STRING = ''
 local LINK_TO_CONTROLLER = false
 local CONTROL_TRACK = nil
 local CONTROL_FX_INDEX = nil
+
+local main_window_width = MAIN_WINDOW_WIDTH -- current values during loop
+local main_window_height = MAIN_WINDOW_HEIGHT -- current values during loop
+
 
 function ensureGlobalSettings()
     nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
@@ -68,6 +75,8 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
+--if reaper.file_exists(reaper.GetResourcePath() .. "/MTT/ReMS/voronoi.lua") then reaper.ShowMessageBox('esiste', '', 0) end
+local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
 local GLOBAL_SETTINGS = ensureGlobalSettings()
 
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
@@ -86,6 +95,109 @@ slider2: 0.5 <0,1,0.0001>mtt_mc_y_pos
     cursor_y = slider2 * gfx_h;
 ]=]
 
+local save_icon_binary = 'iVBORw0KGgoAAAANSUhEUgAAAB8AAAAeCAYAAADU8sWcAAAAAXNSR0IArs4c6QAAAIRlWElmTU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEbAAUAAAABAAAAUgEoAAMAAAABAAIAAIdpAAQAAAABAAAAWgAAAAAAAABIAAAAAQAAAEgAAAABAAOgAQADAAAAAQABAACgAgAEAAAAAQAAAB+gAwAEAAAAAQAAAB4AAAAAvt2RRQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAVlpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IlhNUCBDb3JlIDYuMC4wIj4KICAgPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIKICAgICAgICAgICAgeG1sbnM6dGlmZj0iaHR0cDovL25zLmFkb2JlLmNvbS90aWZmLzEuMC8iPgogICAgICAgICA8dGlmZjpPcmllbnRhdGlvbj4xPC90aWZmOk9yaWVudGF0aW9uPgogICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KICAgPC9yZGY6UkRGPgo8L3g6eG1wbWV0YT4KGV7hBwAAAmVJREFUSA3lVztLA0EQnr0T0wTRQoIWFgFrwSgIooJYKFoZ7dR/oE3ER6NoZcTOf+CjirHVQgQVEcRYaBkIaGEINhLSRLisO4nZm93ceTGmELIQ7pvd2fl2Hnc7AWjUwdwcj6TT/QDGDAPeBwx6gUOrm64yz+BD6D5yYA8mt2K7nZ0PyjoRKsgXk0lfs79lW5BGhJ5JdGuBFgDby+eym/vd3XndgEKOxD5/yy0AD+mKf5NZQhxgUD+AQY2ix/UnRgYeEk5tUS7Ekhxz/B1qqcMLBXiJxeB+aREupyblPAU3C/OAPxwXE+OQOjqiywTz5ZW3tz4yAU22YMyIE8ocI3FifRU+np5tFQeUf39XZlPHJfLg3JwyLwTTYuaseMoClJ4Xq5qov8bjnsREXYF4AKcI6By256XXSRrJ3FxL/BPwtbc7LjtGADnIsMm19ziXShE1dzh0cOi6iAdQwq9x2OSaiYIlXlFtYEHVc8ic19NotbYal9w15zR0Y2fnVPTE1dZG44b9f3pumPIz75ljNwUvG7bn2IGQ4Q8GiVQbrLChcdjVLlofQTFapgkMDUM2mSyK1VZveW/5GRgeKcPik3FI0AnpOfZcdKErHIa2nh469SuMe7ump5U9Oodso0rNBLsT2jLZeKe/np5C5voK8KJx+t5T65hjDDV6jMTMkL6hmmXwwgBtKCU5rkbSmai4c1cQ13+w6F5HYI3aVY72mctuiG5TyQtVrh0XG8hNfb9Cjt0ldpniAFGhWHmn6ru9ZYtz2HHqXHGrEnZqq1QDRhhbH84g9Js/DVjVWFwGt05ojqn9xsZfGVrF0ppqd+IAAAAASUVORK5CYII='
+local cog_icon_binary = 'iVBORw0KGgoAAAANSUhEUgAAAB8AAAAeCAYAAADU8sWcAAAAAXNSR0IArs4c6QAAAIRlWElmTU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEbAAUAAAABAAAAUgEoAAMAAAABAAIAAIdpAAQAAAABAAAAWgAAAAAAAABIAAAAAQAAAEgAAAABAAOgAQADAAAAAQABAACgAgAEAAAAAQAAAB+gAwAEAAAAAQAAAB4AAAAAvt2RRQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAVlpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IlhNUCBDb3JlIDYuMC4wIj4KICAgPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIKICAgICAgICAgICAgeG1sbnM6dGlmZj0iaHR0cDovL25zLmFkb2JlLmNvbS90aWZmLzEuMC8iPgogICAgICAgICA8dGlmZjpPcmllbnRhdGlvbj4xPC90aWZmOk9yaWVudGF0aW9uPgogICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KICAgPC9yZGY6UkRGPgo8L3g6eG1wbWV0YT4KGV7hBwAAA2xJREFUSA3lV01IVFEUPm8mtIU/CVr+ZEL+RFKL8m8RCioIiW2sqEW5VagEf5AoSAqKDMuFBrXV6IeiFrm1hdJC01oISiMTkuFoCjaTixSm1/mevjv3XueNg9rKA8937j3fOd/ce86570q0W8VwWniLz1dE5DpnkFlIBp0kk/Y5YZV5g34x9rNJxqjbDL5+kJ4+qtilwQbya1NTsTFxCXeYtIVxbgm7FTVIZHSuLAfau3NzV/QACjmIY+MSPhKZBTpwe2NjjH/AKf0HuOSgWPHOE4PBLOBF3Za5oAty5Hh9q3XMhvFvr5cGL16wHujRidnaNjtbKGMFOYqLDVHl2DcwQKt+v/X4PgzI8SLp7qDhPi8D9tgDq6rtgfReGh8nz9MnlJB3hLLr6mhxZJjmhwYF4ufQEMVlZVFycQl5e3sp4PlKeQ0NlHTsuMDYis4hCq51bm4pXDsNX71CYmsNhpumHUt9S7b47Gwq6Xms2jHiNuxMTU2yDaFtd+hjrFiIEzEAkk3xEc7AqGdFiFwGSTq2mrCqaIWxlk8UeJFzJyxyLK8KuMT8fMqsOWO5zPS/J//ERMidd2BxZITSq6pCcw6aIznyjKqWiwsxQFz08JEIl1peTp+am8g/OSnmvj3ro+XpaUqrrCTk30kcyb/cvGG1ku6YWVOjT9FB3gWZ/M/CAn1/95bmuA3LXr7agLcnNs25Dfwfb0fyE3fv0aHaWtqbkqLwzvT3K2MMfnDeZYEPfBEjkjhuO3KFBwfIRFeXiIHiQo6x1RAQy1uOucOXLm+v4BAEgpPLajWpj0GmE66h+S+3WnJxsRhGUhy33XbCkam3mm0L++Yf6e1jnygkRI4bSBjBWS0k0mEj2QIej3BRFI0jRM5XHwW4PsBHIj4nhzKqq6ns+QvKb2pWihDFhTnYMk5XW3WSV18fLhQZJo3JBlFwuHPxV6dCNkLH16mku0dM4+TCAYI+huwvLRXFdbSxUeDCKeCQ50Mrp79v2MB3rs0FJ1dMYqL1pFVUbu6whgi6zCA4hChfjBbffAevvk1Yd1QxOjrTDlyXQ0orJ1pdDtziXlHyIoO3rlsXyHbdXyHH7RK3TP4BHQyMKgV6QG0c5M67H+7mCpyy7bLj2oXSdRZXH9OgAv0iIGMVndsJVY3iQo4j/dOg+O2qwT/WvyYZTab97wAAAABJRU5ErkJggg=='
+local bin_icon_binary = 'iVBORw0KGgoAAAANSUhEUgAAAB8AAAAeCAYAAADU8sWcAAAAAXNSR0IArs4c6QAAAIRlWElmTU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEbAAUAAAABAAAAUgEoAAMAAAABAAIAAIdpAAQAAAABAAAAWgAAAAAAAABIAAAAAQAAAEgAAAABAAOgAQADAAAAAQABAACgAgAEAAAAAQAAAB+gAwAEAAAAAQAAAB4AAAAAvt2RRQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAVlpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IlhNUCBDb3JlIDYuMC4wIj4KICAgPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIKICAgICAgICAgICAgeG1sbnM6dGlmZj0iaHR0cDovL25zLmFkb2JlLmNvbS90aWZmLzEuMC8iPgogICAgICAgICA8dGlmZjpPcmllbnRhdGlvbj4xPC90aWZmOk9yaWVudGF0aW9uPgogICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KICAgPC9yZGY6UkRGPgo8L3g6eG1wbWV0YT4KGV7hBwAAAlNJREFUSA3tl89LG0EUx7+zK/4AkYJijRRBROixJAYK3urFgpdae2jA/0BPKaWXKurFSE71T/CY2t6lV+lBrd56EMH20LVSVESIvzbTeStO3s6a3UQTEXQgyfs17zNvZrJ5Ae7rEKUKTztOErBGBGQfBOKQeFQq1mcXOFCxPyTEqi3d3Fxn56rPz5QAfHxzs6G+uWVaQdMqzmax1xFdQGRPjg4n53t7T8wEPjiBG5pblgGZMANvpos1tYB+cwEWT0oVVx9MBJlQRU1xFsm6cjpjAfFd2SK3+vfXL9haWPBy9YyOouvVsCdHvLmWLDznd4BVbo2UAybAr8VFuPm899rO5SKY2m27wn6jNSXUXSrerb5UjM+NiY/4t7JiWC/U0/19fHs5qH1tySSeTc9onQsmo1g5fZ1qPQyGPvN3zo6sNZvyZ2Mdmlms/DbIBkOfuWEPqD/nP2FvfR3Hu7uQrnp2sCFsG43t7WiNx/F0bJx5wsWyK3eWlpB3nACY0tNiyPdHxVQyyoYXzs8j8xbOziJjeEDZcD6pWvIDvFo7WVGeO7Lt1IHUehiMYuWq9Qlj201NYW7PFxUjJNZ4Eg2nnos7TDn2YsA0BfTYQHiMydBwoPBZZfM/N1n67lQKT4aGcFV1ZCNf99sUmxEQVTPhEkMP/QtDlrTzN6N+c99rb1UFkcnGHn/gKVnlwOnR4YTqrHznwoOvL3sN5KQ53wen7pK6TLWAjAoseQRmkhDdlRKzV3WuNMe37TzJRUNpvabWRwokKvnTQLeaLhedMW8Yef77Lf8Hv8e0J8p3FsoAAAAASUVORK5CYII='
+local link_icon_binary = 'iVBORw0KGgoAAAANSUhEUgAAAB8AAAAeCAYAAADU8sWcAAAAAXNSR0IArs4c6QAAAIRlWElmTU0AKgAAAAgABQESAAMAAAABAAEAAAEaAAUAAAABAAAASgEbAAUAAAABAAAAUgEoAAMAAAABAAIAAIdpAAQAAAABAAAAWgAAAAAAAABIAAAAAQAAAEgAAAABAAOgAQADAAAAAQABAACgAgAEAAAAAQAAAB+gAwAEAAAAAQAAAB4AAAAAvt2RRQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAVlpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IlhNUCBDb3JlIDYuMC4wIj4KICAgPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICAgICAgPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIKICAgICAgICAgICAgeG1sbnM6dGlmZj0iaHR0cDovL25zLmFkb2JlLmNvbS90aWZmLzEuMC8iPgogICAgICAgICA8dGlmZjpPcmllbnRhdGlvbj4xPC90aWZmOk9yaWVudGF0aW9uPgogICAgICA8L3JkZjpEZXNjcmlwdGlvbj4KICAgPC9yZGY6UkRGPgo8L3g6eG1wbWV0YT4KGV7hBwAAAvNJREFUSA3lVs9rU0EQ/jZPmksJTeshKf5AJClIBNsYEDyZczw1gl76H3gxvRVbrBZU0pN/gblUMD2ZmxJPIm3aKsRLG6RUheQQGwm9pPD63HnJ27dv+14rJu/UvezM7Ox8M7MzywBndTGvwHP1egoIZBmMm2CYgoERL12HnOEP190ywDY0Q3/7cnx8w3EuMcfAH9ZqwaHh0CIHzXE9TdL9H1IHWL5z0F54FYt1VAMOcAIODoc+AUZSVeyPZ5vcgduqAwHZKEU8eGBCMJI8qCcyFtEicnpjBvaZy/pNtYph8XrAOLol14AUeSDrIzA5oOlMu2d5QrsAN6taPvGBVjEEuNlOPgA6TFLLSuucoF36uPWtir1iEe2dHRy2WqbqWDKJyWdL4hoRX+bm8Htr05QNhcMIxeO4nM0inLju0FP/ChvcqYbdlRV8L7xWpKez5GRzbQ3N9XVcnZnBlfsPPC+5greqVROYaRqi6TQuZO6a0XhZmVyyM0FZ+lV6h3q5zG0UMJJIHM9Az5D95pLlvdWiyRHwtUe5E4GlayZJKac7kTtp3t4GfhRXVRXBu0ZO3tOiiOX1df4xmpWKLBL0+VQKNxafCv5iJoP6h/do17q2xIFEuEYunftKukZOqaOiobejFFpLjsySee0/SyXzKBSLe6nAFZzahMCpaPizgVIYmpjwNCIftLe3QcCNj2X+eTOz5eRzmRZ/+2y9wWHstfuGWq1gFo0tBcameJ9L1U1ncp8LXQ7s1mr5aERgukZOBqg/qU2oWqloOvv7wu5JRHB0FJTqS9lpzxaz7gsvZhuNlvoDWUoD2/mUk49EwpY9u9r56GMJ/dqZge4f3AMQ4DRz+QVq2VUxBDhwRN8an7l8W3yY0LtfZw9CgC9HoxXu2bJv0HyQlKcYwhHgxBwetOd5czreheT9L3OAXFDtOMBpuqQpkzvwgisO4gl0/kk9d5tcyRHRaqpX3YEyME2jj8GQ/Oc25O1EVU3FRW+splrFOZv8X4N/90UIdfDIAAAAAElFTkSuQmCC'
+
+function base64_decode(data)
+    local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    data = string.gsub(data, '[^'..b..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r,f='',(b:find(x)-1)
+        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c=0
+        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+        return string.char(c)
+    end))
+end
+
+function ensureIcons()
+    local saveIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/save_icon.png'
+
+    local path = string.match(saveIconFile, "(.+)/[^/]*$")
+    if path then
+        -- Usa virgolette per gestire i percorsi con spazi su macOS
+        os.execute("mkdir -p \"" .. path .. "\"")
+    end
+
+    local file = io.open(saveIconFile, "rb")
+
+    if file then
+        file:close()
+    else
+        file = io.open(saveIconFile, "wb")
+        if file then
+
+            file:write(base64_decode(save_icon_binary))
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+
+
+    local binIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/bin_icon.png'
+
+    local file = io.open(binIconFile, "rb")
+
+    if file then
+        file:close()
+    else
+        file = io.open(binIconFile, "wb")
+        if file then
+
+            file:write(base64_decode(bin_icon_binary))
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+
+    local cogIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/cog_icon.png'
+
+    local file = io.open(cogIconFile, "rb")
+
+    if file then
+        file:close()
+    else
+        file = io.open(cogIconFile, "wb")
+        if file then
+
+            file:write(base64_decode(cog_icon_binary))
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+
+    local linkIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/link_icon.png'
+
+    local file = io.open(linkIconFile, "rb")
+
+    if file then
+        file:close()
+    else
+        file = io.open(linkIconFile, "wb")
+        if file then
+
+            file:write(base64_decode(link_icon_binary))
+            file:close()
+        else
+            print("Errore nella creazione del file")
+        end
+    end
+
+    return reaper.ImGui_CreateImage(saveIconFile), reaper.ImGui_CreateImage(binIconFile), reaper.ImGui_CreateImage(cogIconFile), reaper.ImGui_CreateImage(linkIconFile)
+
+end
+
+local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
+
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
 local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
@@ -103,11 +215,11 @@ local points_list = {}
 local snapshot_list = {}
 local balls = {}
 
-local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.5,0.5, 1)
-local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.3,0.3, 1)
+local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.8,0.8,0.8, 1)
+local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.4,0.4,0.4, 1)
 
-local selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
-local selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
+local selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.8,0.0, 1)
+local selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.4,0.0, 1)
 
 --local is_new_value,filename,sectionID,cmdID,mode,resolution,val,contextstr = reaper.get_action_context()
 
@@ -142,6 +254,7 @@ local proj_snapshot = {
     y = 0,
     name,
     track_list = {},
+    color = reaper.ImGui_ColorConvertDouble4ToU32(0.5, 0.5, 0.5, 0.2),
     assigned = false
 }
 
@@ -151,6 +264,7 @@ function proj_snapshot:new(x, y, name)
     instance.y = y or 0
     instance.name = name
     instance.track_list = {}
+    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
     instance.assigned = false
     return instance
 end
@@ -201,6 +315,7 @@ local DRAGGING_BALL = nil
 local quit = false
 local PLAY_STATE = false
 
+local needToUpdateVoronoi = true
 
 function serializeSnapshots(obj)
     local luaType = type(obj)
@@ -421,7 +536,13 @@ function gui_loop()
     ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
     
     main_window_x, main_window_y = reaper.ImGui_GetWindowPos(ctx)
-    main_window_w, main_window_h = reaper.ImGui_GetWindowSize(ctx)
+    local tmp_main_window_w, tmp_main_window_h = reaper.ImGui_GetWindowSize(ctx)
+
+    if tmp_main_window_w ~= main_window_width then needToUpdateVoronoi = true end
+    if tmp_main_window_h ~= main_window_height then needToUpdateVoronoi = true end
+
+    main_window_w = tmp_main_window_w
+    main_window_h = tmp_main_window_h
   
   
     if mw_visible then
@@ -579,6 +700,8 @@ function onRightClick()
         table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 7, color = selected_ball_default_color, dragging = false })
 
         saveSelected()
+
+        needToUpdateVoronoi = true
     end
 end
 
@@ -606,7 +729,7 @@ function drawSnapshots()
         local ball_screen_pos_x = window_x + ball.pos_x * window_width
         local ball_screen_pos_y = window_y + ball.pos_y * window_height
 
-        reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color)
+        reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color, 4)
         
         if snapshot_list[s] then
             reaper.ImGui_SetNextItemWidth(ctx, 60)
@@ -651,6 +774,7 @@ function drawSnapshots()
                 ball.pos_y = clamp(mouse_y_rel - ball.offset_y, 0, 1)
                 snapshot_list[s].x = ball.pos_x
                 snapshot_list[s].y = ball.pos_y
+                needToUpdateVoronoi = true
 
             end
         end
@@ -689,10 +813,11 @@ function drawSnapshots()
                                     for p = 1, #snapshot_list[s].track_list[t].fx_list[f].param_list do
         
                                         local param_value = snapshot_list[s].track_list[t].fx_list[f].param_list[p]
+                                        local param_index = snapshot_list[s].track_list[t].fx_list[f].param_index_list[p]
                                         
                                         if track then
         
-                                            reaper.TrackFX_SetParam(track, fx_index, (p-1), param_value)
+                                            reaper.TrackFX_SetParam(track, fx_index, param_index, param_value)
         
                                         end
                                     end
@@ -719,10 +844,11 @@ function drawSnapshots()
 
         -- SHIFT-CLICK
         if reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) and isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating then
-            --if LAST_TOUCHED_BUTTON_INDEX == s then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
+            if LAST_TOUCHED_BUTTON_INDEX == s then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
             table.remove(snapshot_list, s)
             table.remove(balls, s)
             updateSnapshotIndexList()
+            needToUpdateVoronoi = true
             break
         end
     end
@@ -749,6 +875,64 @@ function inverseDistanceWeighting(points, x, y, power)
     end
 
     if denominator == 0 then return 0 end -- Evita la divisione per zero
+    return numerator / denominator
+end
+
+function simpleNaturalNeighborInterpolation(points, x, y, numNeighbors)
+    local closestPoints = {} -- Lista per tenere traccia dei punti più vicini
+    local numNeighbors = numNeighbors or 10 -- Numero di vicini da considerare
+    local distances = {} -- Lista per tenere traccia delle distanze
+
+    -- Trova le distanze di tutti i punti da (x, y) e le ordina
+    for _, point in ipairs(points) do
+        local dx = x - point.x
+        local dy = y - point.y
+        local distance = math.sqrt(dx^2 + dy^2)
+        table.insert(distances, {distance=distance, value=point.value})
+    end
+    -- Ordina le distanze
+    table.sort(distances, function(a, b) return a.distance < b.distance end)
+
+    -- Prendi i primi numNeighbors vicini più prossimi
+    for i = 1, numNeighbors do
+        if distances[i] then
+            table.insert(closestPoints, distances[i])
+        end
+    end
+
+    -- Calcolo dei pesi e dell'interpolazione
+    local numerator = 0
+    local denominator = 0
+    for _, cp in ipairs(closestPoints) do
+        local weight = 1 / cp.distance -- Qui si può modificare la funzione peso se necessario
+        numerator = numerator + (cp.value * weight)
+        denominator = denominator + weight
+    end
+
+    if denominator == 0 then return 0 end
+    return numerator / denominator
+end
+
+function radialBasisFunctionInterpolation(points, x, y, epsilon)
+    epsilon = epsilon or 0.00001 -- Parametro di forma della funzione radiale, regola la "larghezza" della funzione
+
+    local function gaussianRBF(distance)
+        return math.exp(-(distance^2) * epsilon)
+    end
+
+    local numerator = 0
+    local denominator = 0
+
+    for _, point in ipairs(points) do
+        local dx = x - point.x
+        local dy = y - point.y
+        local distance = math.sqrt(dx^2 + dy^2)
+        local weight = gaussianRBF(distance)
+        numerator = numerator + (point.value * weight)
+        denominator = denominator + weight
+    end
+
+    if denominator == 0 then return 0 end
     return numerator / denominator
 end
 
@@ -843,7 +1027,7 @@ function onDragLeftMouse()
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
         
             -- Calcola il valore interpolato per questo gruppo di punti
-            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, 2) -- power = 2 come esempio
+            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
         
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             for _, parameter in ipairs(group) do
@@ -864,6 +1048,10 @@ function getControllerUpdate()
         -- Ottieni la posizione normalizzata del mouse
         local normalizedX, normalizedY = 0, 0
 
+        if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
+            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+        end
+
         if reaper.ImGui_IsMouseDragging(ctx, 0) then
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
@@ -871,6 +1059,7 @@ function getControllerUpdate()
             reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
             reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
+            --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
             normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
             normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
         end
@@ -909,7 +1098,7 @@ function getControllerUpdate()
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
         
             -- Calcola il valore interpolato per questo gruppo di punti
-            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, 2) -- power = 2 come esempio
+            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
         
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             for _, parameter in ipairs(group) do
@@ -1147,14 +1336,15 @@ function containsAnyFormOf(s, ref_string)
 end
 
 function mainWindow()
-    
-    if reaper.ImGui_Button(ctx, 'Save Selected', 100, 30) then
+
+    if reaper.ImGui_ImageButton(ctx, 'Save Selected', save_icon, 20, 20 ) then
         saveSelected()
     end
 
     reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, 'Clear', 45, 30) then
+    
+    if reaper.ImGui_ImageButton(ctx, 'Clear', bin_icon, 20, 20 ) then
         for k in pairs (snapshot_list) do
             snapshot_list = {}
             grouped_parameters = {}
@@ -1166,20 +1356,21 @@ function mainWindow()
     end
 
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 10)
+    reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) + 3)
     reaper.ImGui_Text(ctx, 'Smoothing')
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 40)
     local retval = false
     retval, smoothing_fader_value = reaper.ImGui_DragDouble(ctx, '##SmoothingValue', smoothing_fader_value, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
     smoothing = (1 - smoothing_fader_value) * smoothing_max_value
-   
+    
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 60)
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
     reaper.ImGui_Text(ctx, 'Name:')
 
-    local textEditWidth = MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85 - 100
+    local textEditWidth = MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85 -- 100
 
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
@@ -1201,9 +1392,78 @@ function mainWindow()
         reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + textEditWidth + 18)
     end
     
+    reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, 'Preferences', 82, 30) then
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35)
+
+    if reaper.ImGui_ImageButton(ctx, 'Preferences', cog_icon, 20, 20 ) then
         preferencesWindowState = not preferencesWindowState
+    end
+
+    reaper.ImGui_SameLine(ctx)
+
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35)
+
+    local link_button_retval = false
+
+    if LINK_TO_CONTROLLER == true then
+        link_button_retval = reaper.ImGui_ImageButton(ctx, 'Link to Controller', link_icon, 20, 20, nil, nil, nil, nil, nil, nil)
+    else
+        link_button_retval = reaper.ImGui_ImageButton(ctx, 'Link to Controller', link_icon, 20, 20, nil, nil, nil, nil, nil, reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.5,0.5,0.5))
+    end
+
+    if link_button_retval then
+         
+        if LINK_TO_CONTROLLER == true then LINK_TO_CONTROLLER = false else LINK_TO_CONTROLLER = true end
+
+        if LINK_TO_CONTROLLER == true then
+            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+
+            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
+            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
+
+            
+            for i, ball in ipairs(balls) do
+                 ball.color = ball_default_color
+
+                 if i == LAST_TOUCHED_BUTTON_INDEX then
+                    ball.color = selected_ball_default_color
+                 end
+            end
+
+        else
+
+            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
+            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
+
+            for i, ball in ipairs(balls) do
+                ball.color = ball_default_color
+
+                if i == LAST_TOUCHED_BUTTON_INDEX then
+                   ball.color = selected_ball_default_color
+                end
+           end
+        end
+    end
+
+    if LAST_TOUCHED_BUTTON_INDEX then
+
+        reaper.ImGui_SameLine(ctx)
+
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35 - 35)
+
+        local flags =   reaper.ImGui_ColorEditFlags_NoDragDrop() | 
+                        reaper.ImGui_ColorEditFlags_NoInputs() | 
+                        reaper.ImGui_ColorEditFlags_NoLabel() | 
+                        reaper.ImGui_ColorEditFlags_NoOptions() |
+                        reaper.ImGui_ColorEditFlags_NoTooltip()
+
+        local retval, newcolor = reaper.ImGui_ColorEdit4(ctx, '##selected_snap_color', snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color, flags )
+
+        if retval then
+            snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color = newcolor
+        end
+
     end
 
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
@@ -1211,6 +1471,8 @@ function mainWindow()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()
                                                                                                     | reaper.ImGui_WindowFlags_TopMost())
     
+
+
 
 
     
@@ -1224,6 +1486,8 @@ function mainWindow()
     reaper.ImGui_Text(ctx,string.sub(reaper.GetProjectName(0, ""), 1, -5))
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_PopStyleColor(ctx)
+
+    drawVoronoi()
 
     onRightClick()
     drawSnapshots()
@@ -1277,8 +1541,85 @@ function mainWindow()
         smoothing_fader_value = smoothing_fader_value - 0.02
         if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
     end
-
+        
     reaper.ImGui_EndChild(ctx)
+    
+end
+
+function whichPointIsInThisPolygon(puntiPoligono, listaPunti) -- :)
+    local function puntoInterno(x, y, xp, yp)
+        local npol = #xp
+        local j = npol
+        local c = false
+        for i = 1, npol do
+            if (((yp[i] <= y) and (y < yp[j])) or ((yp[j] <= y) and (y < yp[i]))) and
+               (x < (xp[j] - xp[i]) * (y - yp[i]) / (yp[j] - yp[i]) + xp[i]) then
+                c = not c
+            end
+            j = i
+        end
+        return c
+    end
+
+    local xp = {}
+    local yp = {}
+    for i = 1, #puntiPoligono, 2 do
+        table.insert(xp, puntiPoligono[i])
+        table.insert(yp, puntiPoligono[i+1])
+    end
+
+    for i, punto in ipairs(listaPunti) do
+        if puntoInterno(punto.x, punto.y, xp, yp) then
+            return i -- Restituisce l'indice del primo punto interno
+        end
+    end
+
+    return nil -- Nessun punto trovato all'interno del poligono
+end
+
+function drawVoronoi()
+    
+    if #snapshot_list > 1 then
+
+        if needToUpdateVoronoi then
+
+            snapPointsForVoronoi = {}
+
+            for i = 1, #snapshot_list do
+                table.insert(snapPointsForVoronoi, {x = snapshot_list[i].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[i].y * reaper.ImGui_GetWindowHeight(ctx)})
+            end
+
+            ivoronoi = voronoilib:new(#snapshot_list,snapPointsForVoronoi,1,0,0,reaper.ImGui_GetWindowWidth(ctx),reaper.ImGui_GetWindowHeight(ctx))
+        end
+
+        for v = 1, #ivoronoi.polygons do
+            local verts_line = {}
+
+            for g = 1, #ivoronoi.polygons[v].points do
+                table.insert(verts_line, ivoronoi.polygons[v].points[g])
+            end
+
+            local polygon_verts = {}
+
+            for i = 1, #verts_line, 2 do
+                local x, y = windowToScreenCoordinates(verts_line[i], verts_line[i+1])
+                table.insert(polygon_verts, x)
+                table.insert(polygon_verts, y)
+            end
+
+            local snapIndex = whichPointIsInThisPolygon(verts_line,snapPointsForVoronoi) or v
+           
+            reaper.ImGui_DrawList_AddConvexPolyFilled(reaper.ImGui_GetWindowDrawList(ctx), reaper.new_array(polygon_verts, #polygon_verts), snapshot_list[snapIndex].color)
+        
+            for index,segment in pairs(ivoronoi.segments) do
+                local x1, y1 = windowToScreenCoordinates(segment.startPoint.x,segment.startPoint.y)
+                local x2, y2 = windowToScreenCoordinates(segment.endPoint.x,segment.endPoint.y)
+                drawLine(x1,y1,x2,y2, reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.0, 0.0, 1), 1)
+            end
+        end
+
+        needToUpdateVoronoi = false
+    end
 end
 
 function preferencesWindow()
@@ -1428,8 +1769,10 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)    
 
 
-    local retval, link = reaper.ImGui_Checkbox(ctx, 'Link to Metasurface Controller', LINK_TO_CONTROLLER)
-    if retval then 
+    --[[ local retval, link = reaper.ImGui_Checkbox(ctx, 'Link to Metasurface Controller', LINK_TO_CONTROLLER)
+    
+    if retval then
+
         LINK_TO_CONTROLLER = link
 
         if LINK_TO_CONTROLLER == true then
@@ -1460,7 +1803,7 @@ function preferencesWindow()
                 end
            end
         end
-    end
+    end ]]
 
 end
 
@@ -1498,7 +1841,6 @@ end
 
 function drawCircle(x, y, raggio, color)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
-    local draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
     local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     
     -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
@@ -1507,11 +1849,15 @@ end
 
 function drawDot(x, y, raggio, color)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
-    draw_list = reaper.ImGui_GetForegroundDrawList(ctx)
     local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     
     -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
     reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, color, 0)
+end
+
+function drawLine(x1, y1, x2, y2, color, thickness)
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+    reaper.ImGui_DrawList_AddLine(draw_list, x1, y1, x2, y2, color, thickness)
 end
 
 function onExit()
@@ -1591,6 +1937,8 @@ function initMS()
     end
 
     LAST_TOUCHED_BUTTON_INDEX = nil
+
+    needToUpdateVoronoi = true
 
     return true
 end
