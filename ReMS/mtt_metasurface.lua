@@ -8,7 +8,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 17
+local minor_version = 18
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -17,7 +17,7 @@ local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 360
+local PREF_WINDOW_HEIGHT = 400
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -42,6 +42,8 @@ local LINK_TO_CONTROLLER = false
 local CONTROL_TRACK = nil
 local CONTROL_FX_INDEX = nil
 
+local INTERPOLATION_MODE = 0
+
 local main_window_width = MAIN_WINDOW_WIDTH -- current values during loop
 local main_window_height = MAIN_WINDOW_HEIGHT -- current values during loop
 
@@ -65,6 +67,7 @@ function ensureGlobalSettings()
             file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
             file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
             file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
+            file:write("INTERPOLATION_MODE = " .. string.format("%q", INTERPOLATION_MODE) .. "\n")
 
             file:close()
         else
@@ -75,8 +78,9 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
---if reaper.file_exists(reaper.GetResourcePath() .. "/MTT/ReMS/voronoi.lua") then reaper.ShowMessageBox('esiste', '', 0) end
-local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
+
+--local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
+local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
 local GLOBAL_SETTINGS = ensureGlobalSettings()
 
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
@@ -364,7 +368,7 @@ function saveToFile(filePath, data)
         file:write("IGNORE_PARAMS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_PARAMS_PRE_SAVE_STRING) .. "\n")
         file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
         file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
-        file:write(data) -- Scrive i dati serializzati nel file
+        file:write("INTERPOLATION_MODE = " .. string.format("%q", INTERPOLATION_MODE) .. "\n")
         file:close() -- Chiude il file
     end
 end
@@ -385,6 +389,7 @@ function loadFromFile(filename)
     local ignoreParamsPreSaveString = ''
     local ignorePreSaveFxsString = ''
     local ignorePreSaveTracksString = ''
+    local interpolationModeInt = 0
 
     local local_settings, err = io.open(filename, "r")
     
@@ -435,6 +440,7 @@ function loadFromFile(filename)
         local ignoreParamsPreSave = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
         local ignorePreSaveFxs = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
         local ignorePreSaveTracks = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
+        local interpMode = global_settings:read("*l")
         
         global_settings:close()
     
@@ -452,6 +458,11 @@ function loadFromFile(filename)
         if ignorePreSaveTracksString then
             ignorePreSaveTracksString = load("return " .. ignorePreSaveTracksString)()
         end
+
+        interpolationModeInt = interpMode:match("^INTERPOLATION_MODE = (.+)$")
+        if interpolationModeInt then
+            interpolationModeInt = load("return " .. interpolationModeInt)()
+        end
     end
 
     if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = 'midi' end
@@ -461,8 +472,9 @@ function loadFromFile(filename)
     if not ignorePreSaveTracksString then ignorePreSaveTracksString = '' end
     if not ignorePostSaveTracksString then ignorePostSaveTracksString = '' end
     if not linkToControllerBool then linkToControllerBool = false end
+    if not interpolationModeInt then interpolationModeInt = 0 end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt
 end
 
 function GetNormalizedMousePosition()
@@ -878,58 +890,56 @@ function inverseDistanceWeighting(points, x, y, power)
     return numerator / denominator
 end
 
-function simpleNaturalNeighborInterpolation(points, x, y, numNeighbors)
-    local closestPoints = {} -- Lista per tenere traccia dei punti più vicini
-    local numNeighbors = numNeighbors or 10 -- Numero di vicini da considerare
-    local distances = {} -- Lista per tenere traccia delle distanze
-
-    -- Trova le distanze di tutti i punti da (x, y) e le ordina
-    for _, point in ipairs(points) do
-        local dx = x - point.x
-        local dy = y - point.y
-        local distance = math.sqrt(dx^2 + dy^2)
-        table.insert(distances, {distance=distance, value=point.value})
-    end
-    -- Ordina le distanze
-    table.sort(distances, function(a, b) return a.distance < b.distance end)
-
-    -- Prendi i primi numNeighbors vicini più prossimi
-    for i = 1, numNeighbors do
-        if distances[i] then
-            table.insert(closestPoints, distances[i])
+function containsValue(value, list)
+    for _, v in ipairs(list) do
+        if v == value then
+            return true
         end
     end
-
-    -- Calcolo dei pesi e dell'interpolazione
-    local numerator = 0
-    local denominator = 0
-    for _, cp in ipairs(closestPoints) do
-        local weight = 1 / cp.distance -- Qui si può modificare la funzione peso se necessario
-        numerator = numerator + (cp.value * weight)
-        denominator = denominator + weight
-    end
-
-    if denominator == 0 then return 0 end
-    return numerator / denominator
+    return false
 end
 
-function radialBasisFunctionInterpolation(points, x, y, epsilon)
-    epsilon = epsilon or 0.00001 -- Parametro di forma della funzione radiale, regola la "larghezza" della funzione
+function gaussianKernel(distance, sigma)
+    return math.exp(-((distance^2) / (2 * sigma^2)))
+end
 
-    local function gaussianRBF(distance)
-        return math.exp(-(distance^2) * epsilon)
+function calculateDynamicSigma(points, x, y)
+    local distances = {}
+    for _, point in ipairs(points) do
+        local dx = x - point.x
+        local dy = y - point.y
+        table.insert(distances, math.sqrt(dx^2 + dy^2))
     end
+    -- Calcola la media delle distanze come un esempio semplice di adattamento di sigma
+    local sum = 0
+    for _, distance in ipairs(distances) do
+        sum = sum + distance
+    end
+    return sum / #distances
+end
+
+function smoothTransition(currentValue, targetValue, smoothingFactor)
+    return currentValue + (targetValue - currentValue) * smoothingFactor
+end
+
+function naturalNeighborInterpolation(points, x, y, closestSnapshotsIndexes)
+    local baseSigma = 80 -- Sigma di base
+    local sigmaIncreaseFactor = 0.09 -- Fattore di aumento per sigma per unità di distanza
 
     local numerator = 0
     local denominator = 0
 
     for _, point in ipairs(points) do
-        local dx = x - point.x
-        local dy = y - point.y
-        local distance = math.sqrt(dx^2 + dy^2)
-        local weight = gaussianRBF(distance)
-        numerator = numerator + (point.value * weight)
-        denominator = denominator + weight
+        if containsValue(point.snapIndex, closestSnapshotsIndexes) then
+            local dx = x - point.x
+            local dy = y - point.y
+            local distance = math.sqrt(dx^2 + dy^2)
+            -- Aumenta sigma in base alla distanza
+            local sigma = baseSigma + (sigmaIncreaseFactor * distance)
+            local weight = gaussianKernel(distance, sigma)
+            numerator = numerator + (point.value * weight)
+            denominator = denominator + weight
+        end
     end
 
     if denominator == 0 then return 0 end
@@ -986,6 +996,101 @@ function screenToWindowCoordinates(xSchermo, ySchermo)
 end
 
 function onDragLeftMouse()
+    if INTERPOLATION_MODE == 0 then
+        onDragLeftMouseIDW()
+    else
+        onDragLeftMouseNNI()
+    end
+end
+
+function onDragLeftMouseNNI()
+    
+    if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
+        isInterpolating = true
+        reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = GetNormalizedMousePosition()
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+                previousInterpolatedValues = {}
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+        local temp_points = {}
+        for k = 1, #snapshot_list do
+            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
+        end
+
+        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
+        local relatedPolyIndex = 0
+        for i = 1, #snapshot_list do
+            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
+        end
+
+        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
+
+        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
+
+        local closest_snapshots = {}
+
+        for l = 1, #n do
+            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
+            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
+        end
+        
+        table.insert(closest_snapshots, cpi)
+        
+
+        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
+
+        
+        for groupIndex, group in ipairs(grouped_parameters) do
+            local pointsForGroup = points_list[groupIndex]
+            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
+            -- Applica smoothing al valore interpolato
+            if not previousInterpolatedValues[groupIndex] then
+                previousInterpolatedValues[groupIndex] = interpolatedValue
+            end
+            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
+            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
+        
+            for _, parameter in ipairs(group) do
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
+            end
+        end
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function onDragLeftMouseIDW()
     
     if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
         isInterpolating = true
@@ -1020,8 +1125,8 @@ function onDragLeftMouse()
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 4, reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1))
-        drawDot(dot_x,dot_y, 2, reaper.ImGui_ColorConvertDouble4ToU32(0, 1, 0, 1))
+        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
          for groupIndex, group in ipairs(grouped_parameters) do
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
@@ -1040,7 +1145,25 @@ function onDragLeftMouse()
     end
 end
 
-function getControllerUpdate()
+function findClosestPointIndex(points, targetPoint)
+    if #points == 0 then return nil end -- Controlla se la lista è vuota
+
+    local closestIndex = 1 -- Inizializza l'indice del punto più vicino con il primo punto della lista
+    local minDistance = ((points[closestIndex].x - targetPoint.x)^2 + (points[closestIndex].y - targetPoint.y)^2)
+
+    for i = 2, #points do
+        local point = points[i]
+        local distance = ((point.x - targetPoint.x)^2 + (point.y - targetPoint.y)^2)
+        if distance < minDistance then
+            closestIndex = i
+            minDistance = distance
+        end
+    end
+
+    return closestIndex
+end
+
+function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
 
     if not DRAGGING_BALL then
         isInterpolating = true 
@@ -1091,8 +1214,8 @@ function getControllerUpdate()
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 4, reaper.ImGui_ColorConvertDouble4ToU32(1, 0, 0, 1))
-        drawDot(dot_x,dot_y, 2, reaper.ImGui_ColorConvertDouble4ToU32(1, 0, 0, 1))
+        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
          for groupIndex, group in ipairs(grouped_parameters) do
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
@@ -1108,6 +1231,117 @@ function getControllerUpdate()
     else
         isInterpolating = false
         needToInitSmoothing = true
+    end
+end
+
+function getControllerUpdateNNI() -- da aggiornare una volta modificare on drag
+
+    if not DRAGGING_BALL then
+        isInterpolating = true 
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = 0, 0
+
+        if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
+            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+        end
+
+        if reaper.ImGui_IsMouseDragging(ctx, 0) then
+            reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+            normalizedX, normalizedY = GetNormalizedMousePosition()
+            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
+            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
+        else
+            --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
+            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+        end
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+                previousInterpolatedValues = {}
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+        local temp_points = {}
+        for k = 1, #snapshot_list do
+            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
+        end
+
+        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
+        local relatedPolyIndex = 0
+        for i = 1, #snapshot_list do
+            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
+        end
+
+        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
+
+        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
+
+        local closest_snapshots = {}
+
+        for l = 1, #n do
+            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
+            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
+        end
+        
+        table.insert(closest_snapshots, cpi)
+        
+
+        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
+
+        
+        for groupIndex, group in ipairs(grouped_parameters) do
+            local pointsForGroup = points_list[groupIndex]
+            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
+            -- Applica smoothing al valore interpolato
+            if not previousInterpolatedValues[groupIndex] then
+                previousInterpolatedValues[groupIndex] = interpolatedValue
+            end
+            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
+            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
+        
+            for _, parameter in ipairs(group) do
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
+            end
+        end
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function getControllerUpdate()
+    if INTERPOLATION_MODE == 0 then
+        getControllerUpdateIDW()
+    else
+        getControllerUpdateNNI()
     end
 end
 
@@ -1200,7 +1434,8 @@ function updateSnapshotIndexList()
                 local point = {
                     x = snap.x * ACTION_WINDOW_WIDTH,
                     y = snap.y * ACTION_WINDOW_HEIGHT,
-                    value = param.param_value
+                    value = param.param_value,
+                    snapIndex = param.snap_index
                 }
                 table.insert(pointsForGroup, point)
             end
@@ -1585,11 +1820,14 @@ function drawVoronoi()
 
             snapPointsForVoronoi = {}
 
+            snapIndexRelatedToPoly = {}
+
             for i = 1, #snapshot_list do
                 table.insert(snapPointsForVoronoi, {x = snapshot_list[i].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[i].y * reaper.ImGui_GetWindowHeight(ctx)})
             end
 
             ivoronoi = voronoilib:new(#snapshot_list,snapPointsForVoronoi,1,0,0,reaper.ImGui_GetWindowWidth(ctx),reaper.ImGui_GetWindowHeight(ctx))
+            
         end
 
         for v = 1, #ivoronoi.polygons do
@@ -1616,6 +1854,8 @@ function drawVoronoi()
                 local x2, y2 = windowToScreenCoordinates(segment.endPoint.x,segment.endPoint.y)
                 drawLine(x1,y1,x2,y2, reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.0, 0.0, 1), 1)
             end
+
+            table.insert(snapIndexRelatedToPoly, snapIndex)
         end
 
         needToUpdateVoronoi = false
@@ -1768,42 +2008,13 @@ function preferencesWindow()
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)    
 
-
-    --[[ local retval, link = reaper.ImGui_Checkbox(ctx, 'Link to Metasurface Controller', LINK_TO_CONTROLLER)
-    
-    if retval then
-
-        LINK_TO_CONTROLLER = link
-
-        if LINK_TO_CONTROLLER == true then
-            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
-
-            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
-            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
-
-            
-            for i, ball in ipairs(balls) do
-                 ball.color = ball_default_color
-
-                 if i == LAST_TOUCHED_BUTTON_INDEX then
-                    ball.color = selected_ball_default_color
-                 end
-            end
-
+    if reaper.ImGui_Checkbox(ctx, 'Use Nearest Neighbours Interpolation', INTERPOLATION_MODE) then
+        if INTERPOLATION_MODE == 0 then
+            INTERPOLATION_MODE = 1
         else
-
-            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
-            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
-
-            for i, ball in ipairs(balls) do
-                ball.color = ball_default_color
-
-                if i == LAST_TOUCHED_BUTTON_INDEX then
-                   ball.color = selected_ball_default_color
-                end
-           end
+            INTERPOLATION_MODE = 0
         end
-    end ]]
+    end
 
 end
 
@@ -1839,20 +2050,22 @@ function getControlTrack()
 
 end
 
-function drawCircle(x, y, raggio, color)
+function drawCircle(x, y, raggio, color, n_segs)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
     local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     
     -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
-    reaper.ImGui_DrawList_AddCircle(draw_list, x, y, raggio, color, 0, 1)
+    -- draw_list,  center_x,  center_y,  radius,  col_rgba,  integer num_segmentsIn,  number thicknessIn)
+    reaper.ImGui_DrawList_AddCircle(draw_list, x, y, raggio, color, n_segs, 1)
 end
 
-function drawDot(x, y, raggio, color)
+function drawDot(x, y, raggio, color, n_segs)
     -- Assicurati che la finestra ImGui sia già stata creata con ImGui.Begin
     local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     
+    -- draw_list,  center_x,  center_y,  radius,  col_rgba,   num_segmentsIn)
     -- Disegna un cerchio pieno alle coordinate (x, y) con un certo raggio
-    reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, color, 0)
+    reaper.ImGui_DrawList_AddCircleFilled(draw_list, x, y, raggio, color, n_segs)
 end
 
 function drawLine(x1, y1, x2, y2, color, thickness)
@@ -1917,7 +2130,7 @@ function initMS()
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end

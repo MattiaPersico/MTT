@@ -115,23 +115,25 @@ end
 ------------------------------------------------
 -- returns the actual polygons that are the neighbors
 function voronoilib:getNeighbors(...)
-
+    local arg = {...}
     local returner = { }
     local indexes = { }
-
+    
     -- builds a table of it input polygons
     for i=2,#arg do 
         indexes[arg[i]] = true 
     end
-
+        
     if arg[1] == 'all' then
-
+        
         -- finds all the neighbors and removes all duplicates
         local returnIs = { }
         for pindex,tt in pairs(indexes) do
+            if self.polygonmap[pindex] then
             for j,index in pairs(self.polygonmap[pindex]) do
                 returnIs[index] = true
             end
+        end
         end
 
         -- sets the in polygons as nil so it doesnt' return one of the inputs as a neighbor.
@@ -141,6 +143,8 @@ function voronoilib:getNeighbors(...)
         for index,tt in pairs(returnIs) do
             returner[#returner+1] = self.polygons[index]
         end
+
+        
 
     elseif arg[1] == 'shared' then
 
@@ -170,6 +174,21 @@ function voronoilib:getNeighbors(...)
     return returner
 
 end
+
+function voronoilib:getNeighborsForIndex(polygonIndex)
+    local neighbors = {}
+    if not self.polygonmap[polygonIndex] then
+        return neighbors -- Return an empty table if the polygonIndex is not in the map
+    end
+
+    -- Retrieve neighbors directly from the polygon map
+    for _, neighborIndex in ipairs(self.polygonmap[polygonIndex]) do
+        table.insert(neighbors, self.polygons[neighborIndex])
+    end
+
+    return neighbors
+end
+
 
 -------------------------------------------------------
 -- returns the edges of a polygon. if multiple polygons are 
@@ -241,20 +260,31 @@ end
 
 -----------------------------------------------------------------------------------
 -- returns the polygon that contains the point, returns nil if no polygon was found
-function voronoilib:polygoncontains(x,y)
+function voronoilib:polygoncontains(x,y, voronoi)
 
     local distance = { }
-    for index,centroid in pairs(self.centroids) do
-        distance[#distance+1] = { i = index, d = math.sqrt((x - centroid.x)^2 + (y - centroid.y)^2) }
+    
+    for i = 1, #voronoi.centroids do
+        distance[#distance+1] = { i = i, d = math.sqrt((x - voronoi.centroids[i].x)^2 + (y - voronoi.centroids[i].y)^2) }
     end
+
 
     table.sort(distance,function(a,b) return a.d < b.d end)
+    
 
-    for i,pindex in pairs({ unpack(self.polygonmap[distance[1].i]),distance[1].i }) do
-        if self.polygons[pindex]:containspoint(x,y) then 
-            return self.polygons[pindex]
+        -- Prima attraversa tutti gli elementi in voronoi.polygonmap[distance[1].i]
+        for i, pindex in ipairs(voronoi.polygonmap[distance[1].i]) do
+            if voronoi.polygons[pindex]:containspoint(x, y) then
+                return voronoi.polygons[pindex], i
+            end
         end
-    end
+    
+        -- Poi controlla il caso per distance[1].i separatamente
+        local i = #voronoi.polygonmap[distance[1].i] + 1 -- Calcola l'indice che sarebbe stato per distance[1].i
+        local pindex = distance[1].i
+        if voronoi.polygons[pindex]:containspoint(x, y) then
+            return voronoi.polygons[pindex], i
+        end
 
     return nil
 end
