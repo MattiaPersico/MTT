@@ -8,7 +8,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 18
+local minor_version = 19
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -1605,7 +1605,7 @@ function mainWindow()
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
     reaper.ImGui_Text(ctx, 'Name:')
 
-    local textEditWidth = MAIN_WINDOW_WIDTH - 20 - 60 - 110 - 110 - 85 -- 100
+    local textEditWidth = MAIN_WINDOW_WIDTH - 27 - 60 - 110 - 110 - 85 -- 100
 
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
@@ -1651,7 +1651,7 @@ function mainWindow()
          
         if LINK_TO_CONTROLLER == true then LINK_TO_CONTROLLER = false else LINK_TO_CONTROLLER = true end
 
-        if LINK_TO_CONTROLLER == true then
+        --[[ if LINK_TO_CONTROLLER == true then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
 
             selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
@@ -1678,7 +1678,7 @@ function mainWindow()
                    ball.color = selected_ball_default_color
                 end
            end
-        end
+        end ]]
     end
 
     if LAST_TOUCHED_BUTTON_INDEX then
@@ -1884,15 +1884,6 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    --reaper.ImGui_PushFont(ctx, new_line_font)
-    --reaper.ImGui_NewLine(ctx)
-    --reaper.ImGui_NewLine(ctx)
-    --reaper.ImGui_NewLine(ctx)
-    --reaper.ImGui_PopFont(ctx)
-
-
-    -- IGNORE PARAMETERS (POST-SAVE)
-    --reaper.ImGui_Text(ctx, 'Post Save')
     reaper.ImGui_PushFont(ctx, new_line_font)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
@@ -2138,7 +2129,7 @@ function initMS()
     initBalls()
     updateSnapshotIndexList()
 
-    if LINK_TO_CONTROLLER == true then
+    --[[ if LINK_TO_CONTROLLER == true then
         CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
 
         selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
@@ -2147,7 +2138,7 @@ function initMS()
     else
         selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
         selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
-    end
+    end ]]
 
     LAST_TOUCHED_BUTTON_INDEX = nil
 
