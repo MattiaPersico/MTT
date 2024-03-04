@@ -8,7 +8,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 19
+local minor_version = 20
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -380,13 +380,13 @@ end
 
 function loadFromFile(filename)
 
-    local ignoreParamsPostSaveString = 'midi'
+    local ignoreParamsPostSaveString = ''
     local ignorePostSaveFxsString = ''
     local ignorePostSaveTracksString = ''
     local linkToControllerBool = false
     local data = nil
 
-    local ignoreParamsPreSaveString = ''
+    local ignoreParamsPreSaveString = 'midi'
     local ignorePreSaveFxsString = ''
     local ignorePreSaveTracksString = ''
     local interpolationModeInt = 0
@@ -2021,7 +2021,9 @@ function getControlTrack()
                     
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
-                    if fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' then
+                    if  fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' or
+                        fx_name == 'JS: mtt_metasurface_controller' or 
+                        fx_name == 'mtt_metasurface_controller' then
                         return current_track, f
                     end
                 end
@@ -2035,7 +2037,7 @@ function getControlTrack()
     local trackName = "mtt_metasurface_controller"
     reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", trackName, true)
 
-    reaper.TrackFX_AddByName(new_track, 'JS: mtt_metasurface_controller', false, 1)
+    reaper.TrackFX_AddByName(new_track, 'mtt_metasurface_controller', false, 1)
 
     return new_track, 0
 
