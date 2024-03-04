@@ -25,8 +25,8 @@ local MAX_MAIN_WINDOW_HEIGHT = 600
 local MAIN_WINDOW_WIDTH = 500
 local MAIN_WINDOW_HEIGHT = 500
 
-local WIDTH_OFFSET = 16
-local HEIGHT_OFFSET = 74
+local WIDTH_OFFSET = 8
+local HEIGHT_OFFSET = 67
 
 local ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
 local ACTION_WINDOW_HEIGHT = MAIN_WINDOW_HEIGHT - HEIGHT_OFFSET
@@ -41,6 +41,8 @@ local IGNORE_TRACKS_POST_SAVE_STRING = ''
 local LINK_TO_CONTROLLER = false
 local CONTROL_TRACK = nil
 local CONTROL_FX_INDEX = nil
+
+local ENABLE_WINDOW_RESIZE = true
 
 local INTERPOLATION_MODE = 0
 
@@ -536,11 +538,22 @@ function gui_loop()
 
     reaper.ImGui_SetNextWindowSizeConstraints(ctx, MAX_MAIN_WINDOW_WIDTH, MAX_MAIN_WINDOW_HEIGHT, 900, 900, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
 
-    local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, --reaper.ImGui_WindowFlags_NoResize() |  
-                                                                     reaper.ImGui_WindowFlags_NoCollapse()
-                                                                    | reaper.ImGui_WindowFlags_NoScrollbar()
-                                                                    | reaper.ImGui_WindowFlags_NoScrollWithMouse()  
-                                                                    )
+    local flags
+
+    if ENABLE_WINDOW_RESIZE then
+        flags =  
+          reaper.ImGui_WindowFlags_NoCollapse()
+        | reaper.ImGui_WindowFlags_NoScrollbar()
+        | reaper.ImGui_WindowFlags_NoScrollWithMouse() 
+    else
+        flags = 
+          reaper.ImGui_WindowFlags_NoResize() 
+        | reaper.ImGui_WindowFlags_NoCollapse()
+        | reaper.ImGui_WindowFlags_NoScrollbar()
+        | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+        | reaper.ImGui_WindowFlags_NoMove()
+    end
+        local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, flags)
     
 
     MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT = reaper.ImGui_GetWindowSize(ctx)
@@ -684,7 +697,7 @@ function GetMouseCursorPositionInWindow()
         return relativeClickPosX, relativeClickPosY
     else
         -- Il click è fuori dalla finestra, puoi gestire questo caso come preferisci
-        return DRAG_X, DRAG_Y
+        return relativeClickPosX, relativeClickPosY
     end
 end
 
@@ -709,7 +722,7 @@ function onRightClick()
             ball.color = ball_default_color
         end
 
-        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 7, color = selected_ball_default_color, dragging = false })
+        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 5, color = selected_ball_default_color, dragging = false })
 
         saveSelected()
 
@@ -726,31 +739,57 @@ function clamp(val, min, max)
     return math.max(min, math.min(max, val))
 end
 
+function checkIfBallsAreOverlapped(ball_1, ball_2, win_x, win_y, mouse_x_rel, mouse_y_rel, tolerance)
+
+    local ball_1_pos_x = clamp(mouse_x_rel - ball_1.offset_x, 0.00001, 0.99999)
+    local ball_1_pos_y = clamp(mouse_y_rel - ball_1.offset_y, 0.00001, 0.99999)
+
+    local ball_1_screen_pos_x = win_x + ball_1_pos_x * ACTION_WINDOW_WIDTH
+    local ball_1_screen_pos_y = win_y + ball_1_pos_y * ACTION_WINDOW_HEIGHT
+
+    local ball_2_screen_pos_x = win_x + ball_2.pos_x * ACTION_WINDOW_WIDTH
+    local ball_2_screen_pos_y = win_y + ball_2.pos_y * ACTION_WINDOW_HEIGHT
+
+    local tolerance = tolerance or 5 -- Soglia di tolleranza in pixel
+
+    -- Calcolo della distanza tra i centri delle due palle
+    local dx = ball_1_screen_pos_x - ball_2_screen_pos_x
+    local dy = ball_1_screen_pos_y - ball_2_screen_pos_y
+    local distance = math.sqrt(dx * dx + dy * dy)
+    
+    -- Calcolo del raggio totale più la soglia di tolleranza
+    local total_radius_with_tolerance = ball_1.radius + ball_2.radius + tolerance
+    
+    -- Controllo dell'overlap
+    if distance < total_radius_with_tolerance then
+        return true
+    else
+        return false
+    end
+    
+end
+
 function drawSnapshots()
 
     local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     local window_x, window_y = reaper.ImGui_GetWindowPos(ctx)
-    local window_width, window_height = reaper.ImGui_GetWindowSize(ctx)
     local mouse_x, mouse_y = reaper.ImGui_GetMousePos(ctx)
-
-    local mouse_x_rel = (mouse_x - window_x) / window_width
-    local mouse_y_rel = (mouse_y - window_y) / window_height
 
     for s, ball in ipairs(balls) do
         
-        local ball_screen_pos_x = window_x + ball.pos_x * window_width
-        local ball_screen_pos_y = window_y + ball.pos_y * window_height
+        local ball_screen_pos_x = window_x + ball.pos_x * ACTION_WINDOW_WIDTH
+        local ball_screen_pos_y = window_y + ball.pos_y * ACTION_WINDOW_HEIGHT
 
         reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color, 4)
         
         if snapshot_list[s] then
             reaper.ImGui_SetNextItemWidth(ctx, 60)
-            if ball.pos_x * window_width > ((MAIN_WINDOW_WIDTH / 3) * 2) then
+            if ball.pos_x * ACTION_WINDOW_WIDTH > ((MAIN_WINDOW_WIDTH / 3) * 2) then
                 local str_len = string.len(snapshot_list[s].name)
                 local  w,  h = reaper.ImGui_CalcTextSize(ctx, snapshot_list[s].name, 60, 20)
-                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * window_width - 12 - w, ball.pos_y * window_height - 10)
+                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * ACTION_WINDOW_WIDTH - 12 - w, ball.pos_y * ACTION_WINDOW_HEIGHT - 10)
             else
-                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * window_width + 12, ball.pos_y * window_height - 10)
+                reaper.ImGui_SetCursorPos(ctx, ball.pos_x * ACTION_WINDOW_WIDTH + 12, ball.pos_y * ACTION_WINDOW_HEIGHT - 10)
             end
 
             reaper.ImGui_Text(ctx, snapshot_list[s].name)
@@ -758,10 +797,17 @@ function drawSnapshots()
 
         if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) or DRAGGING_BALL then
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
+            ENABLE_WINDOW_RESIZE = false
+        else
+            ENABLE_WINDOW_RESIZE = true
         end
 
         -- DRAGGING
         if DRAGGING_BALL == ball or (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating) then
+            
+            local mouse_x_rel = (mouse_x - window_x) / ACTION_WINDOW_WIDTH
+            local mouse_y_rel = (mouse_y - window_y) / ACTION_WINDOW_HEIGHT
+
             if reaper.ImGui_IsMouseDown(ctx, 0) and not DRAGGING_BALL then
 
                 if s == LAST_TOUCHED_BUTTON_INDEX then
@@ -776,17 +822,37 @@ function drawSnapshots()
                 
                 DRAGGING_BALL = ball
                 
+                if mouse_x_rel >= 1 then mouse_x_rel = 0.99999 end
+                if mouse_y_rel >= 1 then mouse_y_rel = 0.99999 end
+            
+                if mouse_x_rel <= 0 then mouse_x_rel = 0.00001 end
+                if mouse_y_rel <= 0 then mouse_y_rel = 0.00001 end
+
                 ball.offset_x, ball.offset_y = mouse_x_rel - ball.pos_x, mouse_y_rel - ball.pos_y
             end
 
             if reaper.ImGui_IsMouseDragging(ctx, 0, 0.2) and DRAGGING_BALL == ball then
                 
-                ball.dragging = true
-                ball.pos_x = clamp(mouse_x_rel - ball.offset_x, 0, 1)
-                ball.pos_y = clamp(mouse_y_rel - ball.offset_y, 0, 1)
-                snapshot_list[s].x = ball.pos_x
-                snapshot_list[s].y = ball.pos_y
-                needToUpdateVoronoi = true
+                local ballsOverlapped = false
+
+                for b, otherBall in ipairs(balls) do
+                    if otherBall ~= ball then
+                        if checkIfBallsAreOverlapped(ball, otherBall, window_x, window_y, mouse_x_rel, mouse_y_rel, 0) then
+                            ballsOverlapped = true
+                        end
+                    end
+                end
+
+                if  ballsOverlapped == false then
+                    ball.dragging = true
+                    ball.pos_x = clamp(mouse_x_rel - ball.offset_x, 0.00001, 0.99999)
+                    ball.pos_y = clamp(mouse_y_rel - ball.offset_y, 0.00001, 0.99999)
+                    snapshot_list[s].x = ball.pos_x
+                    snapshot_list[s].y = ball.pos_y
+                    needToUpdateVoronoi = true
+                else
+
+                end
 
             end
         end
@@ -794,10 +860,10 @@ function drawSnapshots()
         -- MOUSE RELEASE
         if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
         
-            local ballUnderMouse = nil
+            --[[ local ballUnderMouse = nil
             local ballUnderMouseIndex = nil
             for i, otherBall in ipairs(balls) do
-                if isMouseOverBall(window_x + otherBall.pos_x * window_width, window_y + otherBall.pos_y * window_height, otherBall.radius) then
+                if isMouseOverBall(window_x + otherBall.pos_x * ACTION_WINDOW_WIDTH, window_y + otherBall.pos_y * ACTION_WINDOW_HEIGHT, otherBall.radius) then
                     if i ~= s then
                         ballUnderMouse = otherBall
                         ballUnderMouseIndex = i
@@ -809,7 +875,7 @@ function drawSnapshots()
             -- Se esiste una ball sotto il mouse e il suo index è maggiore di quello della ball rilasciata, non fare nulla
             if ballUnderMouse and ballUnderMouseIndex ~= s then
                 -- Qui puoi decidere di non fare nulla o gestire in modo specifico questa situazione
-            else
+            else ]]
                 if ball.dragging == false then
                     if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
                         LAST_TOUCHED_BUTTON_INDEX = s
@@ -838,7 +904,7 @@ function drawSnapshots()
                         end
                     end
                 end
-            end
+            --end
 
             ball.dragging = false
                 DRAGGING_BALL = nil
@@ -996,10 +1062,13 @@ function screenToWindowCoordinates(xSchermo, ySchermo)
 end
 
 function onDragLeftMouse()
-    if INTERPOLATION_MODE == 0 then
-        onDragLeftMouseIDW()
-    else
-        onDragLeftMouseNNI()
+
+    if reaper.ImGui_GetMouseCursor(ctx) < 3 then
+        if INTERPOLATION_MODE == 0 then
+            onDragLeftMouseIDW()
+        else
+            onDragLeftMouseNNI()
+        end
     end
 end
 
@@ -1691,7 +1760,10 @@ function mainWindow()
                         reaper.ImGui_ColorEditFlags_NoInputs() | 
                         reaper.ImGui_ColorEditFlags_NoLabel() | 
                         reaper.ImGui_ColorEditFlags_NoOptions() |
-                        reaper.ImGui_ColorEditFlags_NoTooltip()
+                        reaper.ImGui_ColorEditFlags_NoTooltip() |
+                        reaper. ImGui_ColorEditFlags_AlphaBar()
+                        
+                        
 
         local retval, newcolor = reaper.ImGui_ColorEdit4(ctx, '##selected_snap_color', snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color, flags )
 
@@ -1701,11 +1773,18 @@ function mainWindow()
 
     end
 
-    reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, true,   reaper.ImGui_WindowFlags_NoMove()
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 0)
+    reaper.ImGui_SetCursorPosX(ctx, WIDTH_OFFSET * 0.5)
+
+    
+    reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, false,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()
-                                                                                                    | reaper.ImGui_WindowFlags_TopMost())
-    
+                                                                                                    | reaper.ImGui_WindowFlags_TopMost()
+                                                                                                    | reaper.ImGui_WindowFlags_NoDecoration()
+                                                                                                    | reaper.ImGui_WindowFlags_NoResize())
+                                                                        
+    reaper.ImGui_PopStyleVar(ctx)
 
 
 
@@ -1727,7 +1806,7 @@ function mainWindow()
     onRightClick()
     drawSnapshots()
 
-    if reaper.ImGui_IsWindowHovered(ctx) and LINK_TO_CONTROLLER == false then
+    if LINK_TO_CONTROLLER == false then
         onDragLeftMouse()
     end
 
