@@ -8,7 +8,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 21
+local minor_version = 22
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -221,11 +221,8 @@ local points_list = {}
 local snapshot_list = {}
 local balls = {}
 
-local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.8,0.8,0.8, 1)
-local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.4,0.4,0.4, 1)
-
-local selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.8,0.0, 1)
-local selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.4,0.0, 1)
+local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(1,1,1, 1)
+local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.7,0.7,0.7, 1)
 
 --local is_new_value,filename,sectionID,cmdID,mode,resolution,val,contextstr = reaper.get_action_context()
 
@@ -270,7 +267,7 @@ function proj_snapshot:new(x, y, name)
     instance.y = y or 0
     instance.name = name
     instance.track_list = {}
-    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
+    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random() * 0.9, math.random()* 0.9, math.random()* 0.9, 1)
     instance.assigned = false
     return instance
 end
@@ -722,7 +719,7 @@ function onRightClick()
             ball.color = ball_default_color
         end
 
-        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 5, color = selected_ball_default_color, dragging = false })
+        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 5, color = ball_default_color, dragging = false })
 
         saveSelected()
 
@@ -780,8 +777,11 @@ function drawSnapshots()
         local ball_screen_pos_x = window_x + ball.pos_x * ACTION_WINDOW_WIDTH
         local ball_screen_pos_y = window_y + ball.pos_y * ACTION_WINDOW_HEIGHT
 
-        reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, ball.radius, ball.color, 4)
-        
+        reaper.ImGui_DrawList_AddCircle(draw_list, ball_screen_pos_x, ball_screen_pos_y, 6, ball.color, 4)
+        if s == LAST_TOUCHED_BUTTON_INDEX then
+            reaper.ImGui_DrawList_AddCircleFilled(draw_list, ball_screen_pos_x, ball_screen_pos_y, 3, ball.color, 4)
+        end
+
         if snapshot_list[s] then
             reaper.ImGui_SetNextItemWidth(ctx, 60)
             if ball.pos_x * ACTION_WINDOW_WIDTH > ((MAIN_WINDOW_WIDTH / 3) * 2) then
@@ -795,13 +795,14 @@ function drawSnapshots()
             reaper.ImGui_Text(ctx, snapshot_list[s].name)
         end
 
-        if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) or DRAGGING_BALL then
+        
+        if (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) or DRAGGING_BALL) and isInterpolating == false then 
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
             ENABLE_WINDOW_RESIZE = false
         else
             ENABLE_WINDOW_RESIZE = true
         end
-
+        
         -- DRAGGING
         if DRAGGING_BALL == ball or (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating) then
             
@@ -810,17 +811,15 @@ function drawSnapshots()
 
             if reaper.ImGui_IsMouseDown(ctx, 0) and not DRAGGING_BALL then
 
-                if s == LAST_TOUCHED_BUTTON_INDEX then
-                    for i, sball in ipairs(balls) do
-                        sball.color = ball_default_color
-                    end
-
-                    ball.color = selected_ball_clicked_color
-                else
-                    ball.color = ball_clicked_color
+                for i, sball in ipairs(balls) do
+                    sball.color = ball_default_color
                 end
+
+                    ball.color = ball_clicked_color
                 
+                    
                 DRAGGING_BALL = ball
+                ball.clicked = true
                 
                 if mouse_x_rel >= 1 then mouse_x_rel = 0.99999 end
                 if mouse_y_rel >= 1 then mouse_y_rel = 0.99999 end
@@ -860,23 +859,7 @@ function drawSnapshots()
         -- MOUSE RELEASE
         if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
         
-            --[[ local ballUnderMouse = nil
-            local ballUnderMouseIndex = nil
-            for i, otherBall in ipairs(balls) do
-                if isMouseOverBall(window_x + otherBall.pos_x * ACTION_WINDOW_WIDTH, window_y + otherBall.pos_y * ACTION_WINDOW_HEIGHT, otherBall.radius) then
-                    if i ~= s then
-                        ballUnderMouse = otherBall
-                        ballUnderMouseIndex = i
-                        break
-                    end
-                end
-            end
-        
-            -- Se esiste una ball sotto il mouse e il suo index è maggiore di quello della ball rilasciata, non fare nulla
-            if ballUnderMouse and ballUnderMouseIndex ~= s then
-                -- Qui puoi decidere di non fare nulla o gestire in modo specifico questa situazione
-            else ]]
-                if ball.dragging == false then
+                if ball.dragging == false and ball.clicked == true then
                     if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
                         LAST_TOUCHED_BUTTON_INDEX = s
         
@@ -904,19 +887,16 @@ function drawSnapshots()
                         end
                     end
                 end
+
+                ball.clicked = false
             --end
 
-            ball.dragging = false
+                ball.dragging = false
                 DRAGGING_BALL = nil
 
-                if s == LAST_TOUCHED_BUTTON_INDEX then
                     for i, sball in ipairs(balls) do
                         sball.color = ball_default_color
                     end
-                    ball.color = selected_ball_default_color
-                else
-                    ball.color = ball_default_color
-                end
 
         end
 
@@ -930,6 +910,7 @@ function drawSnapshots()
             break
         end
     end
+
 
     
 end
@@ -1108,7 +1089,7 @@ function onDragLeftMouseNNI()
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
         local temp_points = {}
@@ -1194,7 +1175,7 @@ function onDragLeftMouseIDW()
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
          for groupIndex, group in ipairs(grouped_parameters) do
@@ -1283,7 +1264,7 @@ function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
          for groupIndex, group in ipairs(grouped_parameters) do
@@ -1355,7 +1336,7 @@ function getControllerUpdateNNI() -- da aggiornare una volta modificare on drag
         local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
         local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
 
-        drawCircle(circle_x,circle_y, 8, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
         local temp_points = {}
@@ -1761,7 +1742,8 @@ function mainWindow()
                         reaper.ImGui_ColorEditFlags_NoLabel() | 
                         reaper.ImGui_ColorEditFlags_NoOptions() |
                         reaper.ImGui_ColorEditFlags_NoTooltip() |
-                        reaper. ImGui_ColorEditFlags_AlphaBar()
+                        reaper.ImGui_ColorEditFlags_AlphaBar() --|
+                        --reaper.ImGui_ColorEditFlags_AlphaPreview()
                         
                         
 
@@ -1776,12 +1758,13 @@ function mainWindow()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 0)
     reaper.ImGui_SetCursorPosX(ctx, WIDTH_OFFSET * 0.5)
 
-    
+    --reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1))
+    --lamaladonna
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, false,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()
                                                                                                     | reaper.ImGui_WindowFlags_TopMost()
-                                                                                                    | reaper.ImGui_WindowFlags_NoDecoration()
+                                                                                                    --| reaper.ImGui_WindowFlags_NoDecoration()
                                                                                                     | reaper.ImGui_WindowFlags_NoResize())
                                                                         
     reaper.ImGui_PopStyleVar(ctx)
@@ -1855,7 +1838,8 @@ function mainWindow()
         smoothing_fader_value = smoothing_fader_value - 0.02
         if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
     end
-        
+    
+    --reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_EndChild(ctx)
     
 end
