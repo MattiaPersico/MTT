@@ -4,7 +4,12 @@
 -- assicurarsi che si vedano le varie info su come funziona e il nome del progetto
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
-
+-- aggiungi interpolazione cerchi/distanza
+-- provare a fixare glitch voronoi su punti allineati
+-- provare ad aggiungere modalita che lavora solo su tracce selezionate
+-- aggiungere sistema per registrare autom solo controller
+-- sistema filtri specifico oppure...
+-- ... sistema di edit snapshots
 -- Script Name and Version
 
 local major_version = 0
