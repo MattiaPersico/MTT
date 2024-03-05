@@ -5,7 +5,7 @@
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
 -- aggiungi interpolazione cerchi/distanza
--- provare a fixare glitch voronoi su punti allineati
+
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
 -- aggiungere sistema per registrare autom solo controller
 -- sistema filtri specifico oppure...
@@ -54,6 +54,7 @@ local INTERPOLATION_MODE = 0
 local main_window_width = MAIN_WINDOW_WIDTH -- current values during loop
 local main_window_height = MAIN_WINDOW_HEIGHT -- current values during loop
 
+local colorPickerWindowState = false
 
 function ensureGlobalSettings()
     nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
@@ -272,7 +273,7 @@ function proj_snapshot:new(x, y, name)
     instance.y = y or 0
     instance.name = name
     instance.track_list = {}
-    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random() * 0.9, math.random()* 0.9, math.random()* 0.9, 1)
+    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
     instance.assigned = false
     return instance
 end
@@ -513,7 +514,7 @@ function gui_loop()
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_TitleBgCollapsed(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
   
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.2, 0.2, 0.2, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.4, 0.4, 0.4, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBgHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.25, 0.25, 0.25, 2))
   
@@ -546,7 +547,8 @@ function gui_loop()
         flags =  
           reaper.ImGui_WindowFlags_NoCollapse()
         | reaper.ImGui_WindowFlags_NoScrollbar()
-        | reaper.ImGui_WindowFlags_NoScrollWithMouse() 
+        | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+        | reaper.ImGui_WindowFlags_NoDocking()  
     else
         flags = 
           reaper.ImGui_WindowFlags_NoResize() 
@@ -554,6 +556,7 @@ function gui_loop()
         | reaper.ImGui_WindowFlags_NoScrollbar()
         | reaper.ImGui_WindowFlags_NoScrollWithMouse()
         | reaper.ImGui_WindowFlags_NoMove()
+        | reaper.ImGui_WindowFlags_NoDocking() 
     end
         local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, flags)
     
@@ -571,8 +574,24 @@ function gui_loop()
     main_window_w = tmp_main_window_w
     main_window_h = tmp_main_window_h
   
-  
     if mw_visible then
+
+        if colorPickerWindowState then
+            local flags = reaper.ImGui_WindowFlags_NoCollapse()
+            --reaper.ImGui_SetNextWindowFocus(ctx)
+            local cpw_visible, cpw_open = reaper.ImGui_Begin(ctx, 'Color Picker', flags)
+      
+            if cpw_visible then
+                colorPickerWindow()
+                reaper.ImGui_End(ctx)
+                
+                if cpw_open == false then
+                    colorPickerWindowState = false
+                end
+    
+            end
+          end
+          
       mainWindow()
 
       reaper.ImGui_End(ctx)
@@ -580,7 +599,9 @@ function gui_loop()
 
       pref_window_x = main_window_x + main_window_w
       pref_window_y = main_window_y
-  
+        
+      
+
       if preferencesWindowState then
   
         reaper.ImGui_SetNextWindowPos(ctx, pref_window_x, pref_window_y)
@@ -636,6 +657,24 @@ function gui_loop()
         reaper.defer(loop)
     end
 
+end
+
+function colorPickerWindow()
+    local color = reaper.ImGui_ColorConvertDouble4ToU32(0,0,0,1)
+    local canEdit = false
+
+    if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
+        color = snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color
+        canEdit = true
+    end
+    --reaper.ImGui_WindowFlags_TopMost()
+    --reaper.ImGui_ColorEditFlags_AlphaPreview()
+
+    local retval, col_rgba = reaper.ImGui_ColorPicker4(ctx, '##snap_cp', color, flags)
+
+    if retval and canEdit then
+        snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color = col_rgba
+    end
 end
 
 function loop()
@@ -700,6 +739,28 @@ function GetMouseCursorPositionInWindow()
     else
         -- Il click è fuori dalla finestra, puoi gestire questo caso come preferisci
         return relativeClickPosX, relativeClickPosY
+    end
+end
+
+function validateWindowCoordinates(x, y)
+    local mouseClickedX, mouseClickedY = x, y
+
+    -- Ottieni la posizione dell'angolo in alto a sinistra della finestra ImGui
+    local windowPosX, windowPosY = reaper.ImGui_GetWindowPos(ctx)
+
+    -- Calcola la posizione del click del mouse relativa alla finestra ImGui
+    local relativeClickPosX = mouseClickedX - windowPosX
+    local relativeClickPosY = mouseClickedY - windowPosY
+
+    -- (Opzionale) Controlla se il click è all'interno della finestra
+    local windowWidth, windowHeight = reaper.ImGui_GetWindowSize(ctx)
+    if relativeClickPosX >= 0 and relativeClickPosX <= windowWidth and
+       relativeClickPosY >= 0 and relativeClickPosY <= windowHeight then
+        -- Il click è all'interno della finestra
+        return true
+    else
+        -- Il click è fuori dalla finestra, puoi gestire questo caso come preferisci
+        return false
     end
 end
 
@@ -862,7 +923,7 @@ function drawSnapshots()
         end
 
         -- MOUSE RELEASE
-        if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating then
+        if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating and not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())then
         
                 if ball.dragging == false and ball.clicked == true then
                     if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
@@ -907,7 +968,22 @@ function drawSnapshots()
 
         -- SHIFT-CLICK
         if reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) and isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating then
-            if LAST_TOUCHED_BUTTON_INDEX == s then LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 end
+--[[             if LAST_TOUCHED_BUTTON_INDEX == s then 
+                LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 
+                reaper.ShowConsoleMsg('qui\n')
+            end
+
+            if LAST_TOUCHED_BUTTON_INDEX <= 0 then LAST_TOUCHED_BUTTON_INDEX = nil end ]]
+            
+            if LAST_TOUCHED_BUTTON_INDEX >= s then
+                LAST_TOUCHED_BUTTON_INDEX = LAST_TOUCHED_BUTTON_INDEX - 1
+
+                if LAST_TOUCHED_BUTTON_INDEX <= 0 then
+                    LAST_TOUCHED_BUTTON_INDEX = nil
+                    ENABLE_WINDOW_RESIZE = true
+                end
+            end 
+
             table.remove(snapshot_list, s)
             table.remove(balls, s)
             updateSnapshotIndexList()
@@ -1049,13 +1125,34 @@ end
 
 function onDragLeftMouse()
 
-    if reaper.ImGui_GetMouseCursor(ctx) < 3 then
+    if isInterpolating then
         if INTERPOLATION_MODE == 0 then
             onDragLeftMouseIDW()
         else
             onDragLeftMouseNNI()
         end
+    else
+        if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
+            reaper.ImGui_IsMouseDragging(ctx, 0) and
+            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) then
+            --colorPickerWindowState == false then
+            if INTERPOLATION_MODE == 0 then
+                onDragLeftMouseIDW()
+            else
+                onDragLeftMouseNNI()
+            end
+        end
     end
+
+--[[     if reaper.ImGui_GetMouseCursor(ctx) < 3 then
+        if INTERPOLATION_MODE == 0 then
+            onDragLeftMouseIDW()
+        else
+            onDragLeftMouseNNI()
+        end
+    end ]]
+
+
 end
 
 function onDragLeftMouseNNI()
@@ -1736,40 +1833,41 @@ function mainWindow()
         end ]]
     end
 
-    if LAST_TOUCHED_BUTTON_INDEX then
+    if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
 
         reaper.ImGui_SameLine(ctx)
 
-        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35 - 35)
-
-        local flags =   reaper.ImGui_ColorEditFlags_NoDragDrop() | 
-                        reaper.ImGui_ColorEditFlags_NoInputs() | 
-                        reaper.ImGui_ColorEditFlags_NoLabel() | 
-                        reaper.ImGui_ColorEditFlags_NoOptions() |
-                        reaper.ImGui_ColorEditFlags_NoTooltip() |
-                        reaper.ImGui_ColorEditFlags_AlphaBar() --|
-                        --reaper.ImGui_ColorEditFlags_AlphaPreview()
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35 - 35)            
                         
-                        
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
 
-        local retval, newcolor = reaper.ImGui_ColorEdit4(ctx, '##selected_snap_color', snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color, flags )
+        local retval = reaper.ImGui_Button(ctx, '##selected_snap_color', 25, 25 )
+
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_PopStyleColor(ctx)
 
         if retval then
-            snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color = newcolor
+            colorPickerWindowState = not colorPickerWindowState
         end
 
+    else
+        colorPickerWindowState = false
     end
 
-    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 0)
     reaper.ImGui_SetCursorPosX(ctx, WIDTH_OFFSET * 0.5)
 
-    --reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1))
+    --reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.1, 0.1, 0.1, 2))
     --lamaladonna
-    reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT, false,   reaper.ImGui_WindowFlags_NoMove()
+    reaper.ImGui_BeginChildFrame(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()
                                                                                                     | reaper.ImGui_WindowFlags_TopMost()
-                                                                                                    --| reaper.ImGui_WindowFlags_NoDecoration()
+                                                                                                    | reaper.ImGui_WindowFlags_AlwaysUseWindowPadding()
                                                                                                     | reaper.ImGui_WindowFlags_NoResize())
                                                                         
     reaper.ImGui_PopStyleVar(ctx)
@@ -1844,7 +1942,8 @@ function mainWindow()
         if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
     end
     
-    --reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+
     reaper.ImGui_EndChild(ctx)
     
 end

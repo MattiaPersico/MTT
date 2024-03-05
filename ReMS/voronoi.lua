@@ -68,9 +68,9 @@ function voronoilib:new(polygoncount,points,iterations,minx,miny,maxx,maxy)
 			-- don't know what would happened but it would not return the same amount of polygons that user requested
 			for i=1,polygoncount do
 				local rx,ry = points[i].x, points[i].y
---[[ 				while self.tools:tablecontains(rvoronoi[it].points,{ 'x', 'y' }, { rx, ry }) do
-					rx,ry = self.tools:randompoint(rvoronoi[it].boundary)
-				end ]]
+                
+				rx,ry =  self.tools:adjustPointAvoidOverlap(rvoronoi[it].points,{ 'x', 'y' }, { rx, ry }, 1, maxx, maxy)
+
 				rvoronoi[it].points[i] = { x = rx, y = ry }
 			end
 			rvoronoi[it].points = self.tools:sortthepoints(rvoronoi[it].points)
@@ -111,6 +111,9 @@ function voronoilib:new(polygoncount,points,iterations,minx,miny,maxx,maxy)
 	self.__index = self 
     return returner
 end
+
+
+
 
 ------------------------------------------------
 -- returns the actual polygons that are the neighbors
@@ -669,6 +672,69 @@ function voronoilib.tools:sortthepoints(points)
 	sortedpoints = self:sorttable(sortedpoints,'y',true)
 	return sortedpoints
 end
+
+function voronoilib.tools:adjustPointAvoidOverlap(tablename, attributename, value, range, width, height)
+    local rx, ry = value[1], value[2] -- Assume value contains {rx, ry}
+    local directionX, directionY = 0, 0 -- 0: no movement, -1: negative direction, 1: positive direction
+    local iterations = 0 -- Per evitare loop infiniti
+
+    -- Determina una direzione di correzione iniziale basata sulla posizione relativa al centro
+    if rx <= width / 2 then
+        directionX = 1 -- Se `rx` è nel lato sinistro, prova a spostarti verso destra
+    else
+        directionX = -1 -- Altrimenti, spostati verso sinistra
+    end
+
+    if ry <= height / 2 then
+        directionY = 1 -- Se `ry` è nella metà superiore, prova a spostarti verso il basso
+    else
+        directionY = -1 -- Altrimenti, spostarti verso l'alto
+    end
+
+    repeat
+        local adjusted = false
+        for _, v in pairs(tablename) do
+            local xOverlap = math.abs(v['x'] - rx) <= range
+            local yOverlap = math.abs(v['y'] - ry) <= range
+
+            if xOverlap then
+                rx = rx + directionX * (range + 1)
+                if rx < 0 then
+                    rx = 0
+                    directionX = 1 -- Cambia direzione se hai raggiunto il limite
+                elseif rx > width then
+                    rx = width
+                    directionX = -1 -- Cambia direzione se hai raggiunto il limite
+                end
+                adjusted = true
+            end
+
+            if yOverlap then
+                ry = ry + directionY * (range + 1)
+                if ry < 0 then
+                    ry = 0
+                    directionY = 1 -- Cambia direzione se hai raggiunto il limite
+                elseif ry > height then
+                    ry = height
+                    directionY = -1 -- Cambia direzione se hai raggiunto il limite
+                end
+                adjusted = true
+            end
+
+            if adjusted then break end -- Esci dal ciclo se è stato fatto un aggiustamento
+        end
+
+        iterations = iterations + 1
+    until not adjusted or iterations > 100 -- Evita loop infiniti limitando le iterazioni
+
+    return rx, ry
+end
+
+
+
+
+
+
 
 function voronoilib.tools:tablecontains(tablename,attributename,value)
 
