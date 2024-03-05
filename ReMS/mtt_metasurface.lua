@@ -1,19 +1,22 @@
 -- Appunti:
 
--- assicurarsi che si veda bene il puntatore di interpolazione
--- assicurarsi che si vedano le varie info su come funziona e il nome del progetto
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
+
 -- aggiungere supporto a fx dentro container
+
 -- aggiungi interpolazione cerchi/distanza
 
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
--- aggiungere sistema per registrare autom solo controller
+
 -- sistema filtri specifico oppure...
+
 -- ... sistema di edit snapshots
+
 -- Script Name and Version
 
+
 local major_version = 0
-local minor_version = 23
+local minor_version = 26
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -506,7 +509,7 @@ function gui_loop()
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
     
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGrip(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGrip(), reaper.ImGui_ColorConvertDouble4ToU32(0.1, 0.1, 0.1, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGripActive(), reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ResizeGripHovered(), reaper.ImGui_ColorConvertDouble4ToU32(0.18, 0.18, 0.18, 2))
 
@@ -558,7 +561,7 @@ function gui_loop()
         | reaper.ImGui_WindowFlags_NoMove()
         | reaper.ImGui_WindowFlags_NoDocking() 
     end
-        local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name, true, flags)
+        local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name .. '  -  ' .. string.gsub(PROJECT_NAME, '.RPP', ""), true, flags)
     
 
     MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT = reaper.ImGui_GetWindowSize(ctx)
@@ -579,6 +582,7 @@ function gui_loop()
         if colorPickerWindowState then
             local flags = reaper.ImGui_WindowFlags_NoCollapse()
             --reaper.ImGui_SetNextWindowFocus(ctx)
+            reaper.ImGui_SetNextWindowSizeConstraints(ctx, 300, 268, 300 * 1.5, 268 * 1.55, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
             local cpw_visible, cpw_open = reaper.ImGui_Begin(ctx, 'Color Picker', flags)
       
             if cpw_visible then
@@ -669,12 +673,24 @@ function colorPickerWindow()
     end
     --reaper.ImGui_WindowFlags_TopMost()
     --reaper.ImGui_ColorEditFlags_AlphaPreview()
+    local flags =   reaper.ImGui_ColorEditFlags_NoBorder() |
+                    reaper.ImGui_ColorEditFlags_NoDragDrop() |
+                    reaper.ImGui_ColorEditFlags_NoSidePreview() |
+                    reaper.ImGui_ColorEditFlags_NoLabel() | 
+                    reaper.ImGui_ColorEditFlags_NoInputs() | 
+                    reaper.ImGui_ColorEditFlags_AlphaBar() | 
+                    reaper.ImGui_ColorEditFlags_AlphaPreview() | 
+                    reaper.ImGui_ColorEditFlags_NoOptions() | 
+                    reaper.ImGui_ColorEditFlags_NoSmallPreview() | 
+                    reaper.ImGui_ColorEditFlags_NoPicker()
 
+    reaper.ImGui_SetNextItemWidth(ctx, reaper.ImGui_GetWindowWidth(ctx) - 20)
     local retval, col_rgba = reaper.ImGui_ColorPicker4(ctx, '##snap_cp', color, flags)
 
     if retval and canEdit then
         snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color = col_rgba
     end
+
 end
 
 function loop()
@@ -1134,7 +1150,8 @@ function onDragLeftMouse()
     else
         if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
             reaper.ImGui_IsMouseDragging(ctx, 0) and
-            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) then
+            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) and
+            #snapshot_list > 1 then
             --colorPickerWindowState == false then
             if INTERPOLATION_MODE == 0 then
                 onDragLeftMouseIDW()
@@ -1143,16 +1160,6 @@ function onDragLeftMouse()
             end
         end
     end
-
---[[     if reaper.ImGui_GetMouseCursor(ctx) < 3 then
-        if INTERPOLATION_MODE == 0 then
-            onDragLeftMouseIDW()
-        else
-            onDragLeftMouseNNI()
-        end
-    end ]]
-
-
 end
 
 function onDragLeftMouseNNI()
@@ -1315,7 +1322,7 @@ function findClosestPointIndex(points, targetPoint)
     return closestIndex
 end
 
-function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
+function getControllerUpdateIDW() 
 
     if not DRAGGING_BALL then
         isInterpolating = true 
@@ -1325,10 +1332,19 @@ function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
 
         if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+            setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
         end
 
-        if reaper.ImGui_IsMouseDragging(ctx, 0) then
+        if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
+            reaper.ImGui_IsMouseDragging(ctx, 0) and
+            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) and
+            isUserMovingWindow(ctx) == false then
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
         -- Ottieni la posizione normalizzata del mouse
             normalizedX, normalizedY = GetNormalizedMousePosition()
             reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
@@ -1337,6 +1353,7 @@ function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
             normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
             normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
         end
 
         -- Converti le coordinate normalizzate in posizione reale se necessario
@@ -1386,7 +1403,7 @@ function getControllerUpdateIDW() -- da aggiornare una volta modificare on drag
     end
 end
 
-function getControllerUpdateNNI() -- da aggiornare una volta modificare on drag
+function getControllerUpdateNNI() 
 
     if not DRAGGING_BALL then
         isInterpolating = true 
@@ -1396,16 +1413,25 @@ function getControllerUpdateNNI() -- da aggiornare una volta modificare on drag
 
         if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+            setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
         end
 
-        if reaper.ImGui_IsMouseDragging(ctx, 0) then
+        if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
+            reaper.ImGui_IsMouseDragging(ctx, 0) and
+            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) and
+            isUserMovingWindow(ctx) == false then
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
             normalizedX, normalizedY = GetNormalizedMousePosition()
             reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
             reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
             normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
             normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
         end
@@ -1487,6 +1513,25 @@ function getControllerUpdateNNI() -- da aggiornare una volta modificare on drag
         isInterpolating = false
         needToInitSmoothing = true
     end
+end
+
+function isUserMovingWindow(ctx)
+    -- Ottiene la posizione corrente della finestra
+    local currentWindowPosX, currentWindowPosY = reaper.ImGui_GetWindowPos(ctx)
+
+    -- Inizializza lastWindowPosX e lastWindowPosY al primo ciclo
+    if lastWindowPosX == nil or lastWindowPosY == nil then
+        lastWindowPosX, lastWindowPosY = currentWindowPosX, currentWindowPosY
+        return false
+    end
+
+    -- Verifica se la posizione della finestra è cambiata dall'ultimo frame
+    local isMoving = currentWindowPosX ~= lastWindowPosX or currentWindowPosY ~= lastWindowPosY
+
+    -- Aggiorna lastWindowPosX e lastWindowPosY per il prossimo ciclo
+    lastWindowPosX, lastWindowPosY = currentWindowPosX, currentWindowPosY
+
+    return isMoving
 end
 
 function getControllerUpdate()
@@ -1800,37 +1845,49 @@ function mainWindow()
     end
 
     if link_button_retval then
-         
-        if LINK_TO_CONTROLLER == true then LINK_TO_CONTROLLER = false else LINK_TO_CONTROLLER = true end
+        
+        reaper.ImGui_SetKeyboardFocusHere(ctx, -1)
+        local ctrlDown = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl())
+        local shiftDown = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())
 
-        --[[ if LINK_TO_CONTROLLER == true then
-            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+        local controlTrack, fx_index = getControlTrack()
 
-            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
-            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
+        if shiftDown then
+            --boolean reaper.SetEnvelopeStateChunk(TrackEnvelope env, string str, boolean isundo)
+            local envelope = reaper.GetFXEnvelope(controlTrack, fx_index, 0, 0)
+            reaper.DeleteEnvelopePointRange(envelope, -math.huge, math.huge)
+            
+            reaper.SetEnvelopePoint(envelope, 0, 0, 0.5)
+
+            local envelope = reaper.GetFXEnvelope(controlTrack, fx_index, 1, 0)
+            reaper.DeleteEnvelopePointRange(envelope, -math.huge, math.huge)
+
+            reaper.SetEnvelopePoint(envelope, 0, 0, 0.5)
+
+            reaper.TrackFX_SetParam(controlTrack, fx_index, 0, 0.5)
+            reaper.TrackFX_SetParam(controlTrack, fx_index, 1, 0.5)
+
+            reaper.UpdateArrange()
 
             
-            for i, ball in ipairs(balls) do
-                 ball.color = ball_default_color
 
-                 if i == LAST_TOUCHED_BUTTON_INDEX then
-                    ball.color = selected_ball_default_color
-                 end
+        end
+
+        if ctrlDown then
+            if reaper.GetMediaTrackInfo_Value(controlTrack, "B_SHOWINTCP") == 0 then
+                setControlTrackVisibility(controlTrack, true)
+            else
+                setControlTrackVisibility(controlTrack, false)
             end
 
-        else
+            reaper.TrackList_AdjustWindows(false)
 
-            selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
-            selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
+        end
 
-            for i, ball in ipairs(balls) do
-                ball.color = ball_default_color
-
-                if i == LAST_TOUCHED_BUTTON_INDEX then
-                   ball.color = selected_ball_default_color
-                end
-           end
-        end ]]
+        if (not shiftDown) and (not ctrlDown) then 
+            LINK_TO_CONTROLLER = not LINK_TO_CONTROLLER
+        end
+        
     end
 
     if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
@@ -1872,22 +1929,29 @@ function mainWindow()
                                                                         
     reaper.ImGui_PopStyleVar(ctx)
 
+    drawVoronoi()
 
+    if not isInterpolating and not isInfoStringHovered then
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(2, 2, 2, 0.9))
+    else
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.1))
+    end
 
-
-    
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(0.25, 0.25, 0.25, 2))
     reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 90)
+    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 110)
     reaper.ImGui_SetCursorPosX(ctx, 9)
-    reaper.ImGui_Text(ctx, "Right-Click: add snapshot of current FX values\nShift + Left-Click: remove clicked snapshot\nLeft-Click: select a snapshot and load its FX values\nMouse-Wheel: adjust Smoothing\nLeft-Drag: interpolate")
-    reaper.ImGui_SetCursorPosX(ctx, 8)
-    reaper.ImGui_SetCursorPosY(ctx, 4)
-    reaper.ImGui_Text(ctx,string.sub(reaper.GetProjectName(0, ""), 1, -5))
+    reaper.ImGui_Text(ctx, "Right-Click: make a snapshot of current FXs\nLeft-Drag on Snapshot: move\nShift + Left-Click on Snapshot: remove\nLeft-Click on Snapshot: select and load FXs values\nMouse-Wheel: adjust Smoothing\nLeft-Drag: interpolate")
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_PopStyleColor(ctx)
+    
+    local x1, y1 = reaper.ImGui_GetItemRectMin(ctx)
+    local x2, y2 = reaper.ImGui_GetItemRectMax(ctx)
 
-    drawVoronoi()
+    if IsAnyPointInsideRect(snapshot_list, {x1, y1, x2, y2})then
+        isInfoStringHovered = true
+    else
+        isInfoStringHovered = false
+    end 
 
     onRightClick()
     drawSnapshots()
@@ -1900,6 +1964,8 @@ function mainWindow()
         if reaper.GetPlayState() == 1 then
             if PLAY_STATE == false then
                 CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+                setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
+                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
                 needToInitSmoothing = true
                 updateSnapshotIndexList()
                 PLAY_STATE = true
@@ -1913,6 +1979,7 @@ function mainWindow()
             if PLAY_STATE == true then
                 PLAY_STATE = false
                 isInterpolating = false
+                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
             end
         end
         
@@ -1946,6 +2013,40 @@ function mainWindow()
 
     reaper.ImGui_EndChild(ctx)
     
+end
+
+function IsAnyPointInsideRect(points, rect)
+    -- points: lista di punti dove ogni punto è un table {x, y}
+    -- rect: un table che rappresenta il rettangolo con {x1, y1, x2, y2},
+    -- dove (x1, y1) sono le coordinate dell'angolo superiore sinistro,
+    -- e (x2, y2) quelle dell'angolo inferiore destro del rettangolo.
+    --reaper.ShowConsoleMsg(#rect)
+    for _, point in ipairs(points) do
+        local x, y = windowToScreenCoordinates(point.x * ACTION_WINDOW_WIDTH, point.y * ACTION_WINDOW_HEIGHT)
+        if x >= rect[1] and x <= rect[3] and y >= rect[2] and y <= rect[4] then
+            return true -- Almeno un punto è dentro al rettangolo
+        end
+    end
+    
+    return false -- Nessun punto è dentro al rettangolo
+end
+
+function IsMouseStillForXSeconds(ctx, threshold)
+    -- Ottiene la posizione corrente del mouse
+    local mouseX, mouseY = reaper.ImGui_GetMousePos(ctx)
+
+    -- Controlla se la posizione del mouse è cambiata
+    if mouseX ~= lastMousePosX or mouseY ~= lastMousePosY then
+        -- Aggiorna l'ultima posizione del mouse e il tempo
+        lastMousePosX, lastMousePosY = mouseX, mouseY
+        lastTimeMouseMoved = reaper.time_precise()
+    end
+
+    -- Calcola la differenza di tempo da quando il mouse si è mosso l'ultima volta
+    local timeSinceLastMove = reaper.time_precise() - lastTimeMouseMoved
+
+    -- Controlla se il tempo da quando il mouse si è mosso l'ultima volta è maggiore del threshold
+    return timeSinceLastMove >= threshold
 end
 
 function whichPointIsInThisPolygon(puntiPoligono, listaPunti) -- :)
@@ -2026,6 +2127,29 @@ function drawVoronoi()
         end
 
         needToUpdateVoronoi = false
+    else
+        if #snapshot_list == 1 then
+
+            local polygon_verts = {}
+
+            local x, y = windowToScreenCoordinates(0, 0)
+            table.insert(polygon_verts, x)
+            table.insert(polygon_verts, y)
+
+            x, y = windowToScreenCoordinates(reaper.ImGui_GetWindowWidth(ctx), 0)
+            table.insert(polygon_verts, x)
+            table.insert(polygon_verts, y)
+
+            x, y = windowToScreenCoordinates(reaper.ImGui_GetWindowWidth(ctx), reaper.ImGui_GetWindowHeight(ctx))
+            table.insert(polygon_verts, x)
+            table.insert(polygon_verts, y)
+
+            x, y = windowToScreenCoordinates(0, reaper.ImGui_GetWindowHeight(ctx))
+            table.insert(polygon_verts, x)
+            table.insert(polygon_verts, y)
+
+            reaper.ImGui_DrawList_AddConvexPolyFilled(reaper.ImGui_GetWindowDrawList(ctx), reaper.new_array(polygon_verts, #polygon_verts), snapshot_list[1].color)
+        end
     end
 end
 
@@ -2176,6 +2300,33 @@ function preferencesWindow()
 
 end
 
+function setControlTrackEnvelopeChunks(track, fx_index)
+
+    local envelope = reaper.GetFXEnvelope(track, fx_index, 0, 1)
+    local retval, chunk = reaper.GetEnvelopeStateChunk(envelope, "", false)
+    local modifiedChunk = string.gsub(chunk, "\nARM %d", "\nARM 1")
+    modifiedChunk = string.gsub(modifiedChunk, "\nVIS %d %d %d", "\nVIS 1 0 0")
+    reaper.SetEnvelopeStateChunk(envelope, modifiedChunk, true)
+
+    envelope = reaper.GetFXEnvelope(track, fx_index, 1, 1)
+    retval, chunk = reaper.GetEnvelopeStateChunk(envelope, "", false)
+    modifiedChunk = string.gsub(chunk, "\nARM %d", "\nARM 1")
+    modifiedChunk = string.gsub(modifiedChunk, "\nVIS %d %d %d", "\nVIS 1 0 0")
+    reaper.SetEnvelopeStateChunk(envelope, modifiedChunk, true)
+end
+
+function setControlTrackVisibility(track, visible)
+    if visible then
+        reaper.SetMediaTrackInfo_Value(track, "B_SHOWINMIXER", 1)
+        reaper.SetMediaTrackInfo_Value(track, "B_SHOWINTCP", 1)
+        --reaper.ShowConsoleMsg('VISIBLE\n')
+    else
+        reaper.SetMediaTrackInfo_Value(track, "B_SHOWINMIXER", 0)
+        reaper.SetMediaTrackInfo_Value(track, "B_SHOWINTCP", 0)
+        --reaper.ShowConsoleMsg('NOT VISIBLE\n')
+    end
+end
+
 function getControlTrack()
 
     for t = 0, reaper.CountTracks(0) - 1 do
@@ -2191,7 +2342,8 @@ function getControlTrack()
                     if  fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' or
                         fx_name == 'JS: mtt_metasurface_controller' or 
                         fx_name == 'mtt_metasurface_controller' then
-                        return current_track, f
+
+                            return current_track, f
                     end
                 end
             end
@@ -2298,16 +2450,16 @@ function initMS()
     initBalls()
     updateSnapshotIndexList()
 
-    --[[ if LINK_TO_CONTROLLER == true then
+    if LINK_TO_CONTROLLER == true then
         CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
-
+--[[ 
         selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.5,0.0,0.0, 1)
         selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.3,0.0,0.0, 1)
 
     else
         selected_ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.5,0.0, 1)
-        selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1)
-    end ]]
+        selected_ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.0,0.3,0.0, 1) ]]
+    end
 
     LAST_TOUCHED_BUTTON_INDEX = nil
 
