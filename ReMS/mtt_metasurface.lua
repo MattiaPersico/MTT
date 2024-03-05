@@ -13,7 +13,7 @@
 -- Script Name and Version
 
 local major_version = 0
-local minor_version = 22
+local minor_version = 23
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
