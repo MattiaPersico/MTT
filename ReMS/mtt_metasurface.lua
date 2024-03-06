@@ -16,7 +16,7 @@
 
 
 local major_version = 0
-local minor_version = 26
+local minor_version = 27
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -88,7 +88,6 @@ function ensureGlobalSettings()
 
     return nomeFile
 end
-
 
 --local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
 local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
@@ -270,13 +269,13 @@ local proj_snapshot = {
     assigned = false
 }
 
-function proj_snapshot:new(x, y, name)
+function proj_snapshot:new(x, y, name, color)
     local instance = setmetatable({}, {__index = self})
     instance.x = x or 0
     instance.y = y or 0
     instance.name = name
     instance.track_list = {}
-    instance.color = reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
+    instance.color = color or reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
     instance.assigned = false
     return instance
 end
@@ -1238,7 +1237,12 @@ function onDragLeftMouseNNI()
             end
             local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
             previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
-        
+            
+            if containsValue(groupIndex, closest_snapshots) then
+                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
+                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
+            end
+
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
             end
@@ -1292,7 +1296,12 @@ function onDragLeftMouseIDW()
         
             -- Calcola il valore interpolato per questo gruppo di punti
             local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
-        
+
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
+            
+
+
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
@@ -1302,6 +1311,11 @@ function onDragLeftMouseIDW()
         isInterpolating = false
         needToInitSmoothing = true
     end
+end
+
+function drawDistanceLines(x1, y1, x2, y2, maxDistance)
+    local alpha = inverselyProportionalValue(x1, y1, x2, y2, maxDistance)
+    drawLine(x1, y1, x2, y2, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,alpha), 1)
 end
 
 function findClosestPointIndex(points, targetPoint)
@@ -1388,10 +1402,13 @@ function getControllerUpdateIDW()
 
          for groupIndex, group in ipairs(grouped_parameters) do
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
-        
+            
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
+
             -- Calcola il valore interpolato per questo gruppo di punti
             local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
-        
+
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
@@ -1400,6 +1417,21 @@ function getControllerUpdateIDW()
     else
         isInterpolating = false
         needToInitSmoothing = true
+    end
+end
+
+function inverselyProportionalValue(x1, y1, x2, y2, maxDistance)
+    -- Calcola la distanza euclidea tra i due punti
+    local distance = math.sqrt((x2 - x1)^2 + (y2 - y1)^2)
+
+    -- Verifica per evitare divisione per zero o risultati non validi
+    if distance == 0 then
+        return 1 -- I punti sono coincidenti, valore massimo
+    elseif distance >= maxDistance then
+        return 0 -- La distanza è uguale o superiore a maxDistance, valore minimo
+    else
+        -- Calcola il valore inversamente proporzionale
+        return 1 - (distance / maxDistance)
     end
 end
 
@@ -1504,7 +1536,12 @@ function getControllerUpdateNNI()
             end
             local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
             previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
-        
+            
+            if containsValue(groupIndex, closest_snapshots) then
+                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
+                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
+            end
+
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
             end
@@ -1655,7 +1692,11 @@ function saveSelected()
 
         local snap_name = snapshot_list[s].name or ('Snap ' .. tostring(s))
 
-        snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name)
+        if snapshot_list[s] then
+            snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name, snapshot_list[s].color)
+        else
+            snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name)
+        end
 
         for i = 0, reaper.CountTracks(0) - 1 do
             local current_track = reaper.GetTrack(0,i)
