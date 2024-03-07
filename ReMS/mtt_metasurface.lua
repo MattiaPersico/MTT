@@ -4,8 +4,6 @@
 
 -- aggiungere supporto a fx dentro container
 
--- aggiungi interpolazione cerchi/distanza
-
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
 
 -- sistema filtri specifico oppure...
@@ -16,7 +14,7 @@
 
 
 local major_version = 0
-local minor_version = 27
+local minor_version = 29
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -49,6 +47,7 @@ local IGNORE_TRACKS_POST_SAVE_STRING = ''
 local LINK_TO_CONTROLLER = false
 local CONTROL_TRACK = nil
 local CONTROL_FX_INDEX = nil
+local canWriteControllerAutomation = false
 
 local ENABLE_WINDOW_RESIZE = true
 
@@ -230,7 +229,6 @@ local snapshot_list = {}
 local balls = {}
 
 local ball_default_color = reaper.ImGui_ColorConvertDouble4ToU32(1,1,1, 1)
-local ball_clicked_color = reaper.ImGui_ColorConvertDouble4ToU32(0.7,0.7,0.7, 1)
 
 --local is_new_value,filename,sectionID,cmdID,mode,resolution,val,contextstr = reaper.get_action_context()
 
@@ -266,10 +264,11 @@ local proj_snapshot = {
     name,
     track_list = {},
     color = reaper.ImGui_ColorConvertDouble4ToU32(0.5, 0.5, 0.5, 0.2),
-    assigned = false
+    assigned = false,
+    range = 0.5
 }
 
-function proj_snapshot:new(x, y, name, color)
+function proj_snapshot:new(x, y, name, color, range)
     local instance = setmetatable({}, {__index = self})
     instance.x = x or 0
     instance.y = y or 0
@@ -277,6 +276,7 @@ function proj_snapshot:new(x, y, name, color)
     instance.track_list = {}
     instance.color = color or reaper.ImGui_ColorConvertDouble4ToU32(math.random(), math.random(), math.random(), math.random())
     instance.assigned = false
+    instance.range = range or 0.5
     return instance
 end
 
@@ -308,6 +308,7 @@ DRAG_Y = 0
 local smoothing = 5
 local smoothing_max_value = 20
 local smoothing_fader_value = 0.3
+local range_fader_value = 0.5
 local targetX, targetY = 0, 0 -- Coordinate target
 local lastUpdateTime = reaper.time_precise()
 local needToInitSmoothing = true
@@ -560,8 +561,8 @@ function gui_loop()
         | reaper.ImGui_WindowFlags_NoMove()
         | reaper.ImGui_WindowFlags_NoDocking() 
     end
-        local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name .. '  -  ' .. string.gsub(PROJECT_NAME, '.RPP', ""), true, flags)
     
+    local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name .. '  -  ' .. string.gsub(PROJECT_NAME, '.RPP', ""), true, flags)
 
     MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT = reaper.ImGui_GetWindowSize(ctx)
     ACTION_WINDOW_WIDTH = MAIN_WINDOW_WIDTH - WIDTH_OFFSET
@@ -796,11 +797,27 @@ function onRightClick()
 
         --local ball_x, ball_y = windowToScreenCoordinates((normalizedX * ACTION_WINDOW_WIDTH - 1), (normalizedY * ACTION_WINDOW_HEIGHT - 3))
 
-        for i, ball in ipairs(balls) do
-            ball.color = ball_default_color
+        local color = ball_default_color
+
+        if INTERPOLATION_MODE == 0 then
+            color = normalizeAlphaInRange(snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color,1,1)
+        elseif INTERPOLATION_MODE == 1 then
+            color = ball_default_color
+        elseif INTERPOLATION_MODE == 2 then
+            color = normalizeAlphaInRange(snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color,1,1)
         end
 
-        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 5, color = ball_default_color, dragging = false })
+        for i, ball in ipairs(balls) do
+            if INTERPOLATION_MODE == 0 then
+                ball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+            elseif INTERPOLATION_MODE == 1 then
+                ball.color = ball_default_color
+            elseif INTERPOLATION_MODE == 2 then
+                ball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+            end
+        end
+        
+        table.insert(balls, { pos_x = normalizedX, pos_y = normalizedY, radius = 5, color = color, dragging = false })
 
         saveSelected()
 
@@ -845,6 +862,28 @@ function checkIfBallsAreOverlapped(ball_1, ball_2, win_x, win_y, mouse_x_rel, mo
         return false
     end
     
+end
+
+function round(numero)
+    return numero >= 0 and math.floor(numero + 0.5) or math.ceil(numero - 0.5)
+end
+
+function decrementRGB(coloreU32, decremento)
+    -- Estrai i componenti R, G, B, e A dal colore U32
+    local a = (coloreU32 >> 24) & 0xFF
+    local r = (coloreU32 >> 16) & 0xFF
+    local g = (coloreU32 >> 8) & 0xFF
+    local b = coloreU32 & 0xFF
+
+    -- Decrementa i valori R, G, B di 30%
+    r = round(math.max(0, r - r * decremento))
+    g = round(math.max(0, g - g * decremento))
+    b = round(math.max(0, b - b * decremento))
+
+    -- Ricombina i componenti in un unico valore U32
+    local nuovoColoreU32 = (a << 24) | (r << 16) | (g << 8) | b
+
+    return nuovoColoreU32
 end
 
 function drawSnapshots()
@@ -893,10 +932,18 @@ function drawSnapshots()
             if reaper.ImGui_IsMouseDown(ctx, 0) and not DRAGGING_BALL then
 
                 for i, sball in ipairs(balls) do
-                    sball.color = ball_default_color
+
+                    if INTERPOLATION_MODE == 0 then
+                        sball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+                    elseif INTERPOLATION_MODE == 1 then
+                        sball.color = ball_default_color
+                    elseif INTERPOLATION_MODE == 2 then
+                        sball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+                    end
+                    
                 end
 
-                    ball.color = ball_clicked_color
+                    ball.color = decrementRGB(ball.color, 0.3)
                 
                     
                 DRAGGING_BALL = ball
@@ -976,7 +1023,13 @@ function drawSnapshots()
                 DRAGGING_BALL = nil
 
                     for i, sball in ipairs(balls) do
-                        sball.color = ball_default_color
+                        if INTERPOLATION_MODE == 0 then
+                            sball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+                        elseif INTERPOLATION_MODE == 1 then
+                            sball.color = ball_default_color
+                        elseif INTERPOLATION_MODE == 2 then
+                            sball.color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+                        end
                     end
 
         end
@@ -1009,6 +1062,29 @@ function drawSnapshots()
 
 
     
+end
+
+function linearDistanceWeighting(points, x, y)
+    local numerator = 0
+    local denominator = 0
+
+    for _, point in ipairs(points) do
+        local dx = x - point.x
+        local dy = y - point.y
+        local distance = math.sqrt(dx^2 + dy^2)
+        local maxDistance = snapshot_list[point.snapIndex].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2)
+        if distance <= maxDistance then -- Considera solo i punti entro maxDistance
+            local weight = (maxDistance - distance) / maxDistance
+            numerator = numerator + (point.value * weight)
+            denominator = denominator + weight
+        elseif distance == 0 then
+            return point.value -- Ritorna immediatamente il valore se il punto è esattamente uguale
+        end
+        -- Ignora i punti con distanza maggiore di maxDistance
+    end
+
+    if denominator == 0 then return nil end -- Evita la divisione per zero
+    return numerator / denominator
 end
 
 function inverseDistanceWeighting(points, x, y, power)
@@ -1143,8 +1219,10 @@ function onDragLeftMouse()
     if isInterpolating then
         if INTERPOLATION_MODE == 0 then
             onDragLeftMouseIDW()
-        else
+        elseif INTERPOLATION_MODE == 1 then
             onDragLeftMouseNNI()
+        elseif INTERPOLATION_MODE == 2 then
+            onDragLeftMouseLDW()
         end
     else
         if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
@@ -1154,8 +1232,10 @@ function onDragLeftMouse()
             --colorPickerWindowState == false then
             if INTERPOLATION_MODE == 0 then
                 onDragLeftMouseIDW()
-            else
+            elseif INTERPOLATION_MODE == 1 then
                 onDragLeftMouseNNI()
+            elseif INTERPOLATION_MODE == 2 then
+                onDragLeftMouseLDW()
             end
         end
     end
@@ -1238,15 +1318,20 @@ function onDragLeftMouseNNI()
             local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
             previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
             
-            if containsValue(groupIndex, closest_snapshots) then
-                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
-                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
-            end
+
 
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
             end
         end
+
+        for i = 1, #snapshot_list do
+            if containsValue(i, closest_snapshots) then
+                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            end
+         end
+
     else
         isInterpolating = false
         needToInitSmoothing = true
@@ -1292,30 +1377,104 @@ function onDragLeftMouseIDW()
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
          for groupIndex, group in ipairs(grouped_parameters) do
+            --reaper.ShowConsoleMsg(tostring(points_list[groupIndex]) .. '\n')
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
         
             -- Calcola il valore interpolato per questo gruppo di punti
             local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
 
-            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
-            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
-            
-
-
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
-            for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
             end
-        end
+         end
+
+         for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2), snapshot_list[i].color)
+         end
+
     else
         isInterpolating = false
         needToInitSmoothing = true
     end
 end
 
-function drawDistanceLines(x1, y1, x2, y2, maxDistance)
-    local alpha = inverselyProportionalValue(x1, y1, x2, y2, maxDistance)
-    drawLine(x1, y1, x2, y2, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,alpha), 1)
+function onDragLeftMouseLDW()
+    
+    if reaper.ImGui_IsMouseDragging(ctx, 0) and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
+        isInterpolating = true
+        reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = GetNormalizedMousePosition()
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+         for groupIndex, group in ipairs(grouped_parameters) do
+            --reaper.ShowConsoleMsg(tostring(points_list[groupIndex]) .. '\n')
+            local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
+        
+            -- Calcola il valore interpolato per questo gruppo di punti
+            local interpolatedValue = linearDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
+
+            -- Applica questo valore interpolato a tutti i parametri nel gruppo
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
+            end
+         end
+
+         for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+
+            local range_in_pixel = snapshot_list[i].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2)
+
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, range_in_pixel)
+
+         end
+
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function drawDistanceLines(x1, y1, x2, y2, maxDistance, color)
+    local color = color or reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,1)
+    local alpha =  inverselyProportionalValue(x1, y1, x2, y2, maxDistance) --+ 0.0000001
+    color = normalizeAlphaInRange(color, alpha, alpha)
+    drawLine(x1, y1, x2, y2, color, 3 * alpha)
 end
 
 function findClosestPointIndex(points, targetPoint)
@@ -1347,22 +1506,25 @@ function getControllerUpdateIDW()
         if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
             setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
             reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
             reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
         end
 
         if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
             reaper.ImGui_IsMouseDragging(ctx, 0) and
-            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) and
-            isUserMovingWindow(ctx) == false then
-            reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+            canWriteControllerAutomation then
 
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+                if reaper.GetTrackAutomationMode(CONTROL_TRACK) == 1 then
+                    reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+                end
+
+                reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+
+            
         -- Ottieni la posizione normalizzata del mouse
-            normalizedX, normalizedY = GetNormalizedMousePosition()
-            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
-            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
+                normalizedX, normalizedY = GetNormalizedMousePosition()
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
             normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
@@ -1403,35 +1565,119 @@ function getControllerUpdateIDW()
          for groupIndex, group in ipairs(grouped_parameters) do
             local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
             
-            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
-            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
-
             -- Calcola il valore interpolato per questo gruppo di punti
             local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
-            for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
             end
         end
+
+        for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2), snapshot_list[i].color)
+         end
+
     else
         isInterpolating = false
         needToInitSmoothing = true
     end
 end
 
-function inverselyProportionalValue(x1, y1, x2, y2, maxDistance)
-    -- Calcola la distanza euclidea tra i due punti
-    local distance = math.sqrt((x2 - x1)^2 + (y2 - y1)^2)
+function getControllerUpdateLDW() 
 
-    -- Verifica per evitare divisione per zero o risultati non validi
-    if distance == 0 then
-        return 1 -- I punti sono coincidenti, valore massimo
-    elseif distance >= maxDistance then
-        return 0 -- La distanza è uguale o superiore a maxDistance, valore minimo
+    if not DRAGGING_BALL then
+        isInterpolating = true 
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = 0, 0
+
+        if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
+            CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+            setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
+            reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
+        end
+
+        if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
+            reaper.ImGui_IsMouseDragging(ctx, 0) and
+            canWriteControllerAutomation then
+
+                reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+
+                if reaper.GetTrackAutomationMode(CONTROL_TRACK) == 1 then
+                    reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+                end
+            
+        -- Ottieni la posizione normalizzata del mouse
+                normalizedX, normalizedY = GetNormalizedMousePosition()
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
+        else
+            --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
+            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+        end
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+         for groupIndex, group in ipairs(grouped_parameters) do
+            local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
+            
+            -- Calcola il valore interpolato per questo gruppo di punti
+            local interpolatedValue = linearDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
+
+            -- Applica questo valore interpolato a tutti i parametri nel gruppo
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
+            end
+        end
+
+        for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+
+            local range_in_pixel = snapshot_list[i].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2)
+
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, range_in_pixel)
+         end
+
     else
-        -- Calcola il valore inversamente proporzionale
-        return 1 - (distance / maxDistance)
+        isInterpolating = false
+        needToInitSmoothing = true
     end
 end
 
@@ -1446,24 +1692,26 @@ function getControllerUpdateNNI()
         if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
             CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
             setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
             reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
             reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
         end
 
         if  reaper.ImGui_GetMouseCursor(ctx) < 3 and
             reaper.ImGui_IsMouseDragging(ctx, 0) and
-            validateWindowCoordinates(reaper.ImGui_GetMouseClickedPos(ctx, 0)) and
-            isUserMovingWindow(ctx) == false then
-            reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+            canWriteControllerAutomation then
+                reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
-            normalizedX, normalizedY = GetNormalizedMousePosition()
-            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
-            reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
+            
+            if reaper.GetTrackAutomationMode(CONTROL_TRACK) == 1 then
+                reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+            end
+
+                normalizedX, normalizedY = GetNormalizedMousePosition()
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0, normalizedX)
+                reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+            
             normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
             normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
         end
@@ -1536,19 +1784,73 @@ function getControllerUpdateNNI()
             end
             local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
             previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
-            
-            if containsValue(groupIndex, closest_snapshots) then
-                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[groupIndex].x * ACTION_WINDOW_WIDTH, snapshot_list[groupIndex].y * ACTION_WINDOW_HEIGHT)
-                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.max(ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT))
-            end
 
             for _, parameter in ipairs(group) do
                 reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
             end
         end
+
+        for i = 1, #snapshot_list do
+            if containsValue(i, closest_snapshots) then
+                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            end
+         end
+
     else
         isInterpolating = false
         needToInitSmoothing = true
+    end
+end
+
+function inverselyProportionalValue(x1, y1, x2, y2, maxDistance)
+    -- Calcola la distanza euclidea tra i due punti
+    local distance = math.sqrt((x2 - x1)^2 + (y2 - y1)^2)
+
+    -- Verifica per evitare divisione per zero o risultati non validi
+    if distance == 0 then
+        return 1 -- I punti sono coincidenti, valore massimo
+    elseif distance >= maxDistance then
+        return 0 -- La distanza è uguale o superiore a maxDistance, valore minimo
+    else
+        -- Calcola il valore inversamente proporzionale
+        return 1 - (distance / maxDistance)
+    end
+end
+
+function exponentiallyProportionalValue(x1, y1, x2, y2, maxDistance, exponent)
+    -- Calcola la distanza euclidea tra i due punti
+    local exponent = exponent or 2
+    local distance = math.sqrt((x2 - x1)^2 + (y2 - y1)^2)
+
+    -- Verifica per evitare divisione per zero o risultati non validi
+    if distance == 0 then
+        return 1 -- I punti sono coincidenti, valore massimo
+    elseif distance >= maxDistance then
+        return 0 -- La distanza è uguale o superiore a maxDistance, valore minimo
+    else
+        -- Calcola il valore esponenzialmente proporzionale
+        return math.exp(-distance / maxDistance * exponent)
+    end
+end
+
+function logarithmicallyProportionalValue(x1, y1, x2, y2, maxDistance, base, offset)
+    -- Calcola la distanza euclidea tra i due punti
+    local base = base or 2
+    local offset = offset or 200
+    local distance = math.sqrt((x2 - x1)^2 + (y2 - y1)^2) + offset
+
+    -- Verifica per evitare divisione per zero o risultati non validi
+    if distance - offset == 0 then
+        return 1 -- I punti sono coincidenti, valore massimo
+    elseif distance - offset >= maxDistance then
+        return 0 -- La distanza è uguale o superiore a maxDistance, valore minimo
+    else
+        -- Calcola il valore logaritmicamente proporzionale
+        -- Assicurati che la base del logaritmo sia maggiore di 1 per un decremento positivo
+        local adjustedMaxDistance = math.log(maxDistance + offset, base)
+        local value = math.log(distance, base) / adjustedMaxDistance
+        return 1 - value
     end
 end
 
@@ -1572,10 +1874,21 @@ function isUserMovingWindow(ctx)
 end
 
 function getControllerUpdate()
+
+    if reaper.ImGui_IsMouseDragging(ctx, 0) then
+        if reaper.GetTrackAutomationMode(CONTROL_TRACK) == 1 then
+            reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
+        end
+    else
+        reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+    end
+
     if INTERPOLATION_MODE == 0 then
         getControllerUpdateIDW()
-    else
+    elseif INTERPOLATION_MODE == 1 then
         getControllerUpdateNNI()
+    elseif INTERPOLATION_MODE == 2 then
+        getControllerUpdateLDW()
     end
 end
 
@@ -1693,9 +2006,17 @@ function saveSelected()
         local snap_name = snapshot_list[s].name or ('Snap ' .. tostring(s))
 
         if snapshot_list[s] then
-            snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name, snapshot_list[s].color)
+            snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name, snapshot_list[s].color, snapshot_list[s].range)
         else
             snapshot_list[s] = proj_snapshot:new(temp_x, temp_y, snap_name)
+        end
+
+        if INTERPOLATION_MODE == 0 then
+            balls[s].color = normalizeAlphaInRange(snapshot_list[s].color,1,1)
+        elseif INTERPOLATION_MODE == 1 then
+            balls[s].color = reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,1)
+        elseif INTERPOLATION_MODE == 2 then  
+            balls[s].color = normalizeAlphaInRange(snapshot_list[s].color,1,1)
         end
 
         for i = 0, reaper.CountTracks(0) - 1 do
@@ -1810,6 +2131,8 @@ end
 
 function mainWindow()
 
+    --reaper.ImGui_Text(ctx, tostring(reaper.ImGui_GetFramerate(ctx)))
+
     if reaper.ImGui_ImageButton(ctx, 'Save Selected', save_icon, 20, 20 ) then
         saveSelected()
     end
@@ -1829,21 +2152,62 @@ function mainWindow()
     end
 
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 10)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 2)
     reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) + 3)
-    reaper.ImGui_Text(ctx, 'Smoothing')
+    reaper.ImGui_Text(ctx, 'Smooth:')
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 40)
     local retval = false
     retval, smoothing_fader_value = reaper.ImGui_DragDouble(ctx, '##SmoothingValue', smoothing_fader_value, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
     smoothing = (1 - smoothing_fader_value) * smoothing_max_value
     
+    if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
+
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 2)
+        --reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) + 3)
+        reaper.ImGui_Text(ctx, 'Range:')
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetNextItemWidth(ctx, 40)
+        local retval = false
+
+        retval, range_fader_value = reaper.ImGui_DragDouble(ctx, '##Range', snapshot_list[LAST_TOUCHED_BUTTON_INDEX].range, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
+        if retval then
+            snapshot_list[LAST_TOUCHED_BUTTON_INDEX].range = range_fader_value
+        end
+    else
+        --retval, range_fader_value = reaper.ImGui_DragDouble(ctx, '##RangeFake', range_fader_value, 0.01, 0, 1, '%.2f', reaper.ImGui_SliderFlags_AlwaysClamp())
+    end
+
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 60)
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
-    reaper.ImGui_Text(ctx, 'Name:')
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 5)
 
-    local textEditWidth = MAIN_WINDOW_WIDTH - 27 - 60 - 110 - 110 - 85 -- 100
+    if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
+
+        --reaper.ImGui_SameLine(ctx)
+
+        --reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35 - 33)            
+                        
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
+
+        local retval = reaper.ImGui_Button(ctx, '##selected_snap_color', 25, 25 )
+
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_PopStyleColor(ctx)
+
+        if retval then
+            colorPickerWindowState = not colorPickerWindowState
+        end
+
+    else
+        colorPickerWindowState = false
+    end
+
+    local textEditWidth = MAIN_WINDOW_WIDTH - 35 - 60 - 110 - 110 - 85 -- 100
 
     if LAST_TOUCHED_BUTTON_INDEX and snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
         reaper.ImGui_SameLine(ctx)
@@ -1931,36 +2295,14 @@ function mainWindow()
         
     end
 
-    if snapshot_list[LAST_TOUCHED_BUTTON_INDEX] then
-
-        reaper.ImGui_SameLine(ctx)
-
-        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 35 - 35 - 35)            
-                        
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), snapshot_list[LAST_TOUCHED_BUTTON_INDEX].color)
-
-        local retval = reaper.ImGui_Button(ctx, '##selected_snap_color', 25, 25 )
-
-        reaper.ImGui_PopStyleColor(ctx)
-        reaper.ImGui_PopStyleColor(ctx)
-        reaper.ImGui_PopStyleColor(ctx)
-
-        if retval then
-            colorPickerWindowState = not colorPickerWindowState
-        end
-
-    else
-        colorPickerWindowState = false
-    end
+    
 
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 0)
     reaper.ImGui_SetCursorPosX(ctx, WIDTH_OFFSET * 0.5)
 
     --reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.1, 0.1, 0.1, 2))
-    --lamaladonna
+
     reaper.ImGui_BeginChildFrame(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT,   reaper.ImGui_WindowFlags_NoMove()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollbar()
                                                                                                     | reaper.ImGui_WindowFlags_NoScrollWithMouse()
@@ -1970,7 +2312,39 @@ function mainWindow()
                                                                         
     reaper.ImGui_PopStyleVar(ctx)
 
-    drawVoronoi()
+    if reaper.ImGui_IsMouseClicked(ctx, 0) then
+        local MOUSE_CLICKED_POSITION_X, MOUSE_CLICKED_POSITION_Y = reaper.ImGui_GetMouseClickedPos(ctx, 0)
+        if validateWindowCoordinates(MOUSE_CLICKED_POSITION_X, MOUSE_CLICKED_POSITION_Y) then
+            canWriteControllerAutomation = true
+        end
+    end
+
+    if reaper.ImGui_IsMouseReleased(ctx, 0) then
+        canWriteControllerAutomation = false
+    end
+        
+
+    if INTERPOLATION_MODE == 0 then
+        local x,y = reaper.ImGui_GetWindowPos(ctx)
+        reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
+        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetWindowDrawList(ctx), x + 3, y, x + ACTION_WINDOW_WIDTH - 1, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+    elseif INTERPOLATION_MODE == 1 then
+        local x,y = reaper.ImGui_GetWindowPos(ctx)
+        reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
+        drawVoronoi()
+        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetWindowDrawList(ctx), x + 3, y, x + ACTION_WINDOW_WIDTH - 1, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+    elseif INTERPOLATION_MODE == 2 then
+        local x,y = reaper.ImGui_GetWindowPos(ctx)
+        if #snapshot_list >= 1 then
+            
+            reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0,0,0,1))
+            drawSpheres()
+        else
+            reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
+        end
+            reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetWindowDrawList(ctx), x + 3, y, x + ACTION_WINDOW_WIDTH - 1, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+        
+    end
 
     if not isInterpolating and not isInfoStringHovered then
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(2, 2, 2, 0.9))
@@ -1979,9 +2353,9 @@ function mainWindow()
     end
 
     reaper.ImGui_PushFont(ctx, comic_sans_smaller)
-    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 110)
+    reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 125)
     reaper.ImGui_SetCursorPosX(ctx, 9)
-    reaper.ImGui_Text(ctx, "Right-Click: make a snapshot of current FXs\nLeft-Drag on Snapshot: move\nShift + Left-Click on Snapshot: remove\nLeft-Click on Snapshot: select and load FXs values\nMouse-Wheel: adjust Smoothing\nLeft-Drag: interpolate")
+    reaper.ImGui_Text(ctx, "Right-Click: make a snapshot of current FXs\nLeft-Drag on Snapshot: move\nShift + Left-Click on Snapshot: remove\nLeft-Click on Snapshot: select and load FXs values\nMouse-Wheel on Snapshot: adjust range\nCtrl + Mouse-Wheel: adjust Smooth\nLeft-Drag: interpolate")
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_PopStyleColor(ctx)
     
@@ -2006,7 +2380,6 @@ function mainWindow()
             if PLAY_STATE == false then
                 CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
                 setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
-                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
                 needToInitSmoothing = true
                 updateSnapshotIndexList()
                 PLAY_STATE = true
@@ -2020,7 +2393,6 @@ function mainWindow()
             if PLAY_STATE == true then
                 PLAY_STATE = false
                 isInterpolating = false
-                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
             end
         end
         
@@ -2042,18 +2414,52 @@ function mainWindow()
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
         quit = true
     end
-
-    if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
-        smoothing_fader_value = smoothing_fader_value + 0.02
-    elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
-        smoothing_fader_value = smoothing_fader_value - 0.02
-        if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
-    end
     
+    local mouse_x, mouse_y = reaper.ImGui_GetMousePos(ctx)
+
+    local hoveringSnapshot = false
+
+    for i = 1, #snapshot_list do
+        local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * reaper.ImGui_GetWindowWidth(ctx), snapshot_list[i].y * reaper.ImGui_GetWindowHeight(ctx))
+        
+        if checkIfPointsAreaOverlapped(mouse_x, mouse_y, snap_x, snap_y, 6) and not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
+            if reaper.ImGui_GetMouseWheel(ctx) > 0 and snapshot_list[i].range < 1 then
+                snapshot_list[i].range = snapshot_list[i].range + 0.02 
+            elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and snapshot_list[i].range >= 0 then
+                snapshot_list[i].range = snapshot_list[i].range - 0.02
+                if snapshot_list[i].range < 0.01 then snapshot_list[i].range = 0 end
+            end
+
+            hoveringSnapshot = true
+        end    
+    end
+
+    --reaper.ShowConsoleMsg(tostring(reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())))
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and not hoveringSnapshot then
+        if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
+            smoothing_fader_value = smoothing_fader_value + 0.02
+        elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
+            smoothing_fader_value = smoothing_fader_value - 0.02
+            if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
+        end
+    end
+
     reaper.ImGui_PopStyleColor(ctx)
 
     reaper.ImGui_EndChild(ctx)
     
+end
+
+function checkIfPointsAreaOverlapped(x1, y1, x2, y2, pixelTolerance)
+
+        -- Calcola la distanza tra il mouse e il punto di riferimento
+        local deltaX = x2 - x1
+        local deltaY = y2 - y1
+        local distanzaDalPunto = math.sqrt(deltaX^2 + deltaY^2)
+    
+        -- Verifica se il mouse è all'interno del range specificato
+        return distanzaDalPunto <= pixelTolerance
 end
 
 function IsAnyPointInsideRect(points, rect)
@@ -2194,6 +2600,51 @@ function drawVoronoi()
     end
 end
 
+function drawSpheres()
+    for i = 1, #snapshot_list do
+        local x, y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+        local new_color = normalizeAlphaInRange(snapshot_list[i].color, 0.1, 0.2)
+        drawDot(x, y, snapshot_list[i].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2), new_color)
+        --reaper.ImGui_DrawList_AddCircleFilled(ImGui_DrawList draw_list, number center_x, number center_y, number radius, integer col_rgba, optional integer num_segmentsIn)
+    end
+end
+
+function normalizeAlphaInRange(coloreOriginale, alphaMin, alphaMax)
+
+    local R = (coloreOriginale >> 24) & 0xFF
+    local G = (coloreOriginale >> 16) & 0xFF
+    local B = (coloreOriginale >> 8) & 0xFF
+    local alphaOriginale = coloreOriginale & 0xFF
+    
+    -- Converti l'alpha originale in un valore compreso tra 0 e 1
+    local alphaNormalizzato = alphaOriginale / 255
+    
+    -- Calcola il nuovo alpha basato sul range specificato
+    -- Qui mappiamo l'alpha originale (già normalizzato) direttamente nel nuovo range
+    local nuovoAlpha = alphaMin + (alphaNormalizzato * (alphaMax - alphaMin))
+    
+    -- Converti il nuovo alpha normalizzato in un valore intero compreso tra 0 e 255
+    local alphaInt = math.floor(nuovoAlpha * 255)
+    
+    -- Combina R, G, B e il nuovo alpha per creare il nuovo colore
+    return (R << 24) | (G << 16) | (B << 8) | alphaInt
+end
+
+function setAlphaMax(color)
+    -- Estrai i componenti R, G, B dal colore originale
+    local R = (color >> 16) & 0xFF
+    local G = (color >> 8) & 0xFF
+    local B = color & 0xFF
+    
+    -- Imposta l'alpha al massimo (255)
+    local alphaMax = 255
+    
+    -- Combina R, G, B e il nuovo alpha per creare il nuovo colore
+    local nuovoColore = (R << 16) | (G << 8) | B | (alphaMax << 24)
+    --local nuovoColoreU32 = (a << 24) | (r << 16) | (g << 8) | b
+    return nuovoColore
+end
+
 function preferencesWindow()
 
     -- IGNORE PARAMETERS (PRE-SAVE)
@@ -2331,14 +2782,22 @@ function preferencesWindow()
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)    
 
-    if reaper.ImGui_Checkbox(ctx, 'Use Nearest Neighbours Interpolation', INTERPOLATION_MODE) then
-        if INTERPOLATION_MODE == 0 then
-            INTERPOLATION_MODE = 1
-        else
-            INTERPOLATION_MODE = 0
-        end
-    end
+    local retval, current_item = reaper.ImGui_Combo(ctx, "Interpolation", INTERPOLATION_MODE, "IDW\0NNI\0LDW\0")
 
+    if retval then
+        INTERPOLATION_MODE = current_item
+
+        for i = 1, #balls do
+            if INTERPOLATION_MODE == 0 then
+                balls[i].color = normalizeAlphaInRange(snapshot_list[i].color, 1, 1)
+            elseif INTERPOLATION_MODE == 1 then
+                balls[i].color = reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,1)
+            elseif INTERPOLATION_MODE == 2 then
+                balls[i].color = normalizeAlphaInRange(snapshot_list[i].color, 1, 1)
+            end
+        end
+
+    end
 end
 
 function setControlTrackEnvelopeChunks(track, fx_index)
@@ -2440,7 +2899,18 @@ function initBalls()
     balls = {}
 
     for i = 1, #snapshot_list do
-        table.insert(balls, { pos_x = snapshot_list[i].x, pos_y = snapshot_list[i].y, radius = 7, color = ball_default_color, dragging = false })
+
+        local color = ball_default_color
+
+        if INTERPOLATION_MODE == 0 then
+            color = normalizeAlphaInRange(snapshot_list[i].color, 1, 1)
+        elseif INTERPOLATION_MODE == 1 then
+            color = ball_default_color
+        elseif INTERPOLATION_MODE == 2 then
+            color = normalizeAlphaInRange(snapshot_list[i].color,1,1)
+        end
+
+        table.insert(balls, { pos_x = snapshot_list[i].x, pos_y = snapshot_list[i].y, radius = 7, color = color, dragging = false })
     end
 
     return true
