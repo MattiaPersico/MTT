@@ -1,15 +1,9 @@
 -- Appunti:
-
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
-
 -- aggiungere supporto a fx dentro container
-
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
-
 -- sistema filtri specifico oppure...
-
 -- ... sistema di edit snapshots
-
 -- Script Name and Version
 
 
