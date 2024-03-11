@@ -1,4 +1,8 @@
 --[[
+
+This script is a modified version based on the original work by David Ng (2010) and Steve J. Fortune (1987),
+originally licensed under the MIT license. The modifications were made by Mattia Persico in 2024.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

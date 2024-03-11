@@ -2,11 +2,19 @@
 <index version="1" name="MTT_Scripts">
   <category name="ReAG">
     <reapack name="mtt_AudioGuide_Interface.lua" type="script" desc="AudioGuide Interface">
-      <version name="0.20" author="Mattia Persico" time="2024-03-07T16:58:18Z">
+      <version name="0.20" author="Mattia Persico" time="2024-03-11T13:47:38Z">
           <source main="main" file="mtt_AudioGuide_Interface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_AudioGuide_Interface.lua</source>
-          <source file="mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG//mtt_global_functions.lua</source>
+          <source file="mtt_global_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_global_functions.lua</source>
           <source file="mtt_audioguide_paths.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_paths.lua</source>
           <source file="mtt_audioguide_functions.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReAG/mtt_audioguide_functions.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="ReMS">
+    <reapack name="mtt_metasurface.lua" type="script" desc="Metasurface">
+      <version name="0.20" author="Mattia Persico" time="2024-03-11T13:47:38Z">
+          <source main="main" file="mtt_metasurface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/mtt_metasurface.lua</source>
+          <source file="voronoi.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/voronoi.lua</source>
       </version>
     </reapack>
   </category>

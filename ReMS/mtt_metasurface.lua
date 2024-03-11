@@ -1,3 +1,12 @@
+
+--[[
+This script was created by Mattia Persico in 2024.
+It uses a dependency originally developed by David Ng (2010) and Steve J. Fortune (1987)
+and modified by Mattia Persico (2024), which is under the MIT license.
+This dependency is used to calculate the Voronoi diagram.
+For information about the MIT-licensed dependency, refer to the file voronoi.lua.
+]]
+
 -- Appunti:
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
@@ -8,7 +17,7 @@
 
 
 local major_version = 0
-local minor_version = 29
+local minor_version = 30
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -17,7 +26,7 @@ local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
 local SAVE_PROJECT_COMMAND = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 400
+local PREF_WINDOW_HEIGHT = 420
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -83,7 +92,70 @@ function ensureGlobalSettings()
 end
 
 --local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
-local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
+--local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
+if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
+    require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
+  else
+    require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
+  end
+
+
+----------------------------------------------------------------------- OSC -----------------------------------------------------------------------
+--[=[ 
+
+local OSC_CONTROLLED = false                -- va messo nelle preferenze
+local OSC_SERVER_IP = "169.254.139.153"     -- va messo nelle preferenze
+local OSC_LISTEN_PORT = 8003                -- va messo nelle preferenze
+
+-- Load the socket module
+local opsys = reaper.GetOS()
+local extension
+
+local OSC_X, OSC_Y = 0, 0
+
+if opsys:match('Win') then
+  extension = 'dll'
+else -- Linux and Macos
+  extension = 'so'
+end
+
+local info = debug.getinfo(1, 'S');
+local script_path = info.source:match[[^@?(.*[\/])[^\/]-$]];
+package.cpath = package.cpath .. ";" .. script_path .. "/socket module/?."..extension  -- Add current folder/socket module for looking at .dll (need for loading basic luasocket)
+package.path = package.path .. ";" .. script_path .. "/socket module/?.lua" -- Add current folder/socket module for looking at .lua ( Only need for loading the other functions packages lua osc.lua, url.lua etc... You can change those files path and update this line)
+
+-- Get socket and osc modules
+local socket = require('socket.core')
+local osc = require('osc')
+
+-- Get UDP
+local udp = assert(socket.udp())
+assert(udp:setsockname(OSC_SERVER_IP, OSC_LISTEN_PORT)) -- Set IP and PORT
+udp:settimeout(0.0001) -- Dont forget to set a low timeout! udp:receive block until have a message or timeout. values like (1) will make REAPER laggy.
+
+local function updateOSC()
+
+    for address, values in osc.enumReceive(udp) do
+        --[[ print('address: ', address)
+        print('This message haves '..#values..' values:')
+        for k, v in ipairs(values) do
+          print('    ', v)
+          x = v
+        end ]]
+        if #values == 2 then
+            OSC_X = values[1]
+            OSC_Y = values[2]
+        end
+  
+    end
+
+    reaper.defer(updateOSC)
+end
+
+----------------------------------------------------------------------- OSC -----------------------------------------------------------------------
+--]=]
+
+
 local GLOBAL_SETTINGS = ensureGlobalSettings()
 
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
@@ -688,7 +760,7 @@ function colorPickerWindow()
 end
 
 function loop()
-    
+
     gui_loop()
     
     if not isInterpolating then
@@ -1209,7 +1281,7 @@ function screenToWindowCoordinates(xSchermo, ySchermo)
 end
 
 function onDragLeftMouse()
-
+    
     if isInterpolating then
         if INTERPOLATION_MODE == 0 then
             onDragLeftMouseIDW()
@@ -2792,6 +2864,10 @@ function preferencesWindow()
         end
 
     end
+
+--[[     if reaper.ImGui_Checkbox(ctx, 'OSC', OSC_CONTROLLED) then
+        OSC_CONTROLLED = not OSC_CONTROLLED
+    end ]]
 end
 
 function setControlTrackEnvelopeChunks(track, fx_index)
