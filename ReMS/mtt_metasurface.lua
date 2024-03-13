@@ -8,6 +8,8 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 ]]
 
 -- Appunti:
+-- BUG: trascinare la finestra non in modalitá controller provoa il problema dell inizio interpolazione che ho fixato nella modalitá controller
+-- BUG: se la traccia di controllo non c'é e si disattiva la modalitá controllo la traccia controllo viene creata (teoricamente non serve)
 -- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
@@ -17,7 +19,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 32
+local minor_version = 33
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
