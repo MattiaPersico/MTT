@@ -17,23 +17,30 @@ reaper.ImGui_Attach(ctx, comic_sans_bigger)
 reaper.ImGui_Attach(ctx, comic_sans_smaller)
 reaper.ImGui_Attach(ctx, new_line_font)
 
-
-local sizeConstraintsCallback = [=[
-a = 0
-]=]
-
-local stolenPeaksNormMult = {}
-
 --[[
     local number = reaper.CalculateNormalization(PCM_source, 2, 0, 0, 0)
 
     Calculate normalize adjustment for source media.
+    PCM_source: ...
     normalizeTo: 0=LUFS-I, 1=RMS-I, 2=peak, 3=true peak, 4=LUFS-M max, 5=LUFS-S max.
     normalizeTarget: dBFS or LUFS value.
     normalizeStart,
     normalizeEnd: time bounds within source media for normalization calculation.
     If normalizationStart=0 and normalizationEnd=0, the full duration of the media will be used for the calculation.
 ]]
+
+local sizeConstraintsCallback = [=[
+a = 0
+]=]
+
+local stolenPeaksNormMult_Master = {}
+local maxPeak_Master = 0
+local stolePeaksNormMult_Slave = {}
+local maxPeak_Slave = 0
+
+local windowSize = 0.02-- buono: 0.01 -- min:0.0005
+
+
 
 
 function getTakeStartEndTime(take)
@@ -49,24 +56,6 @@ function getTakeStartEndTime(take)
     local endTime = startTime + (takeLength / takeRate)
 
     return startTime, endTime
-end
-
-function createTrackVolumeEnvelopePoint(track, position, volumeValue)
-    -- Assicurati che la traccia e i valori siano validi
-    if not track or not position or not volumeValue then return end
-    
-    -- Ottieni l'envelope del volume per la traccia selezionata
-    local envelope = reaper.GetTrackEnvelopeByName(track, "Volume")
-    if not envelope then return end
-    
-    -- Converte il valore del volume da 0-1 a scala Reaper (dB)
-    local valueDB = reaper.ScaleToEnvelopeMode(1, volumeValue) -- 1 è il modo per l'env di volume
-    
-    -- Inserisce il punto envelope
-    reaper.InsertEnvelopePoint(envelope, position, valueDB, 0, 0, 0, true)
-    
-    -- Ricalcola e aggiorna l'envelope
-    reaper.Envelope_SortPoints(envelope)
 end
 
 function createTakeVolumeEnvelopePoint(take, position, volumeValue)
@@ -88,125 +77,99 @@ function createTakeVolumeEnvelopePoint(take, position, volumeValue)
 end
 
 function stealEnvelope()
-
     
-
-    stolenPeaksNormMult = {}
+    local peaksNormMult = {}
 
     local item = reaper.GetSelectedMediaItem(0, 0)
     local take = reaper.GetActiveTake(item)
+
     local PCM_source = reaper.GetMediaItemTake_Source(take)
-    
-    local track = reaper.GetSelectedTrack(0,0)
-    
-    local windowSize = 0.01
+
     local takeLenght = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") * reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
     local startTime, endTime = getTakeStartEndTime(take)
-    
-    local nWindows = takeLenght/windowSize
-    
-    local itemStart = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-    --setTakeVolumeEnvelopeVisible(item)
-    --createVolumeEnvelopePoint(track, itemStart, 1)
-    --createVolumeEnvelopePoint(track, itemStart + takeLenght, 1)
-    --table.insert(stolenPeaksNormMult, 1)
 
-    local position = itemStart
-    
+    local nWindows = takeLenght/windowSize
+
+    local maxPeak = reaper.CalculateNormalization(PCM_source, 2, 0, startTime, endTime)
+
     for i = 0, nWindows do
         local newStepStartTime = startTime + windowSize * i
         local newStepEndtTime = newStepStartTime + windowSize
-        position = itemStart + newStepStartTime + windowSize * 0.5
-        local number = reaper.CalculateNormalization(PCM_source, 2, 0, newStepStartTime, newStepEndtTime)
-    
-        if position > itemStart + endTime then
-            --table.insert(stolenPeaksNormMult, 1)
-            break 
-        end
-        
-        table.insert(stolenPeaksNormMult, number)
 
-        position = itemStart + newStepStartTime + windowSize * 0.5
-        --createVolumeEnvelopePoint(track, position, 16/number)
+        local number = reaper.CalculateNormalization(PCM_source, 2, 0, newStepStartTime, newStepEndtTime)
+        --number = (20 * math.log(number, 10))
+
+        --
+        table.insert(peaksNormMult, number)
     end
 
-    
-    --createVolumeEnvelopePoint(track, itemStart + takeLenght, 1)
+    return peaksNormMult, maxPeak
 end
 
 function imposeEnvelope()
 
-    if stolenPeaksNormMult then
+    if stolenPeaksNormMult_Master then
+
+        stolePeaksNormMult_Slave = {}
+        stolePeaksNormMult_Slave, maxPeak_Slave = stealEnvelope()
+
         local item = reaper.GetSelectedMediaItem(0, 0)
         local take = reaper.GetActiveTake(item)
-        local PCM_source = reaper.GetMediaItemTake_Source(take)
-        
-        local track = reaper.GetSelectedTrack(0,0)
-        
-        local windowSize = 0.01
-        local takeLenght = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") * reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
         local startTime, endTime = getTakeStartEndTime(take)
-        
-        local nWindows = takeLenght/windowSize
-        
-        --local itemStart = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-        local itemStart = 0
-        --createVolumeEnvelopePoint(track, itemStart, 1)
-        --createVolumeEnvelopePoint(track, itemStart + takeLenght, 1)
-        
-        local position = itemStart
+
+        local position = 0
 
         setTakeVolumeEnvelopeVisible(item)
 
         createTakeVolumeEnvelopePoint(take, position, 1)
-        position = itemStart + windowSize * 0.5
 
+        position = windowSize * 0.5
 
+        for i = 1, #stolenPeaksNormMult_Master do
+ 
+            local number = 0
 
-        for i = 1, #stolenPeaksNormMult do
-            local newStepStartTime = startTime + windowSize * i
-            local newStepEndtTime = newStepStartTime + windowSize
-            
-            local number = stolenPeaksNormMult[i]
-        
-            if position > itemStart + endTime then
-                --createVolumeEnvelopePoint(track, position, 1)
+            if stolePeaksNormMult_Slave[i] > stolenPeaksNormMult_Master[i] then
+                number = stolePeaksNormMult_Slave[i] - stolenPeaksNormMult_Master[i]
+            else
+                number = stolenPeaksNormMult_Master[i] - stolePeaksNormMult_Slave[i]
+            end
+
+            reaper.ShowConsoleMsg(number .. '\n')
+
+            if position > endTime then
                 break 
             end
             
-            createTakeVolumeEnvelopePoint(take, position, 16/number)
+            createTakeVolumeEnvelopePoint(take, position - windowSize * 0.5, number) 
 
-            position = itemStart + newStepStartTime + windowSize * 0.5
+            position = position + windowSize
         end
         
-        createTakeVolumeEnvelopePoint(take, position, 1)
+        createTakeVolumeEnvelopePoint(take, position - windowSize * 0.5, 1)
     end
 end
 
+
 function setTakeVolumeEnvelopeVisible(item)
-    
     if not item then return end
 
     local take = reaper.GetActiveTake(item)
     if not take or reaper.TakeIsMIDI(take) then return end
 
-    -- Ottiene lo state chunk dell'item
     local _, itemChunk = reaper.GetItemStateChunk(item, "", false)
-    local envChunkExists = itemChunk:find("<VOLENV") ~= nil
+    local guid = reaper.genGuid()
 
-    if not envChunkExists then
-        -- Aggiunge un inviluppo di volume se non presente
-        local envChunk = "<VOLENV\nEGUID {FDCF5A46-AFD6-1244-BD64-F5A8DA0BF054}\nACT 1 -1\nVIS 1 1 1\nLANEHEIGHT 0 0\nARM 0\nDEFSHAPE 0 -1 -1\nVOLTYPE 1\nPT 0 1 0\n>\n"
-        itemChunk = itemChunk:gsub("<EXT", envChunk .. "<EXT")
+    -- Definisce la nuova sezione VOLENV
+    local newEnvChunk = "<VOLENV\nEGUID {" .. guid .. "}\nACT 1 -1\nVIS 1 1 1\nLANEHEIGHT 0 0\nARM 0\nDEFSHAPE 0 -1 -1\nVOLTYPE 1\nPT 0 1 0\n>\n"
+
+    -- Controlla se esiste già una sezione VOLENV
+    if itemChunk:find("<VOLENV") then
+        -- Sostituisce la vecchia sezione VOLENV con la nuova
+        itemChunk = itemChunk:gsub("<VOLENV.-\n>\n", newEnvChunk, 1)
     else
-        -- Rende visibile l'inviluppo se già presente ma non visibile
-        itemChunk = itemChunk:gsub("<VOLENV.-\n>", function(match)
-            if match:find("VIS 0") then
-                return match:gsub("VIS 0", "VIS 1")
-            else
-                return match
-            end
-        end)
+        -- Aggiunge la nuova sezione VOLENV subito dopo la sezione SOURCE WAVE
+        itemChunk = itemChunk:gsub("(%<SOURCE WAVE.-\n%>)", "%1\n" .. newEnvChunk)
     end
 
     reaper.SetItemStateChunk(item, itemChunk, false)
@@ -327,7 +290,8 @@ end
 
 function mainWindow()
     if reaper.ImGui_Button(ctx, 'steal', 100) then
-        stealEnvelope()
+        stolenPeaksNormMult_Master = {}
+        stolenPeaksNormMult_Master, maxPeak_Master = stealEnvelope()
     end
 
     if reaper.ImGui_Button(ctx, 'impose', 100) then

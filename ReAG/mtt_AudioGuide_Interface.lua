@@ -9,7 +9,7 @@
 
 -- Script Name and Version
 local major_version = 0
-local minor_version = 20
+local minor_version = 21
 
 local name = 'AudioGuide Interface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 -- Reaper ImGui Stuff
