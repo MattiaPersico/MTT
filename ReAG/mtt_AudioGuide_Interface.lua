@@ -9,7 +9,7 @@
 
 -- Script Name and Version
 local major_version = 0
-local minor_version = 21
+local minor_version = 22
 
 local name = 'AudioGuide Interface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 -- Reaper ImGui Stuff
@@ -30,7 +30,7 @@ local PREF_WINDOW_HEIGHT = 220
 
 local SPASS_WINDOW_HEIGHT = 140
 
-dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
+dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.9')
 local ctx = reaper.ImGui_CreateContext(name)
 local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
 local comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
@@ -1290,7 +1290,7 @@ function GUI_SearchPasses()
   reaper.ImGui_PopFont(ctx)
   reaper.ImGui_PushFont(ctx, comic_sans)
   reaper.ImGui_SetCursorPosX(ctx, 3);
-  if reaper.ImGui_BeginChild(ctx, 'Spass Window', MAIN_WINDOW_WIDTH - 30, SPASS_WINDOW_HEIGHT, true, reaper.ImGui_WindowFlags_HorizontalScrollbar()) then
+  if reaper.ImGui_BeginChild(ctx, 'Spass Window', MAIN_WINDOW_WIDTH - 30, SPASS_WINDOW_HEIGHT, reaper.ImGui_ChildFlags_Border(),reaper.ImGui_WindowFlags_HorizontalScrollbar()) then
 
     spassWindow()
     reaper.ImGui_EndChild(ctx)
@@ -1353,7 +1353,7 @@ function mainWindow()
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_PopFont(ctx)
 
-    if reaper.ImGui_BeginChild(ctx, '##ParametersInvisibleWindow', CURRENT_WINDOW_WIDTH - 12, CURRENT_WINDOW_HEIGHT - 90, false) then
+    if reaper.ImGui_BeginChild(ctx, '##ParametersInvisibleWindow', CURRENT_WINDOW_WIDTH - 12, CURRENT_WINDOW_HEIGHT - 90, nil, nil) then
 
       reaper.ImGui_PushFont(ctx, comic_sans_smaller)
       reaper.ImGui_NewLine(ctx)

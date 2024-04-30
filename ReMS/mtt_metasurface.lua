@@ -8,18 +8,15 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 ]]
 
 -- Appunti:
--- BUG: trascinare la finestra non in modalitá controller provoa il problema dell inizio interpolazione che ho fixato nella modalitá controller
 -- BUG: se la traccia di controllo non c'é e si disattiva la modalitá controllo la traccia controllo viene creata (teoricamente non serve)
--- dare un path sensato al file voronoi.lua attualmente viene letto in un path mio
 -- aggiungere supporto a fx dentro container
 -- provare ad aggiungere modalita che lavora solo su tracce selezionate
 -- sistema filtri specifico oppure...
 -- ... sistema di edit snapshots
--- Script Name and Version
 
 
 local major_version = 0
-local minor_version = 37
+local minor_version = 38
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -653,7 +650,7 @@ function gui_loop()
         if colorPickerWindowState then
             local flags = reaper.ImGui_WindowFlags_NoCollapse()
             --reaper.ImGui_SetNextWindowFocus(ctx)
-            reaper.ImGui_SetNextWindowSizeConstraints(ctx, 300, 268, 300 * 1.5, 268 * 1.55, reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback))
+            reaper.ImGui_SetNextWindowSizeConstraints(ctx, 300, 268, 300 * 1.5, 268 * 1.55, EEL_DUMMY_FUNCTION)
             local cpw_visible, cpw_open = reaper.ImGui_Begin(ctx, 'Color Picker', flags)
       
             if cpw_visible then
@@ -682,7 +679,7 @@ function gui_loop()
         reaper.ImGui_SetNextWindowPos(ctx, pref_window_x, pref_window_y)
         reaper.ImGui_SetNextWindowSize(ctx, PREF_WINDOW_WIDTH, PREF_WINDOW_HEIGHT)--, reaper.ImGui_Cond_FirstUseEver())
   
-        local pw_visible, pw_open = reaper.ImGui_Begin(ctx, 'Preferences',false, reaper.ImGui_WindowFlags_NoResize() | reaper.ImGui_WindowFlags_NoCollapse())
+        local pw_visible, pw_open = reaper.ImGui_Begin(ctx, 'Preferences',false, reaper.ImGui_WindowFlags_NoResize() | reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoScrollbar() )
   
         if pw_visible then
           preferencesWindow()
@@ -2471,11 +2468,12 @@ function mainWindow()
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), reaper.ImGui_ColorConvertDouble4ToU32(0.1, 0.1, 0.1, 2))
 
     reaper.ImGui_BeginChild(ctx, 'MovementWindow', ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT,   reaper.ImGui_ChildFlags_FrameStyle()
-                                                                                                   -- | reaper.ImGui_WindowFlags_NoScrollbar()
-                                                                                                    --| reaper.ImGui_WindowFlags_NoScrollWithMouse()
-                                                                                                    --| reaper.ImGui_WindowFlags_TopMost()
+                                                                                                    | reaper.ImGui_ChildFlags_AutoResizeX()
+                                                                                                    | reaper.ImGui_ChildFlags_AutoResizeY()
                                                                                                     | reaper.ImGui_ChildFlags_AlwaysUseWindowPadding()
-                                                                                                    --| reaper.ImGui_WindowFlags_NoResize()
+                                                                                                    | reaper.ImGui_ChildFlags_Border()
+                                                                                                    | reaper.ImGui_ChildFlags_AlwaysAutoResize(),
+                                                                                                    reaper.ImGui_WindowFlags_NoScrollbar()
 )
     reaper.ImGui_PopStyleVar(ctx)
 
