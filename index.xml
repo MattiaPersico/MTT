@@ -12,9 +12,16 @@
   </category>
   <category name="ReMS">
     <reapack name="mtt_metasurface.lua" type="script" desc="Metasurface">
-      <version name="0.38" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+      <version name="0.39" author="Mattia Persico" time="2024-06-04T13:40:20Z">
           <source main="main" file="mtt_metasurface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/mtt_metasurface.lua</source>
           <source file="voronoi.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/voronoi.lua</source>
+      </version>
+    </reapack>
+  </category>
+    <category name="PlasticIntegration">
+    <reapack name="mtt_plastic_integration.lua" type="script" desc="Partial Plastic (cl) Reaper Integration">
+      <version name="1.6" author="Mattia Persico" time="2024-06-04T13:40:20Z">
+          <source main="main" file="mtt_mmtt_plastic_integrationetasurface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/PlasticIntegration/mtt_plastic_integration.lua</source>
       </version>
     </reapack>
   </category>

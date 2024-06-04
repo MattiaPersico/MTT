@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 38
+local minor_version = 39
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -2492,12 +2492,12 @@ function mainWindow()
     if INTERPOLATION_MODE == 0 then
         local x,y = reaper.ImGui_GetWindowPos(ctx)
         reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
-        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x + 2, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
     elseif INTERPOLATION_MODE == 1 then
         local x,y = reaper.ImGui_GetWindowPos(ctx)
         reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
         drawVoronoi()
-        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x + 2, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+        reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
     elseif INTERPOLATION_MODE == 2 then
         local x,y = reaper.ImGui_GetWindowPos(ctx)
         if #snapshot_list >= 1 then
@@ -2507,7 +2507,7 @@ function mainWindow()
         else
             reaper.ImGui_DrawList_AddRectFilled(reaper.ImGui_GetWindowDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.085,0.085,0.085,1))
         end
-            reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x + 2, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
+            reaper.ImGui_DrawList_AddRect(reaper.ImGui_GetForegroundDrawList(ctx), x, y, x + ACTION_WINDOW_WIDTH, y + ACTION_WINDOW_HEIGHT, reaper.ImGui_ColorConvertDouble4ToU32(0.2,0.2,0.2,1))
         
     end
 

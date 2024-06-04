@@ -3,7 +3,7 @@
 -- se c'é un modo aggiungere al refresh l'informazione di discrepanza in caso di revision non sincronizzate
 
 local major_version = 1
-local minor_version = 5
+local minor_version = 6
 
 local name = 'Plastic Integration ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -107,7 +107,12 @@ function loop()
     if proj_name == '' then
         proj_name = 'Unsaved'
     else
+        if proj_name ~= string.gsub(proj_name, '.RPP', "") then
+            comment = string.sub(reaper.GetProjectName(0,''), 1, -5) .. ' Update' 
+        end
+        
         proj_name = string.gsub(proj_name, '.RPP', "")
+
     end
 
     local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name .. '  -  ' .. proj_name, true, flags)
@@ -291,9 +296,9 @@ function mainWindow()
 
             if plastic_checkWorkspace(proj_path) then
                 checkout_enabled = true
-    
+                
                 if plastic_checkStatus(proj_path) then
-                    
+
                     reaper.Main_OnCommand(40026, 0)
 
                     reaper.Main_OnCommand(40860, 0)
@@ -311,6 +316,32 @@ function mainWindow()
                     refreshStatus(proj_dir, proj_path)
     
                 else
+
+                    reaper.Main_OnCommand(40026, 0)
+
+                    reaper.Main_OnCommand(40860, 0)
+    
+                    plastic_undoChanges(proj_dir)
+    
+                    --plastic_undoCheckOut(proj_dir)
+    
+                    plastic_update(proj_dir)
+    
+                    reaper.ExecProcess(REAPER_CLI_PATH .. ' \"' .. proj_path .. '\"', 0)
+    
+                    --reaper.Main_openProject(proj_path)
+    
+                    refreshStatus(proj_dir, proj_path)
+
+                    if plastic_checkOut(proj_dir) then
+                        status_string = 'Checked-Out'
+                        commit_enabled = true
+                    else
+                        status_string = "Project Locked in another workspace"
+                        checkout_enabled = false
+                        commit_enabled = false
+                    end
+
                     status_string = 'Checked-Out'
                     commit_enabled = true
                 end
@@ -511,7 +542,6 @@ function getThirdBlock(str)
     return ""  -- Se non viene trovato il terzo blocco, restituisci una stringa vuota
 end
 
-
 function plastic_undoChanges(dir)
 
     local command = plastic_cl .. " undo -R " .. dir 
@@ -528,7 +558,6 @@ function plastic_undoChanges(dir)
         return false
     end
 end
-
 
 function plastic_checkOut(dir)
     local command = plastic_cl .. " co -R " .. dir
@@ -547,7 +576,6 @@ function containsExclusiveCheckout(text)
     local pattern = "These items are exclusively checked out by:"
     return string.find(text, pattern) ~= nil
 end
-
 
 function plastic_undoCheckOut(dir)
 
@@ -623,7 +651,6 @@ function getMissingFilePath(input)
     end
 end
 
-
 function errorCheck(input)
     local lines = {}
     for line in input:gmatch("[^\r\n]+") do
@@ -637,7 +664,6 @@ function errorCheck(input)
     end
     return false
 end
-
 
 function plastic_isFileLocked(proj)
     local command = string.format(plastic_cl .. ' status %s --locked --machinereadable --short', proj)
