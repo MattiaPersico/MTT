@@ -3,7 +3,7 @@
 -- se c'é un modo aggiungere al refresh l'informazione di discrepanza in caso di revision non sincronizzate
 
 local major_version = 1
-local minor_version = 6
+local minor_version = 7
 
 local name = 'Plastic Integration ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
