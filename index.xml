@@ -20,7 +20,7 @@
   </category>
     <category name="PlasticIntegration">
     <reapack name="mtt_plastic_integration.lua" type="script" desc="Partial Plastic (cl) Reaper Integration">
-      <version name="1.8" author="Mattia Persico" time="2024-06-12T08:34:57Z">
+      <version name="1.9" author="Mattia Persico" time="2024-06-12T10:50:33Z">
           <source main="main" file="mtt_plastic_integration.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/PlasticIntegration/mtt_plastic_integration.lua</source>
       </version>
     </reapack>

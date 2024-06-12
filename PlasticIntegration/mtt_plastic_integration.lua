@@ -3,7 +3,7 @@
 -- se c'é un modo aggiungere al refresh l'informazione di discrepanza in caso di revision non sincronizzate
 
 local major_version = 1
-local minor_version = 8
+local minor_version = 9
 
 local name = 'Plastic Integration ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -15,6 +15,7 @@ local sizeConstraintsCallback = [=[
 ]=]
 
 local AUDIO_FOLDER_INSIDE_REPOSITORY = '/Audio'
+local proj_name = reaper.GetProjectName(0)
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
@@ -104,18 +105,19 @@ function loop()
         | reaper.ImGui_WindowFlags_NoScrollWithMouse()
         | reaper.ImGui_WindowFlags_NoDocking()  
 
-    local proj_name = reaper.GetProjectName(0)
+    --local proj_name = reaper.GetProjectName(0)
 
     if proj_name == '' then
         proj_name = 'Unsaved'
     else
-        if proj_name ~= string.gsub(proj_name, '.RPP', "") then
-            comment = string.sub(reaper.GetProjectName(0,''), 1, -5) .. ' Update' 
+        if proj_name ~= string.sub(reaper.GetProjectName(0,''), 1, -5) then
+            comment = string.sub(reaper.GetProjectName(0,''), 1, -5) .. ' Update'
+            --reaper.ShowConsoleMsg(proj_name .. '\n')
         end
-        
-        proj_name = string.gsub(proj_name, '.RPP', "")
-
     end
+
+
+    proj_name = string.gsub(reaper.GetProjectName(0,''), '.RPP', "")
 
     local mw_visible, mw_open = reaper.ImGui_Begin(ctx, name .. '  -  ' .. proj_name, true, flags)
 
@@ -658,7 +660,7 @@ end
 
 function plastic_checkIn(dir, comment)
 
-    local command = plastic_cl .. " partial checkin " .. dir .. ' -c="'.. string.gsub(comment, " ", "__") ..'" --applychanged'
+    local command = plastic_cl .. " partial checkin " .. dir .. ' -c="'.. string.gsub(comment, " ", "_") ..'" --applychanged'
 
     local timeout = 0  -- Consente al comando di eseguirsi indefinitamente
     local result = reaper.ExecProcess(command, timeout)
@@ -669,30 +671,28 @@ function plastic_checkIn(dir, comment)
     else
 
         local file_to_delete = getMissingFilePath(result)
+        
 
         if file_to_delete then
             local rm_command = plastic_cl ..  ' remove "' .. file_to_delete .. '"'
             os.execute(rm_command)
             plastic_checkIn(dir, comment)
         else
-            reaper.ShowMessageBox(getSecondBlock(result), "ERROR", 0)
+            reaper.ShowMessageBox(result, "ERROR", 0)
         end
 
     end
 end
 
 function getMissingFilePath(input)
-    local lines = {}
     for line in input:gmatch("[^\r\n]+") do
-        table.insert(lines, line)
+        --reaper.ShowConsoleMsg(line .. '\n')
+        local path = line:match("Error: The changed (.+) is not on disk")
+        if path then
+            return path
+        end
     end
-    if #lines >= 3 then
-        local thirdLine = lines[3]
-        local path = thirdLine:match("Error: The changed (.+) is not on disk")
-        return path
-    else
-        return nil
-    end
+    return nil
 end
 
 function errorCheck(input)
