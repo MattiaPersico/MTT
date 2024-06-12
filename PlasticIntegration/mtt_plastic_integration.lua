@@ -3,7 +3,7 @@
 -- se c'é un modo aggiungere al refresh l'informazione di discrepanza in caso di revision non sincronizzate
 
 local major_version = 1
-local minor_version = 7
+local minor_version = 8
 
 local name = 'Plastic Integration ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -13,6 +13,8 @@ local plastic_cl = "/Applications/PlasticSCM.app/Contents/Applications/cm.app/Co
 local sizeConstraintsCallback = [=[
 1 + 1
 ]=]
+
+local AUDIO_FOLDER_INSIDE_REPOSITORY = '/Audio'
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
@@ -285,6 +287,36 @@ function mainWindow()
     reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetCursorPosY(ctx) - 2)
     reaper.ImGui_Text(ctx, "Status: " .. status_string)
 
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 132)
+
+    reaper.ImGui_BeginDisabled(ctx, not getlatest_enabled)
+
+    if reaper.ImGui_Button(ctx, "Update Repository") then
+        if reaper.ShowMessageBox("This operation will recursively restore the state of all the Projects inside the selected root to the Server version.\n\nYou will lose all your progress.", 'WARNING', 1) == 1 then
+
+            local retval, folder = reaper.JS_Dialog_BrowseForFolder("Choose the folder to update recursively", plastic_getWorkspaceRoot(proj_dir) .. AUDIO_FOLDER_INSIDE_REPOSITORY)
+
+            if retval == 1 then
+
+                reaper.Main_OnCommand(40026, 0)
+
+                reaper.Main_OnCommand(40860, 0)
+    
+                plastic_undoChanges(folder)
+            
+                plastic_update(folder)
+    
+                reaper.ExecProcess(REAPER_CLI_PATH .. ' \"' .. proj_path .. '\"', 0)
+    
+                refreshStatus(proj_dir, proj_path)
+            end
+
+        end
+    end
+
+    reaper.ImGui_EndDisabled(ctx)
+
     guiNewLine()
     guiNewLine()
 
@@ -364,11 +396,11 @@ function mainWindow()
     local buttonText = "Get Server Version and Check-Out"
     local warningText = "This operation will restore the state of the Project to the Server version.\n\nYou will lose all your progress."
     local isSuperDown = false
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) then 
+--[[     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) then 
         buttonText = "Check-Out (no update)"
         warningText = "This operation will attempt to check out the Project without updating to the Server version.\n\nThe operation is safe but may fail."
         isSuperDown = true
-    end
+    end ]]
     
     if reaper.ImGui_Button(ctx, buttonText) then
         if reaper.ShowMessageBox(warningText, 'WARNING', 1) == 1 then
@@ -557,6 +589,18 @@ function plastic_undoChanges(dir)
         --reaper.ShowConsoleMsg('Directory is not a Workspace\n')
         return false
     end
+end
+
+function plastic_getWorkspaceRoot(dir)
+    local command = 'cd ' .. dir .. ' && ' .. plastic_cl .. " wk"
+
+    local handle = io.popen(command)
+    local result = handle:read("*a")
+    handle:close()
+
+    result = getSecondBlock(result)
+
+    return result
 end
 
 function plastic_checkOut(dir)

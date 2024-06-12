@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 39
+local minor_version = 40
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -2947,7 +2947,7 @@ function preferencesWindow()
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)    
 
-    local retval, current_item = reaper.ImGui_Combo(ctx, "Interpolation", INTERPOLATION_MODE, "IDW\0NNI\0LDW\0")
+    local retval, current_item = reaper.ImGui_Combo(ctx, "Interpolation", INTERPOLATION_MODE, "Inverse Distance Weighting\0Nearest Neighbors\0Inverse Distance Weighting (range)\0")
 
     if retval then
         INTERPOLATION_MODE = current_item
