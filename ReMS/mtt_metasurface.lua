@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 41
+local minor_version = 42
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -99,11 +99,19 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
-if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
+--[[ if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
     require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
   else
     require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
-  end
+end
+ ]]
+if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua")
+else
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi.lua")
+end
+
+
 
 local GLOBAL_SETTINGS = ensureGlobalSettings()
 
