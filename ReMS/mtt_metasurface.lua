@@ -243,10 +243,23 @@ local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.9')
 local ctx = reaper.ImGui_CreateContext(name)
-local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
-local comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
-local comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
-local new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+
+local comic_sans_smaller
+local comic_sans_bigger
+local comic_sans_smaller
+local new_line_font
+
+if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+    comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
+    comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
+    comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
+    new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+else
+    comic_sans = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 18)
+    comic_sans_bigger = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 21)
+    comic_sans_smaller = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 17)
+    new_line_font = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 2)
+end
 
 reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, comic_sans_bigger)
