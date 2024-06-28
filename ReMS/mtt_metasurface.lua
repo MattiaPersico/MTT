@@ -16,16 +16,16 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 40
+local minor_version = 41
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
-local PLAY_STOP_COMMAND = '_4d1cade28fdc481a931786c4bb44c78d'
-local PLAY_STOP_LOOP_COMMAND = '_b254db4208aa487c98dc725e435e531c'
-local SAVE_PROJECT_COMMAND = '40026'
+local ON_SPACEBAR_PRESSED = '40044' --'_4d1cade28fdc481a931786c4bb44c78d'
+local ON_SHIFT_SPACEBAR_PRESSED = '' --'_b254db4208aa487c98dc725e435e531c'
+local ON_CMD_S_PRESSED = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 420
+local PREF_WINDOW_HEIGHT = 550
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -60,12 +60,18 @@ local main_window_height = MAIN_WINDOW_HEIGHT -- current values during loop
 
 local colorPickerWindowState = false
 
+local OS = reaper.GetOS()
+
 function ensureGlobalSettings()
     nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
     local path = string.match(nomeFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
-        os.execute("mkdir -p \"" .. path .. "\"")
+        if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+            os.execute("mkdir -p \"" .. path .. "\"")
+        else
+            os.execute("mkdir \"" .. path .. "\"")
+        end
     end
 
     local file = io.open(nomeFile, "r")
@@ -80,6 +86,9 @@ function ensureGlobalSettings()
             file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
             file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
             file:write("INTERPOLATION_MODE = " .. string.format("%q", INTERPOLATION_MODE) .. "\n")
+            file:write("ON_SPACEBAR_PRESSED = " .. string.format("%q", ON_SPACEBAR_PRESSED) .. "\n")
+            file:write("ON_SHIFT_SPACEBAR_PRESSED = " .. string.format("%q", ON_SHIFT_SPACEBAR_PRESSED) .. "\n")
+            file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
 
             file:close()
         else
@@ -90,70 +99,11 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
---local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
---local voronoi = require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
 if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
     require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
   else
     require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
   end
-
-
------------------------------------------------------------------------ OSC -----------------------------------------------------------------------
---[=[ 
-
-local OSC_CONTROLLED = false                -- va messo nelle preferenze
-local OSC_SERVER_IP = "169.254.139.153"     -- va messo nelle preferenze
-local OSC_LISTEN_PORT = 8003                -- va messo nelle preferenze
-
--- Load the socket module
-local opsys = reaper.GetOS()
-local extension
-
-local OSC_X, OSC_Y = 0, 0
-
-if opsys:match('Win') then
-  extension = 'dll'
-else -- Linux and Macos
-  extension = 'so'
-end
-
-local info = debug.getinfo(1, 'S');
-local script_path = info.source:match[[^@?(.*[\/])[^\/]-$]];
-package.cpath = package.cpath .. ";" .. script_path .. "/socket module/?."..extension  -- Add current folder/socket module for looking at .dll (need for loading basic luasocket)
-package.path = package.path .. ";" .. script_path .. "/socket module/?.lua" -- Add current folder/socket module for looking at .lua ( Only need for loading the other functions packages lua osc.lua, url.lua etc... You can change those files path and update this line)
-
--- Get socket and osc modules
-local socket = require('socket.core')
-local osc = require('osc')
-
--- Get UDP
-local udp = assert(socket.udp())
-assert(udp:setsockname(OSC_SERVER_IP, OSC_LISTEN_PORT)) -- Set IP and PORT
-udp:settimeout(0.0001) -- Dont forget to set a low timeout! udp:receive block until have a message or timeout. values like (1) will make REAPER laggy.
-
-local function updateOSC()
-
-    for address, values in osc.enumReceive(udp) do
-        --[[ print('address: ', address)
-        print('This message haves '..#values..' values:')
-        for k, v in ipairs(values) do
-          print('    ', v)
-          x = v
-        end ]]
-        if #values == 2 then
-            OSC_X = values[1]
-            OSC_Y = values[2]
-        end
-  
-    end
-
-    reaper.defer(updateOSC)
-end
-
------------------------------------------------------------------------ OSC -----------------------------------------------------------------------
---]=]
-
 
 local GLOBAL_SETTINGS = ensureGlobalSettings()
 
@@ -203,7 +153,11 @@ function ensureIcons()
     local path = string.match(saveIconFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
-        os.execute("mkdir -p \"" .. path .. "\"")
+        if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+            os.execute("mkdir -p \"" .. path .. "\"")
+        else
+            os.execute("mkdir \"" .. path .. "\"")
+        end
     end
 
     local file = io.open(saveIconFile, "rb")
@@ -445,6 +399,9 @@ function saveToFile(filePath, data)
         file:write("IGNORE_FXs_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_FXs_PRE_SAVE_STRING) .. "\n")
         file:write("IGNORE_TRACKS_PRE_SAVE_STRING = " .. string.format("%q", IGNORE_TRACKS_PRE_SAVE_STRING) .. "\n")
         file:write("INTERPOLATION_MODE = " .. string.format("%q", INTERPOLATION_MODE) .. "\n")
+        file:write("ON_SPACEBAR_PRESSED = " .. string.format("%q", ON_SPACEBAR_PRESSED) .. "\n")
+        file:write("ON_SHIFT_SPACEBAR_PRESSED = " .. string.format("%q", ON_SHIFT_SPACEBAR_PRESSED) .. "\n")
+        file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
         file:close() -- Chiude il file
     end
 end
@@ -475,25 +432,32 @@ function loadFromFile(filename)
         local ignorePostSaveTracks = local_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
         local linkToController = local_settings:read("*l")
         
-
-         ignoreParamsPostSaveString = ignoreParamsPostSave:match("^IGNORE_PARAMS_POST_SAVE_STRING = (.+)$")
-        if ignoreParamsPostSaveString then
-            ignoreParamsPostSaveString = load("return " .. ignoreParamsPostSaveString)()
+        if ignoreParamsPostSave then
+            ignoreParamsPostSaveString = ignoreParamsPostSave:match("^IGNORE_PARAMS_POST_SAVE_STRING = (.+)$")
+            if ignoreParamsPostSaveString then
+                ignoreParamsPostSaveString = load("return " .. ignoreParamsPostSaveString)()
+            end
         end
 
-         ignorePostSaveFxsString = ignorePostSaveFxs:match("^IGNORE_FXs_POST_SAVE_STRING = (.+)$")
-        if ignorePostSaveFxsString then
-            ignorePostSaveFxsString = load("return " .. ignorePostSaveFxsString)()
+        if ignorePostSaveFxs then
+            ignorePostSaveFxsString = ignorePostSaveFxs:match("^IGNORE_FXs_POST_SAVE_STRING = (.+)$")
+            if ignorePostSaveFxsString then
+                ignorePostSaveFxsString = load("return " .. ignorePostSaveFxsString)()
+            end
         end
 
-         ignorePostSaveTracksString = ignorePostSaveTracks:match("^IGNORE_TRACKS_POST_SAVE_STRING = (.+)$")
-        if ignorePostSaveTracksString then
-            ignorePostSaveTracksString = load("return " .. ignorePostSaveTracksString)()
+        if ignorePostSaveTracks then
+            ignorePostSaveTracksString = ignorePostSaveTracks:match("^IGNORE_TRACKS_POST_SAVE_STRING = (.+)$")
+            if ignorePostSaveTracksString then
+                ignorePostSaveTracksString = load("return " .. ignorePostSaveTracksString)()
+            end
         end
 
-         linkToControllerBool = linkToController:match("^LINK_TO_CONTROLLER = (.+)$")
-        if linkToControllerBool then
-            linkToControllerBool = load("return " .. linkToControllerBool)()
+        if linkToController then
+            linkToControllerBool = linkToController:match("^LINK_TO_CONTROLLER = (.+)$")
+            if linkToControllerBool then
+                linkToControllerBool = load("return " .. linkToControllerBool)()
+            end
         end
 
         local dataString = local_settings:read("*a") -- Legge il resto del file per i dati serializzati
@@ -517,27 +481,61 @@ function loadFromFile(filename)
         local ignorePreSaveFxs = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
         local ignorePreSaveTracks = global_settings:read("*l") -- Legge la prima linea che contiene IGNORE_PARAMS_PRE_SAVE_STRING
         local interpMode = global_settings:read("*l")
+        local onSpacebarPressed = global_settings:read("*l")
+        local onShiftSpacebarPressed = global_settings:read("*l")
+        local onCmdSPressed = global_settings:read("*l")
         
         global_settings:close()
     
-         ignoreParamsPreSaveString = ignoreParamsPreSave:match("^IGNORE_PARAMS_PRE_SAVE_STRING = (.+)$")
-        if ignoreParamsPreSaveString then
-            ignoreParamsPreSaveString = load("return " .. ignoreParamsPreSaveString)()
+        if ignoreParamsPreSave then
+            ignoreParamsPreSaveString = ignoreParamsPreSave:match("^IGNORE_PARAMS_PRE_SAVE_STRING = (.+)$")
+            if ignoreParamsPreSaveString then
+                ignoreParamsPreSaveString = load("return " .. ignoreParamsPreSaveString)()
+            end
         end
-    
-         ignorePreSaveFxsString = ignorePreSaveFxs:match("^IGNORE_FXs_PRE_SAVE_STRING = (.+)$")
-        if ignorePreSaveFxsString then
-            ignorePreSaveFxsString = load("return " .. ignorePreSaveFxsString)()
+        
+        if ignorePreSaveFxs then
+            ignorePreSaveFxsString = ignorePreSaveFxs:match("^IGNORE_FXs_PRE_SAVE_STRING = (.+)$")
+            if ignorePreSaveFxsString then
+                ignorePreSaveFxsString = load("return " .. ignorePreSaveFxsString)()
+            end
         end
-    
-         ignorePreSaveTracksString = ignorePreSaveTracks:match("^IGNORE_TRACKS_PRE_SAVE_STRING = (.+)$")
-        if ignorePreSaveTracksString then
-            ignorePreSaveTracksString = load("return " .. ignorePreSaveTracksString)()
+        
+        if ignorePreSaveTracks then
+            ignorePreSaveTracksString = ignorePreSaveTracks:match("^IGNORE_TRACKS_PRE_SAVE_STRING = (.+)$")
+            if ignorePreSaveTracksString then
+                ignorePreSaveTracksString = load("return " .. ignorePreSaveTracksString)()
+            end
         end
 
-        interpolationModeInt = interpMode:match("^INTERPOLATION_MODE = (.+)$")
-        if interpolationModeInt then
-            interpolationModeInt = load("return " .. interpolationModeInt)()
+        if interpMode then
+            interpolationModeInt = interpMode:match("^INTERPOLATION_MODE = (.+)$")
+            if interpolationModeInt then
+                interpolationModeInt = load("return " .. interpolationModeInt)()
+            end
+        end
+
+        if onSpacebarPressed then
+            onSpacebarPressedString = onSpacebarPressed:match("^ON_SPACEBAR_PRESSED = (.+)$")
+            if onSpacebarPressedString then
+                onSpacebarPressedString = load("return " .. onSpacebarPressedString)()
+                if onSpacebarPressedString == '' then onSpacebarPressedString = '40026' end
+            end
+        end
+
+        if onShiftSpacebarPressed then
+            onShiftSpacebarPressedString = onShiftSpacebarPressed:match("^ON_SHIFT_SPACEBAR_PRESSED = (.+)$")
+            if onShiftSpacebarPressedString then
+                onShiftSpacebarPressedString = load("return " .. onShiftSpacebarPressedString)()
+            end
+        end
+
+        if onCmdSPressed then
+            onCmdSPressedString = onCmdSPressed:match("^ON_CMD_S_PRESSED = (.+)$") 
+            if onCmdSPressedString then
+                onCmdSPressedString = load("return " .. onCmdSPressedString)()
+                if onCmdSPressedString == '' then onCmdSPressedString = '40044' end
+            end
         end
     end
 
@@ -549,8 +547,11 @@ function loadFromFile(filename)
     if not ignorePostSaveTracksString then ignorePostSaveTracksString = '' end
     if not linkToControllerBool then linkToControllerBool = false end
     if not interpolationModeInt then interpolationModeInt = 0 end
+    if not onSpacebarPressedString then onSpacebarPressedString = '40044' end --quiquoqua
+    if not onShiftSpacebarPressedString then onShiftSpacebarPressedString = '' end
+    if not onCmdSPressedString then onCmdSPressedString = '40026' end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString
 end
 
 function GetNormalizedMousePosition()
@@ -2566,14 +2567,14 @@ function mainWindow()
     if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Space()) and is_name_edited == false then
 
         if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_LOOP_COMMAND), 0)
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_SHIFT_SPACEBAR_PRESSED), 0)
         else
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(PLAY_STOP_COMMAND), 0)
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_SPACEBAR_PRESSED), 0)
         end
     end
     
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-        reaper.Main_OnCommand(reaper.NamedCommandLookup(SAVE_PROJECT_COMMAND), 0)
+        reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
     end
 
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
@@ -2820,7 +2821,7 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
 
-    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreParamsPreSave', IGNORE_PARAMS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-snap##IgnoreParamsPreSave', IGNORE_PARAMS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
     if rv then IGNORE_PARAMS_PRE_SAVE_STRING = rs end
 
@@ -2837,7 +2838,7 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
 
-    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreParamsPostSave', IGNORE_PARAMS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-snap##IgnoreParamsPostSave', IGNORE_PARAMS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
 
     if rv then IGNORE_PARAMS_POST_SAVE_STRING = rs end
 
@@ -2863,7 +2864,7 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
     
-    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreFXsPreSave', IGNORE_FXs_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-snap##IgnoreFXsPreSave', IGNORE_FXs_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
     
     if rv then IGNORE_FXs_PRE_SAVE_STRING = rs end
     
@@ -2882,7 +2883,7 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
         
-    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreFXsPostSave', IGNORE_FXs_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-snap##IgnoreFXsPostSave', IGNORE_FXs_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
         
     if rv then IGNORE_FXs_POST_SAVE_STRING = rs end
         
@@ -2909,7 +2910,7 @@ function preferencesWindow()
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
     
     
-    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-save##IgnoreTracksPreSave', IGNORE_TRACKS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'pre-snap##IgnoreTracksPreSave', IGNORE_TRACKS_PRE_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
     
     if rv then IGNORE_TRACKS_PRE_SAVE_STRING = rs end
     
@@ -2929,7 +2930,7 @@ function preferencesWindow()
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
     
-    local rv, rs = reaper.ImGui_InputText(ctx, 'post-save##IgnoreTracksPostSave', IGNORE_TRACKS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local rv, rs = reaper.ImGui_InputText(ctx, 'post-snap##IgnoreTracksPostSave', IGNORE_TRACKS_POST_SAVE_STRING, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
     
     if rv then IGNORE_TRACKS_POST_SAVE_STRING = rs end
     
@@ -2964,9 +2965,81 @@ function preferencesWindow()
 
     end
 
---[[     if reaper.ImGui_Checkbox(ctx, 'OSC', OSC_CONTROLLED) then
-        OSC_CONTROLLED = not OSC_CONTROLLED
-    end ]]
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)   
+    
+    reaper.ImGui_Text(ctx, 'Keyboard Hooked Actions')
+    --reaper.ImGui_Text(ctx, 'Pre Save')
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
+
+    local rv, rs = reaper.ImGui_InputText(ctx, 'Spacebar##KeyboardHookSpacebar', ON_SPACEBAR_PRESSED, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+    if rv then ON_SPACEBAR_PRESSED = rs end
+
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
+
+    local rv, rs = reaper.ImGui_InputText(ctx, 'Shift + Spacebar##KeyboardHookShiftSpacebar', ON_SHIFT_SPACEBAR_PRESSED, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+    if rv then ON_SHIFT_SPACEBAR_PRESSED = rs end
+
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+        is_name_edited = false
+    end
+
+    if reaper.ImGui_IsItemActivated(ctx) then
+        is_name_edited = true
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
+
+    if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+        local rv, rs = reaper.ImGui_InputText(ctx, 'Cmd + S##KeyboardCmdS', ON_CMD_S_PRESSED, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+        if rv then ON_CMD_S_PRESSED = rs end
+    
+        if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+            is_name_edited = false
+        end
+    
+        if reaper.ImGui_IsItemActivated(ctx) then
+            is_name_edited = true
+        end
+
+    else
+        local rv, rs = reaper.ImGui_InputText(ctx, 'Ctrl + S##KeyboardCmdS', ON_CMD_S_PRESSED, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+
+        if rv then ON_CMD_S_PRESSED = rs end
+    
+        if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then 
+            is_name_edited = false
+        end
+    
+        if reaper.ImGui_IsItemActivated(ctx) then
+            is_name_edited = true
+        end
+
+    end
+
 end
 
 function setControlTrackEnvelopeChunks(track, fx_index)
@@ -3091,7 +3164,11 @@ function ensureController(nomeFile, contenuto)
     local path = string.match(nomeFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
-        os.execute("mkdir -p \"" .. path .. "\"")
+        if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+            os.execute("mkdir -p \"" .. path .. "\"")
+        else
+            os.execute("mkdir \"" .. path .. "\"")
+        end
     end
 
     local file = io.open(nomeFile, "r")
@@ -3123,7 +3200,7 @@ function initMS()
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end

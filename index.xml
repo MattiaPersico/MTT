@@ -12,7 +12,7 @@
   </category>
   <category name="ReMS">
     <reapack name="mtt_metasurface.lua" type="script" desc="Metasurface">
-      <version name="0.40" author="Mattia Persico" time="2024-06-12T08:34:57Z">
+      <version name="0.41" author="Mattia Persico" time="2024-06-28T10:13:47Z">
           <source main="main" file="mtt_metasurface.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/mtt_metasurface.lua</source>
           <source file="voronoi.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/ReMS/voronoi.lua</source>
       </version>
