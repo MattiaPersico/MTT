@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 44
+local minor_version = 45
 
 local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -3109,6 +3109,7 @@ function getControlTrack()
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
                     if  fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' or
+                        fx_name == 'JS: mtt_metasurface_controller [MTT\\mtt_metasurface_controller]' or
                         fx_name == 'JS: mtt_metasurface_controller' or 
                         fx_name == 'mtt_metasurface_controller' then
 
