@@ -568,7 +568,7 @@ function loadFromFile(filename)
     if not ignorePostSaveTracksString then ignorePostSaveTracksString = '' end
     if not linkToControllerBool then linkToControllerBool = false end
     if not interpolationModeInt then interpolationModeInt = 0 end
-    if not onSpacebarPressedString then onSpacebarPressedString = '40044' end --quiquoqua
+    if not onSpacebarPressedString then onSpacebarPressedString = '40044' end
     if not onShiftSpacebarPressedString then onShiftSpacebarPressedString = '' end
     if not onCmdSPressedString then onCmdSPressedString = '40026' end
 
@@ -2594,8 +2594,14 @@ function mainWindow()
         end
     end
     
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-        reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
+    if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
+        end
+    else
+        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
+        end
     end
 
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
