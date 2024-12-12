@@ -16,9 +16,9 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 45
+local minor_version = 46
 
-local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
+local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
 local ON_SPACEBAR_PRESSED = '40044' --'_4d1cade28fdc481a931786c4bb44c78d'
 local ON_SHIFT_SPACEBAR_PRESSED = '' --'_b254db4208aa487c98dc725e435e531c'
@@ -123,7 +123,7 @@ local sizeConstraintsCallback = [=[
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
 local CONTROLLER = [=[
-desc:mtt_metasurface_controller
+desc:mtt_snapspace_controller
 
 slider1: 0.5 <0,1,0.0001>mtt_mc_x_pos
 slider2: 0.5 <0,1,0.0001>mtt_mc_y_pos
@@ -3102,16 +3102,16 @@ function getControlTrack()
         local current_track = reaper.GetTrack(0, t)
         local retval, track_name = reaper.GetTrackName(current_track)
         if retval then
-            if track_name == 'mtt_metasurface_controller' then
+            if track_name == 'mtt_snapspace_controller' then
                 local n_fx = reaper.TrackFX_GetCount(current_track)
                 for f = 0, n_fx do
                     
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
-                    if  fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' or
-                        fx_name == 'JS: mtt_metasurface_controller [MTT\\mtt_metasurface_controller]' or
-                        fx_name == 'JS: mtt_metasurface_controller' or 
-                        fx_name == 'mtt_metasurface_controller' then
+                    if  fx_name == 'JS: mtt_snapspace_controller [MTT/mtt_snapspace_controller]' or
+                        fx_name == 'JS: mtt_snapspace_controller [MTT\\mtt_snapspace_controller]' or
+                        fx_name == 'JS: mtt_snapspace_controller' or 
+                        fx_name == 'mtt_snapspace_controller' then
 
                             return current_track, f
                     end
@@ -3123,10 +3123,10 @@ function getControlTrack()
     reaper.InsertTrackAtIndex(reaper.CountTracks(0), 0)
     local new_track = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
 
-    local trackName = "mtt_metasurface_controller"
+    local trackName = "mtt_snapspace_controller"
     reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", trackName, true)
 
-    reaper.TrackFX_AddByName(new_track, 'mtt_metasurface_controller', false, 1)
+    reaper.TrackFX_AddByName(new_track, 'mtt_snapspace_controller', false, 1)
 
     return new_track, 0
 
@@ -3219,10 +3219,10 @@ function initMS()
     PROJECT_NAME = reaper.GetProjectName(0, "")
     PROJECT_PATH = reaper.GetProjectPath(0)
 
-    if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Metasurface.', 'Metasurface Error', 0) return false end
+    if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Snapspace.', 'Snapspace Error', 0) return false end
 
     
-    ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_metasurface_controller', CONTROLLER)
+    ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_snapspace_controller', CONTROLLER)
 
     snapshot_list = {}
 
