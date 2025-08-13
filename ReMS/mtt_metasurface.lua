@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 46
+local minor_version = 47
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -241,24 +241,27 @@ end
 
 local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
 
-dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.9')
+dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
 local ctx = reaper.ImGui_CreateContext(name)
 
 local comic_sans_smaller
+local comic_sans_smaller_size = 14
 local comic_sans_bigger
-local comic_sans_smaller
+local comic_sans_bigger_size = 16
 local new_line_font
+local new_line_font_size = 2
+local comic_sans_size = 14
 
 if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
-    comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
-    comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
-    comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
-    new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+    comic_sans = reaper.ImGui_CreateFont("/System/Library/Fonts/Supplemental/Comic Sans MS.ttf")
+    comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf')
+    comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf')
+    new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf')
 else
-    comic_sans = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 18)
-    comic_sans_bigger = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 21)
-    comic_sans_smaller = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 17)
-    new_line_font = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 2)
+    comic_sans = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf')
+    comic_sans_bigger = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf')
+    comic_sans_smaller = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf')
+    new_line_font = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf')
 end
 
 reaper.ImGui_Attach(ctx, comic_sans)
@@ -630,7 +633,7 @@ function gui_loop()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5) 
   
-    reaper.ImGui_PushFont(ctx, comic_sans)
+    reaper.ImGui_PushFont(ctx, comic_sans, comic_sans_size)
 
     reaper.ImGui_SetNextWindowSizeConstraints(ctx, MAX_MAIN_WINDOW_WIDTH, MAX_MAIN_WINDOW_HEIGHT, 900, 900, EEL_DUMMY_FUNCTION)
 
@@ -2493,7 +2496,7 @@ function mainWindow()
                                                                                                     | reaper.ImGui_ChildFlags_AutoResizeX()
                                                                                                     | reaper.ImGui_ChildFlags_AutoResizeY()
                                                                                                     | reaper.ImGui_ChildFlags_AlwaysUseWindowPadding()
-                                                                                                    | reaper.ImGui_ChildFlags_Border()
+                                                                                                    | reaper.ImGui_ChildFlags_Borders()
                                                                                                     | reaper.ImGui_ChildFlags_AlwaysAutoResize(),
                                                                                                     reaper.ImGui_WindowFlags_NoScrollbar()
 )
@@ -2539,7 +2542,7 @@ function mainWindow()
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.1))
     end
 
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+    reaper.ImGui_PushFont(ctx, comic_sans_smaller, comic_sans_smaller_size)
     reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 125)
     reaper.ImGui_SetCursorPosX(ctx, 9)
     reaper.ImGui_Text(ctx, "Right-Click: make a snapshot of current FXs\nLeft-Drag on Snapshot: move\nShift + Left-Click on Snapshot: remove\nLeft-Click on Snapshot: select and load FXs values\nMouse-Wheel on Snapshot: adjust range\nCtrl + Mouse-Wheel: adjust Smooth\nLeft-Drag: interpolate")
@@ -2843,7 +2846,7 @@ function preferencesWindow()
     -- IGNORE PARAMETERS (PRE-SAVE)
     reaper.ImGui_Text(ctx, 'Ignore Parameters')
     --reaper.ImGui_Text(ctx, 'Pre Save')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2860,7 +2863,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2877,7 +2880,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2886,7 +2889,7 @@ function preferencesWindow()
 
     -- IGNORE FX PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Fx')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2905,7 +2908,7 @@ function preferencesWindow()
     
     
     -- IGNORE FX POST-SAVE
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2922,7 +2925,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2931,7 +2934,7 @@ function preferencesWindow()
 
     -- IGNORE TRACKS PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Tracks')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2952,7 +2955,7 @@ function preferencesWindow()
 
 
     -- IGNORE TRACKS POST-SAVE
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2969,7 +2972,7 @@ function preferencesWindow()
         is_name_edited = true
     end
     
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2992,7 +2995,7 @@ function preferencesWindow()
 
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -3000,7 +3003,7 @@ function preferencesWindow()
     
     reaper.ImGui_Text(ctx, 'Keyboard Hooked Actions')
     --reaper.ImGui_Text(ctx, 'Pre Save')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
@@ -3017,7 +3020,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
@@ -3034,7 +3037,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
