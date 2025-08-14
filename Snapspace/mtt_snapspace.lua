@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 53
+local minor_version = 54
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
