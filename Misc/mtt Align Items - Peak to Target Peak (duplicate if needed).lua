@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 0
+local minor_version = 1
 
 -- Selezione insufficiente
 if reaper.CountSelectedMediaItems(0) < 2 then return end

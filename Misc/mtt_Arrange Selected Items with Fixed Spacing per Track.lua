@@ -4,7 +4,7 @@
 --   La distanza è aggiunta dopo la fine del gruppo.
 
 local major_version = 1
-local minor_version = 0
+local minor_version = 1
 
 local spacing = 0.5 -- seconds
 

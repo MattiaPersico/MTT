@@ -1,7 +1,7 @@
 
 -- my variant of the original spk77 script
 local major_version = 1
-local minor_version = 0
+local minor_version = 1
 
 function HandlePluginException(source_track, source_fx_index, source_param_index, dest_track, dest_fx_index, val)
   local _, fx_name = reaper.TrackFX_GetFXName(source_track, source_fx_index, "")
