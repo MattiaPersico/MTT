@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 49
+local minor_version = 50
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -25,7 +25,7 @@ local ON_SHIFT_SPACEBAR_PRESSED = '' --'_b254db4208aa487c98dc725e435e531c'
 local ON_CMD_S_PRESSED = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 660
+local PREF_WINDOW_HEIGHT = 745
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -298,6 +298,12 @@ local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
 local ctx = reaper.ImGui_CreateContext(name)
+
+--[[ if OS:match('Win') then
+  --
+else -- Linux and Macos
+  reaper.ImGui_SetConfigVar(ctx, reaper.ImGui_ConfigVar_MacOSXBehaviors(), true)
+end ]]
 
 local comic_sans
 local comic_sans_smaller
@@ -2974,17 +2980,17 @@ function mainWindow()
         end
     end
     
-    if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
-        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
-        end
-    else
-        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
-        end
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+        reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
     end
 
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
+        quit = true
+    end
+
+        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_Q()) then
         quit = true
     end
     
