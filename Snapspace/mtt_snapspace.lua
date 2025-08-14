@@ -119,7 +119,7 @@ end
 ---------------------------------------------------------------------------------- OSC INTEGRATION ----------------------------------------------------------------------------------
 
 function ensureGlobalSettings()
-    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/ms_global_settings'
+    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/snapspace_global_settings'
     local path = string.match(nomeFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
@@ -560,7 +560,7 @@ function loadFromFile(filename)
 
         if not dataFunction then
             local_settings:close()
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
             loadFromFile(filename)
         else
             data = dataFunction()
@@ -918,7 +918,7 @@ function loop()
         if reaper.IsProjectDirty(0) == 1 then need_to_save = true end
 
         if reaper.IsProjectDirty(0) == 0 and need_to_save == true then
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
             need_to_save = false
         end
     end
@@ -3599,7 +3599,7 @@ function onExit()
     
     --if reaper.GetProjectName(0, "") ~= '' then
         if PROJECT_NAME ~= '' then
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
         end
     --end
 end
@@ -3666,7 +3666,7 @@ function initMS()
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/snapspace_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
