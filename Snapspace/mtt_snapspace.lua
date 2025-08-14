@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 48
+local minor_version = 50
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -25,7 +25,7 @@ local ON_SHIFT_SPACEBAR_PRESSED = '' --'_b254db4208aa487c98dc725e435e531c'
 local ON_CMD_S_PRESSED = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 660
+local PREF_WINDOW_HEIGHT = 745
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -119,7 +119,7 @@ end
 ---------------------------------------------------------------------------------- OSC INTEGRATION ----------------------------------------------------------------------------------
 
 function ensureGlobalSettings()
-    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
+    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/snapspace_global_settings'
     local path = string.match(nomeFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
@@ -160,16 +160,10 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
---[[ if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
-    require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
-  else
-    require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
-end
- ]]
-if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
-    dofile(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua")
+if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/Snapspace/voronoi.lua") then
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT/Snapspace/voronoi.lua")
 else
-    dofile(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi.lua")
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/Snapspace/voronoi.lua")
 end
 
 
@@ -184,7 +178,7 @@ local sizeConstraintsCallback = [=[
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
 local CONTROLLER = [=[
-desc:mtt_metasurface_controller
+desc:mtt_snapspace_controller
 
 slider1: 0.5 <0,1,0.0001>mtt_mc_x_pos
 slider2: 0.5 <0,1,0.0001>mtt_mc_y_pos
@@ -217,7 +211,7 @@ function base64_decode(data)
 end
 
 function ensureIcons()
-    local saveIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/save_icon.png'
+    local saveIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/save_icon.png'
 
     local path = string.match(saveIconFile, "(.+)/[^/]*$")
     if path then
@@ -245,7 +239,7 @@ function ensureIcons()
     end
 
 
-    local binIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/bin_icon.png'
+    local binIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/bin_icon.png'
 
     local file = io.open(binIconFile, "rb")
 
@@ -262,7 +256,7 @@ function ensureIcons()
         end
     end
 
-    local cogIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/cog_icon.png'
+    local cogIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/cog_icon.png'
 
     local file = io.open(cogIconFile, "rb")
 
@@ -279,7 +273,7 @@ function ensureIcons()
         end
     end
 
-    local linkIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/link_icon.png'
+    local linkIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/link_icon.png'
 
     local file = io.open(linkIconFile, "rb")
 
@@ -304,6 +298,12 @@ local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
 
 dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
 local ctx = reaper.ImGui_CreateContext(name)
+
+--[[ if OS:match('Win') then
+  --
+else -- Linux and Macos
+  reaper.ImGui_SetConfigVar(ctx, reaper.ImGui_ConfigVar_MacOSXBehaviors(), true)
+end ]]
 
 local comic_sans
 local comic_sans_smaller
@@ -566,7 +566,7 @@ function loadFromFile(filename)
 
         if not dataFunction then
             local_settings:close()
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
             loadFromFile(filename)
         else
             data = dataFunction()
@@ -924,7 +924,7 @@ function loop()
         if reaper.IsProjectDirty(0) == 1 then need_to_save = true end
 
         if reaper.IsProjectDirty(0) == 0 and need_to_save == true then
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
             need_to_save = false
         end
     end
@@ -2980,17 +2980,17 @@ function mainWindow()
         end
     end
     
-    if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
-        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
-        end
-    else
-        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
-            reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
-        end
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+        reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
     end
 
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
+
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
+        quit = true
+    end
+
+        if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_Q()) then
         quit = true
     end
     
@@ -3547,16 +3547,16 @@ function getControlTrack()
         local current_track = reaper.GetTrack(0, t)
         local retval, track_name = reaper.GetTrackName(current_track)
         if retval then
-            if track_name == 'mtt_metasurface_controller' then
+            if track_name == 'mtt_snapspace_controller' then
                 local n_fx = reaper.TrackFX_GetCount(current_track)
                 for f = 0, n_fx do
                     
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
-                    if  fx_name == 'JS: mtt_metasurface_controller [MTT/mtt_metasurface_controller]' or
-                        fx_name == 'JS: mtt_metasurface_controller [MTT\\mtt_metasurface_controller]' or
-                        fx_name == 'JS: mtt_metasurface_controller' or 
-                        fx_name == 'mtt_metasurface_controller' then
+                    if  fx_name == 'JS: mtt_snapspace_controller [MTT/mtt_snapspace_controller]' or
+                        fx_name == 'JS: mtt_snapspace_controller [MTT\\mtt_snapspace_controller]' or
+                        fx_name == 'JS: mtt_snapspace_controller' or 
+                        fx_name == 'mtt_snapspace_controller' then
 
                             return current_track, f
                     end
@@ -3568,10 +3568,10 @@ function getControlTrack()
     reaper.InsertTrackAtIndex(reaper.CountTracks(0), 0)
     local new_track = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
 
-    local trackName = "mtt_metasurface_controller"
+    local trackName = "mtt_snapspace_controller"
     reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", trackName, true)
 
-    reaper.TrackFX_AddByName(new_track, 'mtt_metasurface_controller', false, 1)
+    reaper.TrackFX_AddByName(new_track, 'mtt_snapspace_controller', false, 1)
 
     return new_track, 0
 
@@ -3605,7 +3605,7 @@ function onExit()
     
     --if reaper.GetProjectName(0, "") ~= '' then
         if PROJECT_NAME ~= '' then
-            writeSnapshotsToFile(PROJECT_PATH .. '/ms_save')
+            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
         end
     --end
 end
@@ -3664,15 +3664,15 @@ function initMS()
     PROJECT_NAME = reaper.GetProjectName(0, "")
     PROJECT_PATH = reaper.GetProjectPath(0)
 
-    if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Metasurface.', 'Metasurface Error', 0) return false end
+    if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Snapspace.', 'Snapspace Error', 0) return false end
     
-    ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_metasurface_controller', CONTROLLER)
+    ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_snapspace_controller', CONTROLLER)
 
     snapshot_list = {}
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/snapspace_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
