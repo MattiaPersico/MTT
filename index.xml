@@ -46,32 +46,32 @@
   <category name="Misc">
     <reapack name="mtt Align Items - Peak to Target Peak (duplicate if needed).lua" type="script" desc="Align Items - Peak to Target Peak (duplicate if needed)">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt Align Items - Peak to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%Align%Items%-%Peak%to%Target%Peak%(duplicate%if%needed).lua</source>
+          <source main="main" file="mtt Align Items - Peak to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Peak%20to%20Target%20Peak%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Peak to Target Start (duplicate if needed).lua" type="script" desc="Align Items - Peak to Target Start (duplicate if needed)">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt Align Items - Peak to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%Align%Items%-%Peak%to%Target%Start%(duplicate%if%needed).lua</source>
+          <source main="main" file="mtt Align Items - Peak to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Peak%20to%20Target%20Start%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Start to Target Peak (duplicate if needed).lua" type="script" desc="Align Items - Start to Target Peak (duplicate if needed)">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt Align Items - Start to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%Align%Items%-%Start%to%Target%Peak%(duplicate%if%needed).lua</source>
+          <source main="main" file="mtt Align Items - Start to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Start%20to%20Target%20Peak%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Start to Target Start (duplicate if needed).lua" type="script" desc="Align Items - Start to Target Start (duplicate if needed)">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt Align Items - Start to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%Align%Items%-%Start%to%Target%Start%(duplicate%if%needed).lua</source>
+          <source main="main" file="mtt Align Items - Start to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Start%20to%20Target%20Start%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
         <reapack name="mtt_Arrange Selected Items with Fixed Spacing per Track.lua" type="script" desc="Arrange Selected Items with Fixed Spacing per Track">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt_Arrange Selected Items with Fixed Spacing per Track.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Arrange%Selected%Items%with%Fixed%Spacing%per%Track.lua</source>
+          <source main="main" file="mtt_Arrange Selected Items with Fixed Spacing per Track.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Arrange%20Selected%20Items%20with%20Fixed%20Spacing%20per%20Track.lua</source>
       </version>
     </reapack>
             <reapack name="mtt_Link selected tracks FX parameters.lua" type="script" desc="Link selected tracks FX parameters">
       <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
-          <source main="main" file="mtt_Link selected tracks FX parameters.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Link%selected%tracks%FX%parameters.lua</source>
+          <source main="main" file="mtt_Link selected tracks FX parameters.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Link%20selected%20tracks%20FX%20parameters.lua</source>
       </version>
     </reapack>
   </category>
