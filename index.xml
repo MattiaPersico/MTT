@@ -43,4 +43,36 @@
       </version>
     </reapack>
   </category>
+  <category name="Misc">
+    <reapack name="mtt Align Items - Peak to Target Peak (duplicate if needed).lua" type="script" desc="Items Alignment Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt Align Items - Peak to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt Align Items - Peak to Target Peak (duplicate if needed).lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt Align Items - Peak to Target Start (duplicate if needed).lua" type="script" desc="Items Alignment Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt Align Items - Peak to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt Align Items - Peak to Target Start (duplicate if needed).lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt Align Items - Start to Target Peak (duplicate if needed).lua" type="script" desc="Items Alignment Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt Align Items - Start to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt Align Items - Start to Target Peak (duplicate if needed).lua</source>
+      </version>
+    </reapack>
+    <reapack name="mtt Align Items - Start to Target Start (duplicate if needed).lua" type="script" desc="Items Alignment Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt Align Items - Start to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt Align Items - Start to Target Start (duplicate if needed).lua</source>
+      </version>
+    </reapack>
+        <reapack name="mtt_Arrange Selected Items with Fixed Spacing per Track.lua" type="script" desc="Items Arrangement Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt_Arrange Selected Items with Fixed Spacing per Track.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Arrange Selected Items with Fixed Spacing per Track.lua</source>
+      </version>
+    </reapack>
+            <reapack name="mtt_Link selected tracks FX parameters.lua" type="script" desc="Mixing Utility">
+      <version name="1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+          <source main="main" file="mtt_Link selected tracks FX parameters.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Link selected tracks FX parameters.lua</source>
+      </version>
+    </reapack>
+  </category>
 </index>
