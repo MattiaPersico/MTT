@@ -119,7 +119,7 @@ end
 ---------------------------------------------------------------------------------- OSC INTEGRATION ----------------------------------------------------------------------------------
 
 function ensureGlobalSettings()
-    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
+    nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/ms_global_settings'
     local path = string.match(nomeFile, "(.+)/[^/]*$")
     if path then
         -- Usa virgolette per gestire i percorsi con spazi su macOS
@@ -160,16 +160,10 @@ function ensureGlobalSettings()
     return nomeFile
 end
 
---[[ if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
-    require(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi")
-  else
-    require(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi")
-end
- ]]
-if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua") then
-    dofile(reaper.GetResourcePath() .. "/Scripts/MTT/ReMS/voronoi.lua")
+if reaper.file_exists(reaper.GetResourcePath() .. "/Scripts/MTT/Snapspace/voronoi.lua") then
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT/Snapspace/voronoi.lua")
 else
-    dofile(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/ReMS/voronoi.lua")
+    dofile(reaper.GetResourcePath() .. "/Scripts/MTT_Scripts/Snapspace/voronoi.lua")
 end
 
 
@@ -217,7 +211,7 @@ function base64_decode(data)
 end
 
 function ensureIcons()
-    local saveIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/save_icon.png'
+    local saveIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/save_icon.png'
 
     local path = string.match(saveIconFile, "(.+)/[^/]*$")
     if path then
@@ -245,7 +239,7 @@ function ensureIcons()
     end
 
 
-    local binIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/bin_icon.png'
+    local binIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/bin_icon.png'
 
     local file = io.open(binIconFile, "rb")
 
@@ -262,7 +256,7 @@ function ensureIcons()
         end
     end
 
-    local cogIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/cog_icon.png'
+    local cogIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/cog_icon.png'
 
     local file = io.open(cogIconFile, "rb")
 
@@ -279,7 +273,7 @@ function ensureIcons()
         end
     end
 
-    local linkIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/icons/link_icon.png'
+    local linkIconFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/Snapspace/icons/link_icon.png'
 
     local file = io.open(linkIconFile, "rb")
 
