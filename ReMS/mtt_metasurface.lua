@@ -16,16 +16,16 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 45
+local minor_version = 48
 
-local name = 'Metasurface ' .. tostring(major_version) .. '.' .. tostring(minor_version)
+local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
 local ON_SPACEBAR_PRESSED = '40044' --'_4d1cade28fdc481a931786c4bb44c78d'
 local ON_SHIFT_SPACEBAR_PRESSED = '' --'_b254db4208aa487c98dc725e435e531c'
 local ON_CMD_S_PRESSED = '40026'
 
 local PREF_WINDOW_WIDTH = 350
-local PREF_WINDOW_HEIGHT = 550
+local PREF_WINDOW_HEIGHT = 660
 
 local MAX_MAIN_WINDOW_WIDTH = 600
 local MAX_MAIN_WINDOW_HEIGHT = 600
@@ -62,6 +62,62 @@ local colorPickerWindowState = false
 
 local OS = reaper.GetOS()
 
+---------------------------------------------------------------------------------- OSC INTEGRATION ----------------------------------------------------------------------------------
+
+-- @noindex
+-- Load the socket module
+
+local extension 
+if OS:match('Win') then
+  extension = 'dll'
+else -- Linux and Macos
+  extension = 'so'
+end
+
+local info = debug.getinfo(1, 'S');
+local script_path = info.source:match[[^@?(.*[\/])[^\/]-$]];
+package.cpath = package.cpath .. ";" .. script_path .. "/socket module/?."..extension  -- Add current folder/socket module for looking at .dll (need for loading basic luasocket)
+package.path = package.path .. ";" .. script_path .. "/socket module/?.lua" -- Add current folder/socket module for looking at .lua ( Only need for loading the other functions packages lua osc.lua, url.lua etc... You can change those files path and update this line)ssssssssssssssssssssssssssssssssssss
+socket = require('socket.core')
+osc = require('osc')
+udp = socket.udp()
+
+local DEVICE_IP = ""
+local DEVICE_PORT = 0
+local OSC_INITIALISED = false
+
+local OSC_MESSAGE_X = 'Snapspace_x'
+local OSC_MESSAGE_Y = 'Snapspace_y'
+local OSC_MESSAGE_TOUCH = 'Snapspace_Touch'
+
+local osc_x, osc_y = 0,0
+local osc_touch = false
+
+
+function init_osc(ip, port)
+
+        udp = socket.udp()
+        udp:setsockname(ip,port) -- Set IP and PORT
+        udp:settimeout(0.0001) -- Dont forget to set a low timeout! udp:receive block until have a message or timeout. values like (1) will make REAPER laggy.
+        return true
+end
+
+function read_osc()
+    for address, values in osc.enumReceive(udp) do
+      if address == OSC_MESSAGE_X then
+        osc_x = values[1]
+        end
+      if address == OSC_MESSAGE_Y then
+        osc_y = 1 - values[1]
+        end
+      if address == OSC_MESSAGE_TOUCH then
+        if values[1] == 0 then osc_touch = false else osc_touch = true end
+        end
+    end
+end
+
+---------------------------------------------------------------------------------- OSC INTEGRATION ----------------------------------------------------------------------------------
+
 function ensureGlobalSettings()
     nomeFile = reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/ReMS/ms_global_settings'
     local path = string.match(nomeFile, "(.+)/[^/]*$")
@@ -89,6 +145,11 @@ function ensureGlobalSettings()
             file:write("ON_SPACEBAR_PRESSED = " .. string.format("%q", ON_SPACEBAR_PRESSED) .. "\n")
             file:write("ON_SHIFT_SPACEBAR_PRESSED = " .. string.format("%q", ON_SHIFT_SPACEBAR_PRESSED) .. "\n")
             file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
+            file:write("DEVICE_IP = " .. string.format("%q", DEVICE_IP) .. "\n")
+            file:write("DEVICE_PORT = " .. string.format("%q", DEVICE_PORT) .. "\n")
+            file:write("OSC_MESSAGE_X = " .. string.format("%q", OSC_MESSAGE_X) .. "\n")
+            file:write("OSC_MESSAGE_Y = " .. string.format("%q", OSC_MESSAGE_Y) .. "\n")
+            file:write("OSC_MESSAGE_TOUCH = " .. string.format("%q", OSC_MESSAGE_TOUCH) .. "\n")
 
             file:close()
         else
@@ -241,19 +302,24 @@ end
 
 local save_icon, bin_icon, cog_icon, link_icon = ensureIcons()
 
-dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.9')
+dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
 local ctx = reaper.ImGui_CreateContext(name)
 
+local comic_sans
 local comic_sans_smaller
 local comic_sans_bigger
-local comic_sans_smaller
 local new_line_font
 
+local comic_sans_size = 13
+local comic_sans_smaller_size = 11
+local comic_sans_bigger_size = 12
+local new_line_font_size = 1
+
 if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
-    comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
-    comic_sans_bigger = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 21)
-    comic_sans_smaller = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 17)
-    new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+    comic_sans = reaper.ImGui_CreateFont('Comic Sans MS', 18)
+    comic_sans_bigger = reaper.ImGui_CreateFont('Comic Sans MS', 21)
+    comic_sans_smaller = reaper.ImGui_CreateFont('Comic Sans MS', 17)
+    new_line_font = reaper.ImGui_CreateFont('Comic Sans MS', 2)
 else
     comic_sans = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 18)
     comic_sans_bigger = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 21)
@@ -423,6 +489,13 @@ function saveToFile(filePath, data)
         file:write("ON_SPACEBAR_PRESSED = " .. string.format("%q", ON_SPACEBAR_PRESSED) .. "\n")
         file:write("ON_SHIFT_SPACEBAR_PRESSED = " .. string.format("%q", ON_SHIFT_SPACEBAR_PRESSED) .. "\n")
         file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
+        file:write("DEVICE_IP = " .. string.format("%q", DEVICE_IP) .. "\n")
+        file:write("DEVICE_PORT = " .. string.format("%q", DEVICE_PORT) .. "\n")
+        file:write("OSC_MESSAGE_X = " .. string.format("%q", OSC_MESSAGE_X) .. "\n")
+        file:write("OSC_MESSAGE_Y = " .. string.format("%q", OSC_MESSAGE_Y) .. "\n")
+        file:write("OSC_MESSAGE_TOUCH = " .. string.format("%q", OSC_MESSAGE_TOUCH) .. "\n")
+
+        
         file:close() -- Chiude il file
     end
 end
@@ -444,6 +517,12 @@ function loadFromFile(filename)
     local ignorePreSaveFxsString = ''
     local ignorePreSaveTracksString = ''
     local interpolationModeInt = 0
+
+    local device_ip_string = ""
+    local device_port_int = 0
+    local osc_message_x_string = ""
+    local osc_message_y_string = ""
+    local osc_message_touch_string = ""
 
     local local_settings, err = io.open(filename, "r")
     
@@ -505,6 +584,11 @@ function loadFromFile(filename)
         local onSpacebarPressed = global_settings:read("*l")
         local onShiftSpacebarPressed = global_settings:read("*l")
         local onCmdSPressed = global_settings:read("*l")
+        local device_ip = global_settings:read("*l")
+        local device_port = global_settings:read("*l")
+        local osc_message_x = global_settings:read("*l")
+        local osc_message_y = global_settings:read("*l")
+        local osc_message_touch = global_settings:read("*l")
         
         global_settings:close()
     
@@ -558,6 +642,41 @@ function loadFromFile(filename)
                 if onCmdSPressedString == '' then onCmdSPressedString = '40044' end
             end
         end
+
+        if device_ip then
+            device_ip_string = device_ip:match("^DEVICE_IP = (.+)$")
+            if device_ip_string then
+                device_ip_string = load("return " .. device_ip_string)()
+            end
+        end
+
+        if device_port then
+            device_port_int = device_port:match("^DEVICE_PORT = (.+)$") 
+            if device_port_int then
+                device_port_int = load("return " .. device_port_int)()
+            end
+        end
+
+        if osc_message_x then
+            osc_message_x_string = osc_message_x:match("^OSC_MESSAGE_X = (.+)$")
+            if osc_message_x_string then
+                osc_message_x_string = load("return " .. osc_message_x_string)()
+            end
+        end
+
+        if osc_message_y then
+            osc_message_y_string = osc_message_y:match("^OSC_MESSAGE_Y = (.+)$")
+            if osc_message_y_string then
+                osc_message_y_string = load("return " .. osc_message_y_string)()
+            end
+        end
+
+        if osc_message_touch then
+            osc_message_touch_string = osc_message_touch:match("^OSC_MESSAGE_TOUCH = (.+)$")
+            if osc_message_touch_string then
+                osc_message_touch_string = load("return " .. osc_message_touch_string)()
+            end
+        end
     end
 
     if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = 'midi' end
@@ -571,8 +690,13 @@ function loadFromFile(filename)
     if not onSpacebarPressedString then onSpacebarPressedString = '40044' end
     if not onShiftSpacebarPressedString then onShiftSpacebarPressedString = '' end
     if not onCmdSPressedString then onCmdSPressedString = '40026' end
+    if not device_ip_string then device_ip_string = '' end
+    if not device_port_int then device_port_int = 0 end
+    if not osc_message_x_string then osc_message_x_string = 'Snapspace_x' end
+    if not osc_message_y_string then osc_message_y_string = 'Snapspace_y' end
+    if not osc_message_touch_string then osc_message_touch_string = 'Snapspace_touch' end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString, device_ip_string, device_port_int, osc_message_x_string, osc_message_y_string, osc_message_touch_string
 end
 
 function GetNormalizedMousePosition()
@@ -630,7 +754,7 @@ function gui_loop()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5) 
   
-    reaper.ImGui_PushFont(ctx, comic_sans)
+    reaper.ImGui_PushFont(ctx, comic_sans, comic_sans_size)
 
     reaper.ImGui_SetNextWindowSizeConstraints(ctx, MAX_MAIN_WINDOW_WIDTH, MAX_MAIN_WINDOW_HEIGHT, 900, 900, EEL_DUMMY_FUNCTION)
 
@@ -784,6 +908,10 @@ function colorPickerWindow()
 end
 
 function loop()
+
+    --reaper.ShowConsoleMsg("DEVICE_IP: " .. tostring(DEVICE_IP) .. '\n' .. "DEVICE_PORT: " .. tostring(DEVICE_PORT) .. "\n\n")
+
+   if OSC_INITIALISED then read_osc() end
 
     gui_loop()
     
@@ -1304,6 +1432,260 @@ function screenToWindowCoordinates(xSchermo, ySchermo)
     local yRelativo = ySchermo - posYFinestra
 
     return xRelativo, yRelativo
+end
+
+function onOSCUpdate()
+    
+    if isInterpolating then
+        if INTERPOLATION_MODE == 0 then
+            onOSCUpdateIDW()
+        elseif INTERPOLATION_MODE == 1 then
+            onOSCUpdateNNI()
+        elseif INTERPOLATION_MODE == 2 then
+            onOSCUpdateLDW()
+        end
+    else
+        if  osc_touch and
+            #snapshot_list > 1 then
+            --colorPickerWindowState == false then
+            if INTERPOLATION_MODE == 0 then
+                onOSCUpdateIDW()
+            elseif INTERPOLATION_MODE == 1 then
+                onOSCUpdateNNI()
+            elseif INTERPOLATION_MODE == 2 then
+                onOSCUpdateLDW()
+            end
+        end
+    end
+end
+
+function onOSCUpdateNNI()
+    
+    if osc_touch and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
+        isInterpolating = true
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = osc_x, osc_y
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+                previousInterpolatedValues = {}
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+        local temp_points = {}
+        for k = 1, #snapshot_list do
+            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
+        end
+
+        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
+        local relatedPolyIndex = 0
+        for i = 1, #snapshot_list do
+            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
+        end
+
+        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
+
+        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
+
+        local closest_snapshots = {}
+
+        for l = 1, #n do
+            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
+            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
+        end
+        
+        table.insert(closest_snapshots, cpi)
+        
+
+        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
+
+        
+        for groupIndex, group in ipairs(grouped_parameters) do
+            local pointsForGroup = points_list[groupIndex]
+            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
+            -- Applica smoothing al valore interpolato
+            if not previousInterpolatedValues[groupIndex] then
+                previousInterpolatedValues[groupIndex] = interpolatedValue
+            end
+            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
+            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
+            
+
+
+            for _, parameter in ipairs(group) do
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
+            end
+        end
+
+        for i = 1, #snapshot_list do
+            if containsValue(i, closest_snapshots) then
+                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            end
+         end
+
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function onOSCUpdateIDW()
+    
+    if osc_touch == true and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
+        isInterpolating = true
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = osc_x, osc_y
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+         for groupIndex, group in ipairs(grouped_parameters) do
+            --reaper.ShowConsoleMsg(tostring(points_list[groupIndex]) .. '\n')
+            local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
+        
+            -- Calcola il valore interpolato per questo gruppo di punti
+            local interpolatedValue = inverseDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
+
+            -- Applica questo valore interpolato a tutti i parametri nel gruppo
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
+            end
+         end
+
+         for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2), snapshot_list[i].color)
+         end
+
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
+end
+
+function onOSCUpdateLDW()
+    
+    if osc_touch == true and not DRAGGING_BALL and (LINK_TO_CONTROLLER == false or (LINK_TO_CONTROLLER == true and reaper.GetPlayState() == 0)) then
+        isInterpolating = true
+        --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
+        -- Ottieni la posizione normalizzata del mouse
+        local normalizedX, normalizedY = osc_x, osc_y
+
+        -- Converti le coordinate normalizzate in posizione reale se necessario
+        -- Esempio: applicazione diretta senza conversione, poiché la logica IDW utilizza valori normalizzati
+        DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
+        DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
+
+        if smoothing_fader_value ~= 0 then
+            if needToInitSmoothing == true then
+                initSmoothing(DRAG_X, DRAG_Y)
+                updateSnapshotIndexList()
+            end
+
+            updateSmoothingTarget(DRAG_X, DRAG_Y)
+            updateSmoothingPosition()
+        else
+            CURRENT_DRAG_X = DRAG_X
+            CURRENT_DRAG_Y = DRAG_Y
+        end
+
+        CURRENT_DRAG_X = clamp(CURRENT_DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        CURRENT_DRAG_Y = clamp(CURRENT_DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        DRAG_X = clamp(DRAG_X, 0, ACTION_WINDOW_WIDTH)
+        DRAG_Y = clamp(DRAG_Y, 0, ACTION_WINDOW_HEIGHT)
+
+        local circle_x, circle_y = windowToScreenCoordinates(CURRENT_DRAG_X, CURRENT_DRAG_Y)
+        local dot_x, dot_y = windowToScreenCoordinates(DRAG_X, DRAG_Y)
+
+        drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+        drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
+
+         for groupIndex, group in ipairs(grouped_parameters) do
+            --reaper.ShowConsoleMsg(tostring(points_list[groupIndex]) .. '\n')
+            local pointsForGroup = points_list[groupIndex] -- Ottieni i punti corrispondenti per questo gruppo
+        
+            -- Calcola il valore interpolato per questo gruppo di punti
+            local interpolatedValue = linearDistanceWeighting(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y) -- power = 2 come esempio
+
+            -- Applica questo valore interpolato a tutti i parametri nel gruppo
+            if interpolatedValue then
+                for _, parameter in ipairs(group) do
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
+            end
+         end
+
+         for i = 1, #snapshot_list do
+            local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+
+            local range_in_pixel = snapshot_list[i].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2)
+
+            drawDistanceLines(snap_x, snap_y, circle_x, circle_y, range_in_pixel)
+
+         end
+
+    else
+        isInterpolating = false
+        needToInitSmoothing = true
+    end
 end
 
 function onDragLeftMouse()
@@ -2493,7 +2875,7 @@ function mainWindow()
                                                                                                     | reaper.ImGui_ChildFlags_AutoResizeX()
                                                                                                     | reaper.ImGui_ChildFlags_AutoResizeY()
                                                                                                     | reaper.ImGui_ChildFlags_AlwaysUseWindowPadding()
-                                                                                                    | reaper.ImGui_ChildFlags_Border()
+                                                                                                    | reaper.ImGui_ChildFlags_Borders()
                                                                                                     | reaper.ImGui_ChildFlags_AlwaysAutoResize(),
                                                                                                     reaper.ImGui_WindowFlags_NoScrollbar()
 )
@@ -2539,7 +2921,7 @@ function mainWindow()
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.1))
     end
 
-    reaper.ImGui_PushFont(ctx, comic_sans_smaller)
+    reaper.ImGui_PushFont(ctx, comic_sans_smaller, comic_sans_smaller_size)
     reaper.ImGui_SetCursorPosY(ctx, ACTION_WINDOW_HEIGHT - 125)
     reaper.ImGui_SetCursorPosX(ctx, 9)
     reaper.ImGui_Text(ctx, "Right-Click: make a snapshot of current FXs\nLeft-Drag on Snapshot: move\nShift + Left-Click on Snapshot: remove\nLeft-Click on Snapshot: select and load FXs values\nMouse-Wheel on Snapshot: adjust range\nCtrl + Mouse-Wheel: adjust Smooth\nLeft-Drag: interpolate")
@@ -2558,8 +2940,12 @@ function mainWindow()
     onRightClick()
     drawSnapshots()
 
-    if LINK_TO_CONTROLLER == false then
+    if LINK_TO_CONTROLLER == false and osc_touch == false then
         onDragLeftMouse()
+    end
+
+    if osc_touch == true then
+        onOSCUpdate()
     end
 
     if LINK_TO_CONTROLLER == true then
@@ -2843,7 +3229,7 @@ function preferencesWindow()
     -- IGNORE PARAMETERS (PRE-SAVE)
     reaper.ImGui_Text(ctx, 'Ignore Parameters')
     --reaper.ImGui_Text(ctx, 'Pre Save')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2860,7 +3246,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2877,7 +3263,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2886,7 +3272,7 @@ function preferencesWindow()
 
     -- IGNORE FX PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Fx')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2905,7 +3291,7 @@ function preferencesWindow()
     
     
     -- IGNORE FX POST-SAVE
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2922,7 +3308,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2931,7 +3317,7 @@ function preferencesWindow()
 
     -- IGNORE TRACKS PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Tracks')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_fon, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2952,7 +3338,7 @@ function preferencesWindow()
 
 
     -- IGNORE TRACKS POST-SAVE
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -2969,7 +3355,7 @@ function preferencesWindow()
         is_name_edited = true
     end
     
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -2992,7 +3378,7 @@ function preferencesWindow()
 
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_NewLine(ctx)
@@ -3000,7 +3386,7 @@ function preferencesWindow()
     
     reaper.ImGui_Text(ctx, 'Keyboard Hooked Actions')
     --reaper.ImGui_Text(ctx, 'Pre Save')
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
@@ -3017,7 +3403,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
@@ -3034,7 +3420,7 @@ function preferencesWindow()
         is_name_edited = true
     end
 
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 140)
@@ -3065,6 +3451,65 @@ function preferencesWindow()
             is_name_edited = true
         end
 
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)   
+    
+    reaper.ImGui_Text(ctx, 'OSC Configuration')
+    --reaper.ImGui_Text(ctx, 'Pre Save')
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+    local rv, new_ip = reaper.ImGui_InputText(ctx, "Device IP", DEVICE_IP, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        DEVICE_IP = new_ip
+        onExit()
+        reaper.ShowMessageBox("Restart Snapspace for changes to take effect", "Attention", 1)
+    end
+
+        reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+    local rv, new_port = reaper.ImGui_InputText(ctx, "Device Port", DEVICE_PORT, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        DEVICE_PORT = new_port
+        onExit()
+        reaper.ShowMessageBox("Restart Snapspace for changes to take effect", "Attention", 1)
+    end
+
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)   
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+    local rv, new_message = reaper.ImGui_InputText(ctx, "X Axis message", OSC_MESSAGE_X, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_X = new_message
+    end
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+        local rv, new_message = reaper.ImGui_InputText(ctx, "Y Axis message", OSC_MESSAGE_Y, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_Y = new_message
+    end
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+        local rv, new_message = reaper.ImGui_InputText(ctx, "Touch message", OSC_MESSAGE_TOUCH, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_TOUCH = new_message
     end
 
 end
@@ -3220,7 +3665,6 @@ function initMS()
     PROJECT_PATH = reaper.GetProjectPath(0)
 
     if PROJECT_NAME == '' then reaper.ShowMessageBox('You must save the project to use Metasurface.', 'Metasurface Error', 0) return false end
-
     
     ensureController(reaper.GetResourcePath() .. '/Effects/MTT/mtt_metasurface_controller', CONTROLLER)
 
@@ -3228,10 +3672,14 @@ function initMS()
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
+
+    if DEVICE_IP ~= "" and DEVICE_PORT ~= 0 then 
+        OSC_INITIALISED = init_osc(DEVICE_IP, DEVICE_PORT)
+    end
 
     initBalls()
     updateSnapshotIndexList()
