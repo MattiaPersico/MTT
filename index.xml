@@ -12,7 +12,7 @@
   </category>
   <category name="Snapspace">
     <reapack name="mtt_snapspace.lua" type="script" desc="Snapspace">
-      <version name="0.49" author="Mattia Persico" time="2025-08-14T08:05:07Z">
+      <version name="0.51" author="Mattia Persico" time="2025-08-14T09:20:21Z">
           <source main="main" file="mtt_snapspace.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/mtt_snapspace.lua</source>
           <source file="voronoi.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/voronoi.lua</source>
       </version>
