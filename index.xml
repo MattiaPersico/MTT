@@ -12,9 +12,27 @@
   </category>
   <category name="Snapspace">
     <reapack name="mtt_snapspace.lua" type="script" desc="Snapspace">
-      <version name="0.51" author="Mattia Persico" time="2025-08-14T09:20:21Z">
+      <version name="0.52" author="Mattia Persico" time="2025-08-14T09:52:15Z">
           <source main="main" file="mtt_snapspace.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/mtt_snapspace.lua</source>
           <source file="voronoi.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/voronoi.lua</source>
+          <!-- socket module -->
+          <source file="socket module/dkjson.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/dkjson.lua</source>
+          <source file="socket module/ftp.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/ftp.lua</source>
+          <source file="socket module/headers.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/headers.lua</source>
+          <source file="socket module/http.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/http.lua</source>
+          <source file="socket module/ltn12.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/ltn12.lua</source>
+          <source file="socket module/mbox.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/mbox.lua</source>
+          <source file="socket module/mime.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/mime.lua</source>
+          <source file="socket module/mobdebug.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/mobdebug.lua</source>
+          <source file="socket module/osc.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/osc.lua</source>
+          <source file="socket module/smtp.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/smtp.lua</source>
+          <source file="socket module/socket.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/socket.lua</source>
+          <source file="socket module/tp.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/tp.lua</source>
+          <source file="socket module/url.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/url.lua</source>
+
+          <source file="socket module/socket/core.dll">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/socket/core.dll</source>
+          <source file="socket module/socket/core.so">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/socket/core.so</source>
+          <source file="socket module/socket/core.so.linux">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Snapspace/socket%20module/socket/core.so.linux</source>
       </version>
     </reapack>
   </category>
