@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 47
+local minor_version = 48
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -86,6 +86,10 @@ local DEVICE_IP = ""
 local DEVICE_PORT = 0
 local OSC_INITIALISED = false
 
+local OSC_MESSAGE_X = 'Snapspace_x'
+local OSC_MESSAGE_Y = 'Snapspace_y'
+local OSC_MESSAGE_TOUCH = 'Snapspace_Touch'
+
 local osc_x, osc_y = 0,0
 local osc_touch = false
 
@@ -100,17 +104,15 @@ end
 
 function read_osc()
     for address, values in osc.enumReceive(udp) do
-      if address == "Snapspace_x" then
+      if address == OSC_MESSAGE_X then
         osc_x = values[1]
         end
-      if address == "Snapspace_y" then
+      if address == OSC_MESSAGE_Y then
         osc_y = 1 - values[1]
         end
-      if address == "Snapspace_Touch" then
+      if address == OSC_MESSAGE_TOUCH then
         if values[1] == 0 then osc_touch = false else osc_touch = true end
         end
-    --reaper.ShowConsoleMsg("X: " .. tostring(osc_x) .. "\nY: " .. tostring(osc_y) .. "\n")
-    --reaper.ShowConsoleMsg("Touch: " .. tostring(osc_touch) .. "\n")
     end
 end
 
@@ -145,6 +147,9 @@ function ensureGlobalSettings()
             file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
             file:write("DEVICE_IP = " .. string.format("%q", DEVICE_IP) .. "\n")
             file:write("DEVICE_PORT = " .. string.format("%q", DEVICE_PORT) .. "\n")
+            file:write("OSC_MESSAGE_X = " .. string.format("%q", OSC_MESSAGE_X) .. "\n")
+            file:write("OSC_MESSAGE_Y = " .. string.format("%q", OSC_MESSAGE_Y) .. "\n")
+            file:write("OSC_MESSAGE_TOUCH = " .. string.format("%q", OSC_MESSAGE_TOUCH) .. "\n")
 
             file:close()
         else
@@ -486,6 +491,11 @@ function saveToFile(filePath, data)
         file:write("ON_CMD_S_PRESSED = " .. string.format("%q", ON_CMD_S_PRESSED) .. "\n")
         file:write("DEVICE_IP = " .. string.format("%q", DEVICE_IP) .. "\n")
         file:write("DEVICE_PORT = " .. string.format("%q", DEVICE_PORT) .. "\n")
+        file:write("OSC_MESSAGE_X = " .. string.format("%q", OSC_MESSAGE_X) .. "\n")
+        file:write("OSC_MESSAGE_Y = " .. string.format("%q", OSC_MESSAGE_Y) .. "\n")
+        file:write("OSC_MESSAGE_TOUCH = " .. string.format("%q", OSC_MESSAGE_TOUCH) .. "\n")
+
+        
         file:close() -- Chiude il file
     end
 end
@@ -509,7 +519,10 @@ function loadFromFile(filename)
     local interpolationModeInt = 0
 
     local device_ip_string = ""
-    local device_port_int = ""
+    local device_port_int = 0
+    local osc_message_x_string = ""
+    local osc_message_y_string = ""
+    local osc_message_touch_string = ""
 
     local local_settings, err = io.open(filename, "r")
     
@@ -573,6 +586,9 @@ function loadFromFile(filename)
         local onCmdSPressed = global_settings:read("*l")
         local device_ip = global_settings:read("*l")
         local device_port = global_settings:read("*l")
+        local osc_message_x = global_settings:read("*l")
+        local osc_message_y = global_settings:read("*l")
+        local osc_message_touch = global_settings:read("*l")
         
         global_settings:close()
     
@@ -640,6 +656,27 @@ function loadFromFile(filename)
                 device_port_int = load("return " .. device_port_int)()
             end
         end
+
+        if osc_message_x then
+            osc_message_x_string = osc_message_x:match("^OSC_MESSAGE_X = (.+)$")
+            if osc_message_x_string then
+                osc_message_x_string = load("return " .. osc_message_x_string)()
+            end
+        end
+
+        if osc_message_y then
+            osc_message_y_string = osc_message_y:match("^OSC_MESSAGE_Y = (.+)$")
+            if osc_message_y_string then
+                osc_message_y_string = load("return " .. osc_message_y_string)()
+            end
+        end
+
+        if osc_message_touch then
+            osc_message_touch_string = osc_message_touch:match("^OSC_MESSAGE_TOUCH = (.+)$")
+            if osc_message_touch_string then
+                osc_message_touch_string = load("return " .. osc_message_touch_string)()
+            end
+        end
     end
 
     if not ignoreParamsPreSaveString then ignoreParamsPreSaveString = 'midi' end
@@ -655,8 +692,11 @@ function loadFromFile(filename)
     if not onCmdSPressedString then onCmdSPressedString = '40026' end
     if not device_ip_string then device_ip_string = '' end
     if not device_port_int then device_port_int = 0 end
+    if not osc_message_x_string then osc_message_x_string = 'Snapspace_x' end
+    if not osc_message_y_string then osc_message_y_string = 'Snapspace_y' end
+    if not osc_message_touch_string then osc_message_touch_string = 'Snapspace_touch' end
 
-    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString, device_ip_string, device_port_int
+    return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString, device_ip_string, device_port_int, osc_message_x_string, osc_message_y_string, osc_message_touch_string
 end
 
 function GetNormalizedMousePosition()
@@ -3444,6 +3484,34 @@ function preferencesWindow()
         reaper.ShowMessageBox("Restart Snapspace for changes to take effect", "Attention", 1)
     end
 
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
+    reaper.ImGui_NewLine(ctx)
+    reaper.ImGui_PopFont(ctx)   
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+    local rv, new_message = reaper.ImGui_InputText(ctx, "X Axis message", OSC_MESSAGE_X, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_X = new_message
+    end
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+        local rv, new_message = reaper.ImGui_InputText(ctx, "Y Axis message", OSC_MESSAGE_Y, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_Y = new_message
+    end
+
+    reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 200)
+
+        local rv, new_message = reaper.ImGui_InputText(ctx, "Touch message", OSC_MESSAGE_TOUCH, reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    if rv then
+        --init_osc(DEVICE_IP, DEVICE_PORT)
+        OSC_MESSAGE_TOUCH = new_message
+    end
+
 end
 
 function setControlTrackEnvelopeChunks(track, fx_index)
@@ -3604,7 +3672,7 @@ function initMS()
 
     if PROJECT_NAME ~= '' then
         --data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool
-        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
+        snapshot_list, IGNORE_PARAMS_PRE_SAVE_STRING, IGNORE_PARAMS_POST_SAVE_STRING, IGNORE_FXs_PRE_SAVE_STRING, IGNORE_FXs_POST_SAVE_STRING, IGNORE_TRACKS_PRE_SAVE_STRING, IGNORE_TRACKS_POST_SAVE_STRING, LINK_TO_CONTROLLER, INTERPOLATION_MODE, ON_SPACEBAR_PRESSED, ON_SHIFT_SPACEBAR_PRESSED, ON_CMD_S_PRESSED, DEVICE_IP, DEVICE_PORT, OSC_MESSAGE_X, OSC_MESSAGE_Y, OSC_MESSAGE_TOUCH = loadFromFile(reaper.GetProjectPath(0) .. '/ms_save')
     end
     
     if snapshot_list == nil then snapshot_list = {} end
