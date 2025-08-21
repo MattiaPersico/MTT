@@ -3,7 +3,7 @@
 local major_version = 1
 local minor_version = 2
 
---  OSC SETTINGS  --
+--  OSC USER PREFERENCES  --
 
 local DEVICE_IP = "169.254.200.115"
 local DEVICE_LISTENING_PORT = 9001
@@ -11,13 +11,13 @@ local DEVICE_LISTENING_PORT = 9001
 local REAPER_IP = "169.254.127.88"
 local REAPER_LISTENING_PORT = 8008
 
-local OSC_INITIALISED = false
-
 local OSC_MESSAGE_X = "ReaSurroundPan_X"
 local OSC_MESSAGE_Y = "ReaSurroundPan_Y"
 local OSC_MESSAGE_TOUCH = "ReaSurroundPan_Touch"
 
---  OSC SETTINGS --
+--  OSC USER PREFERENCES  --
+
+local OSC_INITIALISED = false
 
 local OS = reaper.GetOS()
 
