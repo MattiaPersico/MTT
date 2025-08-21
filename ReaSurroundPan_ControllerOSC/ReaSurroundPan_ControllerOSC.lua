@@ -86,7 +86,7 @@ function updatePanners()
 
         -- cicla tutti i fx della traccia
         local fx_count = reaper.TrackFX_GetCount(track)
-        
+
         for fx = 0, fx_count - 1 do
             local retval, fx_name = reaper.TrackFX_GetFXName(track, fx, "")
             if fx_name:match("ReaSurroundPan") then
@@ -121,13 +121,13 @@ function updatePanners()
         end
     end
 
-        if anySurroundPan then
-            local msg1 = osc.encode("IsPannerControllerState", 1)
-            controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
-        else
-            local msg1 = osc.encode("IsPannerControllerState", 0)
-            controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
-        end
+    if anySurroundPan then
+        local msg1 = osc.encode("IsPannerControllerState", 1)
+        controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
+    else
+        local msg1 = osc.encode("IsPannerControllerState", 0)
+        controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
+    end
 end
 
 function main()
