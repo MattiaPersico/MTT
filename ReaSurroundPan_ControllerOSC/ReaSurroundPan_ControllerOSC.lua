@@ -1,15 +1,15 @@
 -- ReaSurroundPan OSC Controller
 
 local major_version = 1
-local minor_version = 1
+local minor_version = 2
 
 --  OSC SETTINGS  --
 
 local DEVICE_IP = "169.254.200.115"
-local REAPER_PORT = 8008
+local DEVICE_LISTENING_PORT = 9001
 
-local DEVICE_PORT = 9001
 local REAPER_IP = "169.254.127.88"
+local REAPER_LISTENING_PORT = 8008
 
 local OSC_INITIALISED = false
 
@@ -103,7 +103,7 @@ function updatePanners()
                             else
                                 local paramVal = reaper.TrackFX_GetParam(track, fx, p)
                                 local msg1 = osc.encode("ReaSurroundPan_X", paramVal)
-                                controller_udp:sendto(msg1, REAPER_IP, DEVICE_PORT)
+                                controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
                             end
                         elseif suffix == "Y" then
                             if osc_touch == true then
@@ -111,7 +111,7 @@ function updatePanners()
                             else
                                 local paramVal = reaper.TrackFX_GetParam(track, fx, p)
                                 local msg1 = osc.encode("ReaSurroundPan_Y", paramVal)
-                                controller_udp:sendto(msg1, REAPER_IP, DEVICE_PORT)
+                                controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
                             end
                         end
                     end
@@ -123,10 +123,10 @@ function updatePanners()
 
         if anySurroundPan then
             local msg1 = osc.encode("IsPannerControllerState", 1)
-            controller_udp:sendto(msg1, REAPER_IP, DEVICE_PORT)
+            controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
         else
             local msg1 = osc.encode("IsPannerControllerState", 0)
-            controller_udp:sendto(msg1, REAPER_IP, DEVICE_PORT)
+            controller_udp:sendto(msg1, REAPER_IP, DEVICE_LISTENING_PORT)
         end
 end
 
@@ -137,7 +137,7 @@ function main()
     end
 end
 
-OSC_INITIALISED = init_osc(DEVICE_IP, REAPER_PORT)
+OSC_INITIALISED = init_osc(DEVICE_IP, REAPER_LISTENING_PORT)
 SetButtonState(1)
 main()
 reaper.atexit(
