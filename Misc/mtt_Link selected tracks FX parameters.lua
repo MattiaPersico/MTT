@@ -1,7 +1,6 @@
-
 -- my variant of the original spk77 script
 local major_version = 1
-local minor_version = 1
+local minor_version = 2
 
 function HandlePluginException(source_track, source_fx_index, source_param_index, dest_track, dest_fx_index, val)
   local _, fx_name = reaper.TrackFX_GetFXName(source_track, source_fx_index, "")
@@ -22,29 +21,29 @@ function HandlePluginException(source_track, source_fx_index, source_param_index
     end
   end
 
--- ReaSurroundPan: update only channel gains, X, Y, Z, LFE
-if fx_name == "VST: ReaSurroundPan (Cockos)" then
-  local ch_prefix, suffix = param_name:match("^(in %d+) ([gainXYZLFE]+)$")
-  if ch_prefix and suffix then
-    for p = 0, reaper.TrackFX_GetNumParams(source_track, source_fx_index) - 1 do
-      local _, name = reaper.TrackFX_GetParamName(source_track, source_fx_index, p, "")
-      local ch_match, subparam = name:match("^(in %d+) ([gainXYZLFE]+)$")
-      if ch_match == ch_prefix and subparam and subparam:match("^[gainXYZLFE]+$") then
-        local src_val = reaper.TrackFX_GetParam(source_track, source_fx_index, p)
+  -- ReaSurroundPan: update only channel gains, X, Y, Z, LFE
+  if fx_name == "VST: ReaSurroundPan (Cockos)" then
+    local ch_prefix, suffix = param_name:match("^(in %d+) ([gainXYZLFE]+)$")
+    if ch_prefix and suffix then
+      for p = 0, reaper.TrackFX_GetNumParams(source_track, source_fx_index) - 1 do
+        local _, name = reaper.TrackFX_GetParamName(source_track, source_fx_index, p, "")
+        local ch_match, subparam = name:match("^(in %d+) ([gainXYZLFE]+)$")
+        if ch_match == ch_prefix and subparam and subparam:match("^[gainXYZLFE]+$") then
+          local src_val = reaper.TrackFX_GetParam(source_track, source_fx_index, p)
 
-        -- if param is X and its not the manually controlled track then invert
-        if subparam == "X" and dest_track ~= source_track then
-          src_val = 1 - src_val
+          -- if param is X and its not the manually controlled track then invert
+          if subparam == "X" and dest_track ~= source_track then
+            src_val = 1 - src_val
+          end
+
+          reaper.TrackFX_SetParam(dest_track, dest_fx_index, p, src_val)
         end
-
-        reaper.TrackFX_SetParam(dest_track, dest_fx_index, p, src_val)
       end
+      return true
+    else
+      return true
     end
-    return true
-  else
-    return true
   end
-end
 
   return false
 end
@@ -103,8 +102,10 @@ function main()
 
   for _, tr in ipairs(locked_tracks) do
     if tr ~= track then
+      -- check if FX in this slot has the same name
       local dest_fx_name = select(2, reaper.TrackFX_GetFXName(tr, fx_idx, ""))
-      if dest_fx_name then
+      local src_fx_name = select(2, reaper.TrackFX_GetFXName(track, fx_idx, ""))
+      if dest_fx_name == src_fx_name then
         local handled = HandlePluginException(track, fx_idx, param_idx, tr, fx_idx, val)
         if not handled then
           reaper.TrackFX_SetParam(tr, fx_idx, param_idx, val)
@@ -119,6 +120,3 @@ end
 SetButtonState(1)
 main()
 reaper.atexit(function() SetButtonState(0) end)
-
-
-
