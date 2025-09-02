@@ -3,7 +3,7 @@
 -- se c'é un modo aggiungere al refresh l'informazione di discrepanza in caso di revision non sincronizzate
 
 local major_version = 1
-local minor_version = 9
+local minor_version = 2
 
 local name = 'Plastic Integration ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -31,11 +31,28 @@ local checkout_enabled = false
 local getlatest_enabled = false
 local last_frame_project_path = ''
 
-dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.8')
+dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
 local ctx = reaper.ImGui_CreateContext(name)
-local comic_sans = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 18)
-local comic_sans_small = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 16)
-local new_line_font = reaper.ImGui_CreateFont('/System/Library/Fonts/Supplemental/Comic Sans MS.ttf', 2)
+
+local comic_sans_size = 13
+local comic_sans_small_size = 11
+local new_line_font_size = 1
+
+local comic_sans
+local comic_sans_small
+local new_line_font
+
+local OS = reaper.GetOS()
+
+if OS == "OSX32" or OS == "OSX64" or OS == "macOS-arm64" then
+    comic_sans = reaper.ImGui_CreateFont('Comic Sans MS', 18)
+    comic_sans_small = reaper.ImGui_CreateFont('Comic Sans MS', 17)
+    new_line_font = reaper.ImGui_CreateFont('Comic Sans MS', 2)
+else
+    comic_sans = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 18)
+    comic_sans_small = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 17)
+    new_line_font = reaper.ImGui_CreateFont('C:/Windows/Fonts/comic.ttf', 2)
+end
 
 reaper.ImGui_Attach(ctx, comic_sans_small)
 reaper.ImGui_Attach(ctx, comic_sans)
@@ -88,7 +105,7 @@ function refreshStatus(proj_dir, proj_path)
 end
 
 function guiNewLine()
-    reaper.ImGui_PushFont(ctx, new_line_font)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
 end
@@ -184,7 +201,7 @@ function guiStylePush()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5) 
   
-    reaper.ImGui_PushFont(ctx, comic_sans)
+    reaper.ImGui_PushFont(ctx, comic_sans, comic_sans_size)
 end
 
 function guiStylePop()
@@ -270,7 +287,7 @@ function mainWindow()
 
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + 20)
 
-    reaper.ImGui_PushFont(ctx, comic_sans_small)
+    reaper.ImGui_PushFont(ctx, comic_sans_small, comic_sans_small_size)
 
     if reaper.ImGui_Button(ctx, 'Refresh') then
         refreshStatus(proj_dir, proj_path)
