@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 1
+local minor_version = 3
 
 if reaper.CountSelectedMediaItems(0) < 2 then return end
 
@@ -120,7 +120,7 @@ for track, items in pairs(track_items) do
     end
 end
 
-reaper.Main_OnCommand(reaper.NamedCommandLookup("_FNG_CLEAN_OVERLAP"), 0)
+--reaper.Main_OnCommand(reaper.NamedCommandLookup("_FNG_CLEAN_OVERLAP"), 0)
 reaper.UpdateArrange()
 reaper.Undo_EndBlock("Allinea inizio item al picco della traccia più alta (con duplicati se necessari)", -1)
 reaper.PreventUIRefresh(-1)
