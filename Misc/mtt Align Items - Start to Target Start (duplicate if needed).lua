@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 3
+local minor_version = 4
 
 if reaper.CountSelectedMediaItems(0) < 2 then return end
 
