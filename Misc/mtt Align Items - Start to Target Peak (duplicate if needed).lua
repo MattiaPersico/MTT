@@ -118,6 +118,52 @@ for track, items in pairs(track_items) do
         -- Sposta l’inizio dell’item sul picco del target
         reaper.SetMediaItemInfo_Value(t.item, "D_POSITION", ref.peak_time)
     end
+
+        --- free item positioning block
+
+    local prev_item_start_pos = -1
+    local prev_item_len = -1
+    local needToSetFreeItemPositioningTrue = false
+
+    for i=1, #items, 1 do
+
+        local item_pos = reaper.GetMediaItemInfo_Value(items[i].item, "D_POSITION")
+        local item_lenght = reaper.GetMediaItemInfo_Value(items[i].item, "D_LENGTH")
+
+        if prev_item_start_pos > -1 then
+
+            if item_pos > prev_item_start_pos and item_pos < (prev_item_start_pos + prev_item_len) then
+                needToSetFreeItemPositioningTrue = true
+                break
+            end
+
+        end
+
+        prev_item_start_pos = item_pos
+        prev_item_len = item_lenght
+
+    end
+
+    if needToSetFreeItemPositioningTrue then
+
+        local selected_tracks = {}
+
+        for i=0, reaper.CountSelectedTracks(0)-1, 1 do
+            selected_tracks[i] = reaper.GetSelectedTrack(0, i)
+            reaper.SetTrackSelected(selected_tracks[i], false)
+        end
+
+        reaper.SetTrackSelected(track, true)
+        reaper.Main_OnCommand(40751, 0)
+
+        for i=0, #selected_tracks-1, 1 do
+            reaper.SetTrackSelected(selected_tracks[i], true)
+        end
+    end
+
+    --- free item positioning block
+
+
 end
 
 --reaper.Main_OnCommand(reaper.NamedCommandLookup("_FNG_CLEAN_OVERLAP"), 0)
