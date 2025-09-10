@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 4
+local minor_version = 5
 
 -- Selezione insufficiente
 if reaper.CountSelectedMediaItems(0) < 2 then return end
@@ -102,7 +102,8 @@ local function duplicate_item_on_track(item)
     return new_item
 end
 
--- Allinea gli altri item
+
+
 for track, items in pairs(track_items) do
     local count = #items
 
@@ -130,6 +131,11 @@ for track, items in pairs(track_items) do
     local prev_item_start_pos = -1
     local prev_item_len = -1
     local needToSetFreeItemPositioningTrue = false
+
+    if reaper.GetMediaTrackInfo_Value(track, "I_FREEMODE") == 1 then
+        needToSetFreeItemPositioningTrue = true
+        reaper.SetMediaTrackInfo_Value(track, "I_FREEMODE", 0)
+    end
 
     for i=1, #items, 1 do
 
@@ -166,7 +172,6 @@ for track, items in pairs(track_items) do
             reaper.SetTrackSelected(selected_tracks[i], true)
         end
     end
-
     --- free item positioning block
 
 end
