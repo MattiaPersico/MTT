@@ -3,8 +3,20 @@
 
 -- This script is is based on "mpl_Peak follower tools.lua" and uses parts of its code
 
+
+--[[ APPUNTI
+
+- aggiungi hint di quanto sta sforando oltre il bordo accanto a 24db
+- rinomina window with tipo definition o simili
+- fare che si aggiorna quando rilasci e non mentre trascini
+- levare triangolone
+- aggiungere istruzioni
+
+ APPUNTI ]]
+
+
 local major_version = 0
-local minor_version = 2
+local minor_version = 4
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -18,7 +30,7 @@ local sizeConstraintsCallback = [=[
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
-local MAIN_WINDOW_WIDTH = 462
+local MAIN_WINDOW_WIDTH = 600
 local MAIN_WINDOW_HEIGHT = 640
 
 local PLOT_WINDOW_HEIGHT = 160
@@ -56,7 +68,7 @@ end
 -- User Parameters
 local window_sec = 0.04 -- analysis window in seconds 0.001 - 0.4
 local window_overlap = 2 -- overlap factor, 2 = 50% overlap, 1-16
-local auto_update = false
+local auto_update = true
 local auto_update_apply = true
 local auto_update_impose = false
 local scaling_factor = 1 -- envelope scaling factor
@@ -264,6 +276,7 @@ function Process_GetAudioData(item, clear_envelope)
     rms_sum = rms_sum + db_raw
         count = count + 1
         max_rms = math.max(max_rms, db_raw)
+
     end
     reaper.DestroyAudioAccessor(accessor)
     -- free our shared buffer
@@ -481,10 +494,9 @@ function EnvelopeVis(envelope, bool)
 end
 
 function AnalyseReferenceEnvelope()
-
     REF_AUDIO_DATA, RMS_MEAN, RMS_MAX = Process_GetAudioData(REF_ITEM, false)
     RMS_MEAN = math.abs(RMS_MEAN)
-
+    REF_ANALYSIS_DONE = true
 end
 
 function makeCorrectiveEnvelope(TARGET_AUDIO_DATA, REF_AUDIO_DATA)
@@ -644,6 +656,12 @@ function plotWindow()
                 envelope_point_color
             ) ]]
         end
+    else
+        local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
+        -- use same offsets as plotting (offset_x/offset_y) so spinner is centered in plot area
+        local center_x = x + ((reaper.ImGui_GetWindowWidth(ctx) - 15) * 0.5) + offset_x
+        local center_y = y + (PLOT_WINDOW_HEIGHT * 0.5) + offset_y
+        drawSpinner(center_x, center_y, 100, 0.3)
     end
 
     
@@ -674,7 +692,7 @@ function mainWindow()
         TARGET_AI_IDX = nil
         TARGET_AUDIO_DATA = nil
     end
-
+    
     -- SET REF_ITEM BUTTON
 
     if reaper.CountSelectedMediaItems(0) == 0 then
@@ -696,16 +714,26 @@ function mainWindow()
         TARGET_AUDIO_DATA = nil
 
         REF_ITEM = reaper.GetSelectedMediaItem(0, 0)
+
         AnalyseReferenceEnvelope()
-        REF_ANALYSIS_DONE = true
     end
 
     if reaper.CountSelectedMediaItems(0) == 0 then
         reaper.ImGui_EndDisabled(ctx)
     end
 
-    -- REF ITEM NAME TEXT
 
+    --- HELPER SPINNER
+
+    if REF_ITEM == -1 then
+        reaper.ImGui_SameLine(ctx)
+        local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
+        drawSpinner(x + 13, y + 11.5, 13, 1)
+        reaper.ImGui_NewLine(ctx)
+    end
+
+
+    -- REF ITEM NAME TEXT
     if REF_ITEM ~= -1 then
         reaper.ImGui_SameLine(ctx)
         local retval, stringNeedBig =
@@ -714,6 +742,7 @@ function mainWindow()
     end
 
     reaper.ImGui_NewLine(ctx)
+
 
     -- ANALYSIS PARAMETERS
 
@@ -872,7 +901,7 @@ function mainWindow()
 
     reaper.ImGui_NewLine(ctx)
 
-    local target_name = "No Target Item"
+    local target_name = "no valid target item selected"
 
     if reaper.CountSelectedMediaItems(0) ~= 0 and reaper.GetSelectedMediaItem(0, 0) ~= REF_ITEM and REF_ANALYSIS_DONE then
         local retval, str =
@@ -885,7 +914,19 @@ function mainWindow()
         target_name = str
     end
 
-    reaper.ImGui_Text(ctx, "Target Item: " .. target_name)
+    if REF_ITEM ~= -1 then
+        reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,1), "Target Item: " .. target_name)
+    else
+        reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,0.3), "Target Item: " .. target_name)
+    end
+
+        --- HELPER SPINNER
+    if (reaper.CountSelectedMediaItems(0) == 0 or reaper.GetSelectedMediaItem(0, 0) == REF_ITEM) and REF_ITEM ~= -1 then
+        reaper.ImGui_SameLine(ctx)
+        local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
+        drawSpinner(x + 7, y + 10.5, 13, 1)
+        reaper.ImGui_NewLine(ctx)
+    end
 
     reaper.ImGui_NewLine(ctx)
 
@@ -975,6 +1016,12 @@ function mainWindow()
     end
 
     -- AUTO-UPDATE ENVELOPE CHECKBOX
+
+    if reaper.CountSelectedMediaItems(0) > 0 and reaper.GetSelectedMediaItem(0, 0) ~= REF_ITEM and REF_ITEM ~= -1 then
+        reaper.ImGui_SameLine(ctx)
+        local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
+        drawSpinner(x + 12, y + 11.5, 13, 1)
+    end
 
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 30)
@@ -1233,6 +1280,19 @@ function loop()
     if mw_open then
         reaper.defer(loop)
     end
+end
+
+function drawSpinner(x, y, size, alpha)
+    -- treat x,y as the center of the spinner (caller already computes center)
+    local rotation = (os.clock() * 6) % (2 * math.pi)
+    local r = size / 2
+    local thickness = 1
+
+    if size > 50 then 
+        thickness = 2
+    end
+    -- draw ellipse centered at (x,y). use more segments for smoothness and slightly thicker stroke
+    reaper.ImGui_DrawList_AddEllipse(reaper.ImGui_GetWindowDrawList(ctx), x, y, r, r, reaper.ImGui_ColorConvertDouble4ToU32(1,0.5,0,alpha), rotation, 3, thickness)
 end
 
 SetButtonState(1)
