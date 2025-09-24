@@ -16,7 +16,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 54
+local minor_version = 55
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -893,7 +893,7 @@ function colorPickerWindow()
                     reaper.ImGui_ColorEditFlags_NoLabel() | 
                     reaper.ImGui_ColorEditFlags_NoInputs() | 
                     reaper.ImGui_ColorEditFlags_AlphaBar() | 
-                    reaper.ImGui_ColorEditFlags_AlphaPreview() | 
+                    reaper.ImGui_ColorEditFlags_AlphaPreviewHalf() | 
                     reaper.ImGui_ColorEditFlags_NoOptions() | 
                     reaper.ImGui_ColorEditFlags_NoSmallPreview() | 
                     reaper.ImGui_ColorEditFlags_NoPicker()
@@ -3015,7 +3015,7 @@ function mainWindow()
 
     --reaper.ShowConsoleMsg(tostring(reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())))
 
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and not hoveringSnapshot then
+    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and not hoveringSnapshot then
         if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
             smoothing_fader_value = smoothing_fader_value + 0.02
         elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
