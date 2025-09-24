@@ -3,7 +3,6 @@
 
 -- This script is is based on "mpl_Peak follower tools.lua" and uses parts of its code
 
-
 --[[ APPUNTI
 
 - aggiungi hint di quanto sta sforando oltre il bordo accanto a 24db
@@ -13,10 +12,8 @@
 - aggiungere istruzioni
 
  APPUNTI ]]
-
-
 local major_version = 0
-local minor_version = 4
+local minor_version = 5
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -75,9 +72,9 @@ local scaling_factor = 1 -- envelope scaling factor
 local envelope_offset = 0 -- envelope offset
 local envelope_top_limit = 90
 local envelope_bottom_limit = -150
--- Smoothing parameters (attack/release in milliseconds)
-local attack_ms = 0.01  -- how fast it reacts to increases (ms)
+local attack_ms = 0.01 -- how fast it reacts to increases (ms)
 local release_ms = 0.01 -- how fast it reacts to decreases (ms)
+local continuous_update = true
 
 -- Private Parameters
 local REF_ANALYSIS_DONE, REF_ENV, REF_AI_IDX  -- global vars to store state between stealing and applying
@@ -90,6 +87,10 @@ local ENV_RANGE = 24
 local TARGET_ANALYSIS_DONE, TARGET_ENV, TARGET_AI_IDX  -- global vars to store state between stealing and applying
 local TARGET_AUDIO_DATA  -- global var to store audio data between stealing and applying
 local TARGET_ITEM = -1 -- global var to store reference item
+
+local envelope_top_limit_to_plot = envelope_top_limit
+local envelope_bottom_limit_to_plot = envelope_bottom_limit
+local scaling_factor_to_plot = scaling_factor
 
 local smoothing_enabled = true
 
@@ -113,26 +114,29 @@ function WDL_VAL2DB(x) --https://github.com/majek/wdl/blob/master/WDL/db2val.h
 end
 
 function Process_InsertData_PF(t, boundary_start, offs, isImpose)
-
     local output = {}
     -- avoid shadowing the global `window_sec`; calculate the analysis step
     local step = window_sec / window_overlap
 
---[[     local max_dB = -math.huge
+    --[[     local max_dB = -math.huge
     for i = 1, #t do
         max_dB = math.max(t[i], max_dB)
     end ]]
-
     if isImpose == false then
         for i = 1, #t do
             local tpos = (i - 1) * step + boundary_start - offs
-            local val = math.min(math.max((((t[i] + RMS_MEAN) * scaling_factor) - RMS_MEAN), envelope_bottom_limit), envelope_top_limit) + envelope_offset
+            local val =
+                math.min(
+                math.max((((t[i] + RMS_MEAN) * scaling_factor) - RMS_MEAN), envelope_bottom_limit),
+                envelope_top_limit
+            ) + envelope_offset
             output[#output + 1] = {tpos = tpos, val = val}
         end
     else
         for i = 1, #t do
             local tpos = (i - 1) * step + boundary_start - offs
-            local val = math.min(math.max((t[i] * scaling_factor), envelope_bottom_limit), envelope_top_limit) + envelope_offset
+            local val =
+                math.min(math.max((t[i] * scaling_factor), envelope_bottom_limit), envelope_top_limit) + envelope_offset
             -- Usiamo il valore dB direttamente, senza normalizzazione
             output[#output + 1] = {tpos = tpos, val = val}
         end
@@ -143,14 +147,22 @@ end
 
 function remapCurve(x, k)
     -- clamp per sicurezza
-    if x < 0 then x = 0 end
-    if x > 1 then x = 1 end
+    if x < 0 then
+        x = 0
+    end
+    if x > 1 then
+        x = 1
+    end
     return x ^ k
 end
 
 function remapCurveInv(x, k)
-    if x < 0 then x = 0 end
-    if x > 1 then x = 1 end
+    if x < 0 then
+        x = 0
+    end
+    if x > 1 then
+        x = 1
+    end
     return 1 - (1 - x) ^ k
 end
 
@@ -221,7 +233,9 @@ function Process_GetAudioData(item, clear_envelope)
 
     -- convert attack/release from ms to per-sample smoothing coefficients
     local function coef_from_time_ms(t_ms)
-        if t_ms <= 0 then return 0 end
+        if t_ms <= 0 then
+            return 0
+        end
         -- time constant in seconds
         local tau = t_ms / 1000
         -- per-step coefficient for step length = window_sec/window_overlap
@@ -265,18 +279,17 @@ function Process_GetAudioData(item, clear_envelope)
 
         prev_smoothed_linear = smoothed_linear
 
-    local db_raw = WDL_VAL2DB(smoothed_linear)
-    -- clamp to limits for storage/apply but keep raw for mean calculation
-    --reaper.ShowConsoleMsg("envelope_top_limit: " .. tostring(envelope_top_limit) .. "\n")
+        local db_raw = WDL_VAL2DB(smoothed_linear)
+        -- clamp to limits for storage/apply but keep raw for mean calculation
+        --reaper.ShowConsoleMsg("envelope_top_limit: " .. tostring(envelope_top_limit) .. "\n")
 
-    local db_clamped = math.min(math.max(db_raw, envelope_bottom_limit), envelope_top_limit)
-    data[id] = db_clamped
+        local db_clamped = math.min(math.max(db_raw, envelope_bottom_limit), envelope_top_limit)
+        data[id] = db_clamped
 
-    -- accumulate raw (unclamped) dB into rms_sum so limits don't change the normalization baseline
-    rms_sum = rms_sum + db_raw
+        -- accumulate raw (unclamped) dB into rms_sum so limits don't change the normalization baseline
+        rms_sum = rms_sum + db_raw
         count = count + 1
         max_rms = math.max(max_rms, db_raw)
-
     end
     reaper.DestroyAudioAccessor(accessor)
     -- free our shared buffer
@@ -293,16 +306,16 @@ function Process_InsertData_reduceSameVal(output)
     local sz = #output
     -- reduce pts with same values
 
-        local last_val = 0
-        local trigval
-        for i = 1, sz - 1 do
-            local val = output[i].val
-            local valnext = output[i + 1].val
-            if last_val == val and valnext == val then
-                output[i].ignore = true
-            end
-            last_val = val
+    local last_val = 0
+    local trigval
+    for i = 1, sz - 1 do
+        local val = output[i].val
+        local valnext = output[i + 1].val
+        if last_val == val and valnext == val then
+            output[i].ignore = true
         end
+        last_val = val
+    end
 end
 
 function Process_InsertData(item, env, AI_idx, t, isImpose)
@@ -391,11 +404,10 @@ end
 
 function Process_GenerateAI(item)
     -- get boundary
---[[     local ret, boundary_start, boundary_end, i_pos = Process_GetBoundary(item)
+    --[[     local ret, boundary_start, boundary_end, i_pos = Process_GetBoundary(item)
     if not ret then
         return
     end ]]
-
     -- destination
     local env
     local AI_idx = -1
@@ -430,13 +442,22 @@ function Process_GenerateAI(item)
             AI_idx = reaper.InsertAutomationItem(env, -1, boundary_start, boundary_end - boundary_start)
         end
     end ]]
-
     -- take env
     --if select == 3 then
-        local take = reaper.GetActiveTake(item)
-        if not take then
-            return
+    local take = reaper.GetActiveTake(item)
+    if not take then
+        return
+    end
+    for envidx = 1, reaper.CountTakeEnvelopes(take) do
+        local tkenv = reaper.GetTakeEnvelope(take, envidx - 1)
+        local retval, envname = reaper.GetEnvelopeName(tkenv)
+        if envname == "Volume" then
+            env = tkenv
+            break
         end
+    end
+    if not reaper.ValidatePtr2(0, env, "TrackEnvelope*") then
+        VF_Action(40693) -- Take: Toggle take volume envelope
         for envidx = 1, reaper.CountTakeEnvelopes(take) do
             local tkenv = reaper.GetTakeEnvelope(take, envidx - 1)
             local retval, envname = reaper.GetEnvelopeName(tkenv)
@@ -445,17 +466,7 @@ function Process_GenerateAI(item)
                 break
             end
         end
-        if not reaper.ValidatePtr2(0, env, "TrackEnvelope*") then
-            VF_Action(40693) -- Take: Toggle take volume envelope
-            for envidx = 1, reaper.CountTakeEnvelopes(take) do
-                local tkenv = reaper.GetTakeEnvelope(take, envidx - 1)
-                local retval, envname = reaper.GetEnvelopeName(tkenv)
-                if envname == "Volume" then
-                    env = tkenv
-                    break
-                end
-            end
-        end
+    end
     --end
 
     -- apply points
@@ -471,7 +482,7 @@ end
 
 function EnvelopeVis(envelope, bool)
     local retval, str = reaper.GetEnvelopeStateChunk(envelope, "VIS", false)
-    
+
     if retval then
         if bool then
             str = string.gsub(str, "VIS %d", "VIS 1")
@@ -528,7 +539,6 @@ function makeCorrectiveEnvelope(TARGET_AUDIO_DATA, REF_AUDIO_DATA)
 end
 
 function ApplyEnvelope()
-
     local item = reaper.GetSelectedMediaItem(0, 0)
 
     if item == REF_ITEM then
@@ -570,11 +580,11 @@ function onExit()
 end
 
 function plotWindow()
-
     reaper.ImGui_PushFont(ctx, comic_sans_small, comic_sans_small_size)
     --reaper.ImGui_SetCursorPosX(ctx, 0 + 1)
     --reaper.ImGui_SetCursorPosY(ctx, -2)
-    reaper.ImGui_TextColored(ctx,reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,0.8) ,tostring(ENV_RANGE) .. "dB")-- .. " (" .. tostring(math.floor(ENV_RANGE + envelope_offset)) .. "dB)")
+    reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.8), tostring(ENV_RANGE) .. "dB")
+     -- .. " (" .. tostring(math.floor(ENV_RANGE + envelope_offset)) .. "dB)")
 
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 0)
 
@@ -603,12 +613,19 @@ function plotWindow()
             local point_x = x + ((i / #REF_AUDIO_DATA) * reaper.ImGui_GetWindowWidth(ctx) + offset_x)
             local prev_point_x = x + (((i - 1) / #REF_AUDIO_DATA) * reaper.ImGui_GetWindowWidth(ctx) + offset_x)
 
-            local point_y_raw = math.min(math.max(((REF_AUDIO_DATA[i] + RMS_MEAN) * scaling_factor) - RMS_MEAN, envelope_bottom_limit), envelope_top_limit)
-            local prev_point_y_raw = math.min(math.max(((REF_AUDIO_DATA[i-1] + RMS_MEAN) * scaling_factor) - RMS_MEAN , envelope_bottom_limit), envelope_top_limit)
+            local point_y_raw =
+                math.min(
+                math.max(((REF_AUDIO_DATA[i] + RMS_MEAN) * scaling_factor_to_plot) - RMS_MEAN, envelope_bottom_limit_to_plot),
+                envelope_top_limit_to_plot
+            )
+            local prev_point_y_raw =
+                math.min(
+                math.max(((REF_AUDIO_DATA[i - 1] + RMS_MEAN) * scaling_factor_to_plot) - RMS_MEAN, envelope_bottom_limit_to_plot),
+                envelope_top_limit_to_plot
+            )
 
-            local point_y = map_db_to_pixels(--[[ envelope_offset +  ]]point_y_raw, PLOT_WINDOW_HEIGHT)
-            local prev_point_y = map_db_to_pixels(--[[ envelope_offset +  ]]prev_point_y_raw, PLOT_WINDOW_HEIGHT)
-
+            local point_y = map_db_to_pixels --[[ envelope_offset +  ]](point_y_raw, PLOT_WINDOW_HEIGHT)
+            local prev_point_y = map_db_to_pixels --[[ envelope_offset +  ]](prev_point_y_raw, PLOT_WINDOW_HEIGHT)
 
             if i == 2 then
                 reaper.ImGui_DrawList_AddLine(
@@ -621,7 +638,7 @@ function plotWindow()
                     1
                 )
 
---[[                 reaper.ImGui_DrawList_AddCircleFilled(
+            --[[                 reaper.ImGui_DrawList_AddCircleFilled(
                     reaper.ImGui_GetForegroundDrawList(ctx),
                     prev_point_x,
                     prev_point_y,
@@ -648,7 +665,7 @@ function plotWindow()
                 1
             )
 
---[[             reaper.ImGui_DrawList_AddCircleFilled(
+            --[[             reaper.ImGui_DrawList_AddCircleFilled(
                 reaper.ImGui_GetForegroundDrawList(ctx),
                 point_x,
                 point_y,
@@ -657,22 +674,70 @@ function plotWindow()
             ) ]]
         end
     else
+        --[[    SPINNER       
         local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
         -- use same offsets as plotting (offset_x/offset_y) so spinner is centered in plot area
         local center_x = x + ((reaper.ImGui_GetWindowWidth(ctx) - 15) * 0.5) + offset_x
         local center_y = y + (PLOT_WINDOW_HEIGHT * 0.5) + offset_y
-        drawSpinner(center_x, center_y, 100, 0.3)
+        drawSpinner(center_x, center_y, 100, 0.3) ]]
     end
 
-    
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_EndChild(ctx)
 
     --reaper.ImGui_SetCursorPosX(ctx, 0 + 1)
     --reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) * 0.92)
-    reaper.ImGui_TextColored(ctx,reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,0.8), "-150dB")
+    reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.8), "-150dB")
 
     reaper.ImGui_PopFont(ctx)
+end
+
+function updateAfterSliderValueChange(retval)
+    -- Normalize behavior: if nothing changed and the item wasn't deactivated, do nothing
+    if not retval and not reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+        return
+    end
+
+    -- require a valid reference item
+    if REF_ITEM == -1 then
+        return
+    end
+
+    -- If continuous update is enabled, react to any value change (retval true)
+    if continuous_update then
+
+        envelope_bottom_limit_to_plot = envelope_bottom_limit
+        envelope_top_limit_to_plot = envelope_top_limit
+        scaling_factor_to_plot = scaling_factor
+
+        AnalyseReferenceEnvelope()
+
+        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
+            if auto_update_apply then
+                ApplyEnvelope()
+            else
+                ImposeEnvelope()
+            end
+        end
+        return
+    end
+
+    -- If continuous update is disabled, only react when the item was deactivated after edit
+    if reaper.ImGui_IsItemDeactivatedAfterEdit(ctx) then
+
+        envelope_bottom_limit_to_plot = envelope_bottom_limit
+        envelope_top_limit_to_plot = envelope_top_limit
+        scaling_factor_to_plot = scaling_factor
+
+        AnalyseReferenceEnvelope()
+        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
+            if auto_update_apply then
+                ApplyEnvelope()
+            else
+                ImposeEnvelope()
+            end
+        end
+    end
 end
 
 function mainWindow()
@@ -692,7 +757,7 @@ function mainWindow()
         TARGET_AI_IDX = nil
         TARGET_AUDIO_DATA = nil
     end
-    
+
     -- SET REF_ITEM BUTTON
 
     if reaper.CountSelectedMediaItems(0) == 0 then
@@ -700,7 +765,6 @@ function mainWindow()
     end
 
     if reaper.ImGui_Button(ctx, "Set Reference Item") then
-        
         REF_ITEM = -1
         REF_ANALYSIS_DONE = false
         REF_ENV = nil
@@ -722,7 +786,6 @@ function mainWindow()
         reaper.ImGui_EndDisabled(ctx)
     end
 
-
     --- HELPER SPINNER
 
     if REF_ITEM == -1 then
@@ -731,7 +794,6 @@ function mainWindow()
         drawSpinner(x + 13, y + 11.5, 13, 1)
         reaper.ImGui_NewLine(ctx)
     end
-
 
     -- REF ITEM NAME TEXT
     if REF_ITEM ~= -1 then
@@ -743,7 +805,6 @@ function mainWindow()
 
     reaper.ImGui_NewLine(ctx)
 
-
     -- ANALYSIS PARAMETERS
 
     if not REF_ANALYSIS_DONE then
@@ -754,18 +815,11 @@ function mainWindow()
 
     if retval and REF_ITEM ~= -1 then
         window_sec = v
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
 
---[[     local retval, v = reaper.ImGui_SliderInt(ctx, "Window Overlap", window_overlap, 1, 16)
+    updateAfterSliderValueChange(retval)
+
+    --[[     local retval, v = reaper.ImGui_SliderInt(ctx, "Window Overlap", window_overlap, 1, 16)
 
     if retval and REF_ITEM ~= -1 then
         window_overlap = v
@@ -779,25 +833,17 @@ function mainWindow()
             end
         end
     end ]]
-
     local retval, v = reaper.ImGui_SliderDouble(ctx, "Scaling Factor", scaling_factor, 0, 2)
 
     if retval and REF_ITEM ~= -1 then
         scaling_factor = v
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
+
+    updateAfterSliderValueChange(retval)
 
     reaper.ImGui_NewLine(ctx)
 
---[[     -- Smoothing controls
+    --[[     -- Smoothing controls
     local retval_s, vs = reaper.ImGui_Checkbox(ctx, "Enable Smoothing", smoothing_enabled)
     if retval_s and REF_ITEM ~= -1 then
         smoothing_enabled = vs
@@ -811,55 +857,32 @@ function mainWindow()
             end
         end
     end ]]
-
-    local retval_a, a_ms = reaper.ImGui_SliderDouble(ctx, "Attack (ms)", attack_ms, 0.01, 100)
-    if retval_a and REF_ITEM ~= -1 then
+    local retval, a_ms = reaper.ImGui_SliderDouble(ctx, "Attack (ms)", attack_ms, 0.01, 100)
+    if retval and REF_ITEM ~= -1 then
         attack_ms = a_ms
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
 
-    local retval_r, r_ms = reaper.ImGui_SliderDouble(ctx, "Release (ms)", release_ms, 0.01, 100)
-    if retval_r and REF_ITEM ~= -1 then
+    updateAfterSliderValueChange(retval)
+
+
+    local retval, r_ms = reaper.ImGui_SliderDouble(ctx, "Release (ms)", release_ms, 0.01, 100)
+    if retval and REF_ITEM ~= -1 then
         release_ms = r_ms
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
+
+    updateAfterSliderValueChange(retval)
 
     reaper.ImGui_NewLine(ctx)
 
-    local retval, v1, v2 = reaper.ImGui_SliderDouble2(ctx, "Limits (dB)", envelope_bottom_limit, envelope_top_limit, -150, 90)
+    local retval, v1, v2 =
+        reaper.ImGui_SliderDouble2(ctx, "Limits (dB)", envelope_bottom_limit, envelope_top_limit, -150, 90)
 
     if retval and REF_ITEM ~= -1 then
-
         envelope_bottom_limit = v1
         envelope_top_limit = v2
-
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
 
+    updateAfterSliderValueChange(retval)
 
     if not REF_ANALYSIS_DONE then
         reaper.ImGui_EndDisabled(ctx)
@@ -881,21 +904,13 @@ function mainWindow()
 
     if retval and REF_ITEM ~= -1 then
         envelope_offset = v
-        AnalyseReferenceEnvelope()
-
-        if auto_update and reaper.CountSelectedMediaItems(0) ~= 0 then
-            if auto_update_apply then
-                ApplyEnvelope()
-            else
-                ImposeEnvelope()
-            end
-        end
     end
+
+    updateAfterSliderValueChange(retval)
 
     if not REF_ANALYSIS_DONE then
         reaper.ImGui_EndDisabled(ctx)
     end
-
 
     -- TARGET ITEM NAME TEXT
 
@@ -915,12 +930,16 @@ function mainWindow()
     end
 
     if REF_ITEM ~= -1 then
-        reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,1), "Target Item: " .. target_name)
+        reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), "Target Item: " .. target_name)
     else
-        reaper.ImGui_TextColored(ctx, reaper.ImGui_ColorConvertDouble4ToU32(1,1,1,0.3), "Target Item: " .. target_name)
+        reaper.ImGui_TextColored(
+            ctx,
+            reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 0.3),
+            "Target Item: " .. target_name
+        )
     end
 
-        --- HELPER SPINNER
+    --- HELPER SPINNER
     if (reaper.CountSelectedMediaItems(0) == 0 or reaper.GetSelectedMediaItem(0, 0) == REF_ITEM) and REF_ITEM ~= -1 then
         reaper.ImGui_SameLine(ctx)
         local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
@@ -929,7 +948,6 @@ function mainWindow()
     end
 
     reaper.ImGui_NewLine(ctx)
-
 
     -- APPLY ENVELOPE BUTTON
 
@@ -965,7 +983,7 @@ function mainWindow()
         if reaper.CountSelectedMediaItems(0) <= 0 or reaper.GetSelectedMediaItem(0, 0) == REF_ITEM or REF_ITEM == -1 then
             reaper.ImGui_EndDisabled(ctx)
         end
-    else    -- if auto apply
+    else -- if auto apply
         -- Apply Button
         if reaper.CountSelectedMediaItems(0) <= 0 or reaper.GetSelectedMediaItem(0, 0) == REF_ITEM or REF_ITEM == -1 then
             reaper.ImGui_BeginDisabled(ctx)
@@ -1015,13 +1033,17 @@ function mainWindow()
         end
     end
 
-    -- AUTO-UPDATE ENVELOPE CHECKBOX
+    -- SPINNER
 
     if reaper.CountSelectedMediaItems(0) > 0 and reaper.GetSelectedMediaItem(0, 0) ~= REF_ITEM and REF_ITEM ~= -1 then
         reaper.ImGui_SameLine(ctx)
         local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
         drawSpinner(x + 12, y + 11.5, 13, 1)
     end
+
+
+
+    -- AUTO-UPDATE ENVELOPE CHECKBOX
 
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 30)
@@ -1047,6 +1069,37 @@ function mainWindow()
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 118)
     --reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 30)
     reaper.ImGui_Text(ctx, "Auto-Update")
+
+
+
+    -- CONTINUOUS ENVELOPE CHECKBOX
+
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 170)
+    --reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 30)
+
+    local retval, v = reaper.ImGui_Checkbox(ctx, "##Continuous-Update", continuous_update)
+
+    if retval then
+        continuous_update = v
+
+        --[[ if reaper.CountSelectedMediaItems(0) ~= 0 then
+            if continuous_update and REF_ANALYSIS_DONE then
+                if auto_update_apply then
+                    ApplyEnvelope()
+                else
+                    ImposeEnvelope()
+                end
+            end
+        end ]]
+    end
+
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetWindowWidth(ctx) - 295)
+    --reaper.ImGui_SetCursorPosY(ctx, reaper.ImGui_GetWindowHeight(ctx) - 30)
+    reaper.ImGui_Text(ctx, "Continuous-Update")
+
+
 end
 
 function guiStylePush()
@@ -1237,7 +1290,6 @@ function guiStylePop()
 end
 
 function loop()
-
     local ret, val = reaper.BR_Win32_GetPrivateProfileString("REAPER", "volenvrange", "", reaper.get_ini_file())
 
     if val == "4" then
@@ -1288,11 +1340,21 @@ function drawSpinner(x, y, size, alpha)
     local r = size / 2
     local thickness = 1
 
-    if size > 50 then 
+    if size > 50 then
         thickness = 2
     end
     -- draw ellipse centered at (x,y). use more segments for smoothness and slightly thicker stroke
-    reaper.ImGui_DrawList_AddEllipse(reaper.ImGui_GetWindowDrawList(ctx), x, y, r, r, reaper.ImGui_ColorConvertDouble4ToU32(1,0.5,0,alpha), rotation, 3, thickness)
+    reaper.ImGui_DrawList_AddEllipse(
+        reaper.ImGui_GetWindowDrawList(ctx),
+        x,
+        y,
+        r,
+        r,
+        reaper.ImGui_ColorConvertDouble4ToU32(1, 0.5, 0, alpha),
+        rotation,
+        3,
+        thickness
+    )
 end
 
 SetButtonState(1)
