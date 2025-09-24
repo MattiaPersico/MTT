@@ -13,6 +13,7 @@
         "main",
         "osc",
         "socket",
-        "udp"
+        "udp",
+        "makeCorrectiveEnvelope"
     ]
 }
