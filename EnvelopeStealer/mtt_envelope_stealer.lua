@@ -8,10 +8,12 @@
 - aggiungi hint di quanto sta sforando oltre il bordo accanto a 24db
 - rinomina window with tipo definition o simili
 - aggiungere istruzioni
+- gestire correttamente gli undo (fatti solo con drop)
+- lock target generico in modo che si possa bloccare il target su quello che vedi, sia take vol che env volume che env fx
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 6
+local minor_version = 7
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -111,7 +113,6 @@ function WDL_VAL2DB(x) --https://github.com/majek/wdl/blob/master/WDL/db2val.h
     return v
 end
 
--- Generate a RFC4122 v4 GUID string like {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}
 function generate_guid()
     -- seed randomness with time + clock for more entropy
     math.randomseed(os.time() + math.floor((os.clock() * 1000000) % 2147483647))
@@ -127,7 +128,6 @@ function generate_guid()
     return string.format("{%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}", table.unpack(b))
 end
 
--- Replace the first EGUID {...} occurrence in a chunk with a newly generated GUID
 function replace_eguid(chunk)
     if not chunk or type(chunk) ~= "string" then
         return chunk
@@ -453,7 +453,6 @@ function Process_RemapAndInsertData(item, env, AI_idx, t, isImpose, t_offset)
         local sz = #output
         for i = 1, sz do
             if output[i] and (not output[i].ignore or output[i].ignore == false) then
-                
                 valout = remapCurve((output[i].val + 150) / (174), 4.8)
 
                 reaper.InsertEnvelopePointEx(
@@ -611,7 +610,6 @@ function EnvelopeVis(envelope, bool)
     reaper.SetEnvelopeStateChunk(envelope, str, true)
 end
 
--- Return true if the envelope is visible/active in the arrange (based on VIS/ACT chunk flags)
 function IsEnvelopeVisible(envelope)
     if not reaper.ValidatePtr2(0, envelope, "TrackEnvelope*") then
         return false
@@ -698,25 +696,33 @@ function Process_GenerateTrackEnvelope(envelope)
 end
 
 function InsertTrackEnvelope(envelope, remap)
-
     local ret = nil
     ret, TARGET_ENV, TARGET_AI_IDX = Process_GenerateTrackEnvelope(envelope)
+
     if ret then
+        local position = reaper.GetCursorPosition()
+        local handles = 0.05
+        reaper.DeleteEnvelopePointRange(
+            envelope,
+            position,
+            position + reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGHT")
+        )
 
-        local position = reaper.BR_PositionAtMouseCursor(false)
-
-        local start_time, end_time = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
-
-        if start_time ~= end_time then
-            position = start_time
-        end
+        InsertEnvBoundaries(
+            envelope,
+            position,
+            reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGTH"),
+            val_before,
+            val_after,
+            handles
+        )
 
         if remap == true then
             Process_RemapAndInsertData(REF_ITEM, TARGET_ENV, TARGET_AI_IDX, REF_AUDIO_DATA, false, position)
         else
             Process_InsertVolumeData(REF_ITEM, TARGET_ENV, TARGET_AI_IDX, REF_AUDIO_DATA, false, position)
         end
-        
+
         EnvelopeVis(TARGET_ENV, true)
         reaper.UpdateTimeline()
     end
@@ -770,6 +776,12 @@ function plotWindow()
 
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 0)
 
+    local drawlist = reaper.ImGui_GetForegroundDrawList(ctx)
+    local rect_x, rect_y = reaper.ImGui_GetCursorScreenPos(ctx)
+    local rect_width = reaper.ImGui_GetWindowWidth(ctx)
+
+    --reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 0)
+
     reaper.ImGui_BeginChild(
         ctx,
         "PlotWindow",
@@ -783,7 +795,7 @@ function plotWindow()
         reaper.ImGui_WindowFlags_NoScrollbar()
     )
 
-    dragOutEnvelope()
+    DragOutEnvelope()
     --local window_height = reaper.ImGui_GetWindowHeight(ctx)
     local offset_x = -4.5
     local offset_y = -2.5
@@ -817,7 +829,7 @@ function plotWindow()
 
             if i == 2 then
                 reaper.ImGui_DrawList_AddLine(
-                    reaper.ImGui_GetForegroundDrawList(ctx),
+                    drawlist,
                     prev_point_x,
                     y + prev_point_y + offset_y,
                     x + offset_x,
@@ -844,7 +856,7 @@ function plotWindow()
             end
 
             reaper.ImGui_DrawList_AddLine(
-                reaper.ImGui_GetForegroundDrawList(ctx),
+                drawlist,
                 point_x,
                 y + point_y + offset_y,
                 prev_point_x,
@@ -870,6 +882,19 @@ function plotWindow()
         drawSpinner(center_x, center_y, 100, 0.3) ]]
     end
 
+    reaper.ImGui_DrawList_AddRect(
+        drawlist,
+        rect_x - 1,
+        rect_y - 1,
+        rect_x + rect_width - 15 + 1,
+        rect_y + PLOT_WINDOW_HEIGHT + 1,
+        reaper.ImGui_ColorConvertDouble4ToU32(0.3, 0.3, 0.3, 1),
+        0,
+        reaper.ImGui_DrawFlags_None(),
+        1
+    )
+
+    --reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_PopStyleVar(ctx)
     reaper.ImGui_EndChild(ctx)
 
@@ -1521,43 +1546,102 @@ PT 0 1 0
     return new_chunk
 end
 
-function GetFXEnvelopeRange(env)
-  if not env then return nil,nil end
-
-  -- prendi la traccia
-  local track = reaper.Envelope_GetParentTrack(env)
-  if not track then return nil,nil end
-
-  -- nome dell’envelope (es: "ReaEQ: Band 1 Gain")
-  local retval, env_name = reaper.GetEnvelopeName(env, "")
-  if not retval then return nil,nil end
-
-  -- loop sugli FX della traccia
-  local fx_count = reaper.TrackFX_GetCount(track)
-  for fx = 0, fx_count-1 do
-    local param_count = reaper.TrackFX_GetNumParams(track, fx)
-    for p = 0, param_count-1 do
-      local _, pname = reaper.TrackFX_GetParamName(track, fx, p, "")
-      -- match sul nome (grezzo: puoi raffinare se serve)
-      if env_name:find(pname, 1, true) then
-        local minval, maxval, midval, step = reaper.TrackFX_GetParamEx(track, fx, p)
-        return minval, maxval
-      end
+function EnsureItemVolumeEnv(chunk)
+    -- controlla se c'è già un VOLENV
+    if chunk:find("<VOLENV") then
+        return chunk -- già presente, restituisco chunk invariato
     end
-  end
 
-  return nil,nil
+    -- prepara blocco VOLENV standard
+    local volenv =
+        [[
+<VOLENV
+EGUID ]] ..
+        reaper.genGuid() .. [[
+ACT 0 -1
+VIS 0 1 1
+LANEHEIGHT 0 0
+ARM 0
+DEFSHAPE 0 -1 -1
+VOLTYPE 1
+PT 0 1 0
+>]]
+
+    -- inserisci subito dopo il blocco <SOURCE ...>
+    -- o prima di <EXT ...> se presente
+    local before_ext = chunk:match("(.*)(<EXT.*)")
+    if before_ext then
+        return before_ext .. volenv .. "\n" .. chunk:match("(<EXT.*)")
+    else
+        -- se non c'è <EXT>, metto il VOLENV prima della chiusura >
+        local before_close = chunk:match("^(.*)\n>$")
+        if before_close then
+            return before_close .. volenv .. "\n>"
+        else
+            -- fallback: append alla fine
+            return chunk .. volenv
+        end
+    end
 end
 
-function dragOutEnvelope()
+function GetFXEnvelopeRange(env)
+    if not env then
+        return nil, nil
+    end
 
+    -- prendi la traccia
+    local track = reaper.Envelope_GetParentTrack(env)
+    if not track then
+        return nil, nil
+    end
+
+    -- nome dell’envelope (es: "ReaEQ: Band 1 Gain")
+    local retval, env_name = reaper.GetEnvelopeName(env, "")
+    if not retval then
+        return nil, nil
+    end
+
+    -- loop sugli FX della traccia
+    local fx_count = reaper.TrackFX_GetCount(track)
+    for fx = 0, fx_count - 1 do
+        local param_count = reaper.TrackFX_GetNumParams(track, fx)
+        for p = 0, param_count - 1 do
+            local _, pname = reaper.TrackFX_GetParamName(track, fx, p, "")
+            -- match sul nome (grezzo: puoi raffinare se serve)
+            if env_name:find(pname, 1, true) then
+                local minval, maxval, midval, step = reaper.TrackFX_GetParamEx(track, fx, p)
+                return minval, maxval
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+function InsertEnvBoundaries(env, time, length, val_before, val_after, handles)
+    if not env then
+        return
+    end
+
+    local _, val_before = reaper.Envelope_Evaluate(env, time - handles, 0, 0)
+    local _, val_after = reaper.Envelope_Evaluate(env, time + length + handles, 0, 0)
+
+    reaper.InsertEnvelopePoint(env, time - handles, val_before, 0, 0, false, true)
+    reaper.InsertEnvelopePoint(env, time + length + handles, val_after, 0, 0, false, true)
+    reaper.Envelope_SortPoints(env)
+end
+
+function DragOutEnvelope()
     local l_mouse_down = reaper.ImGui_IsMouseDown(ctx, reaper.ImGui_MouseButton_Left())
 
     if l_mouse_down and drag_operation_started == true then
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
     end
 
-    if l_mouse_down and drag_operation_started == false and reaper.ImGui_IsWindowHovered(ctx) and REF_ANALYSIS_DONE and REF_ITEM then
+    if
+        l_mouse_down and drag_operation_started == false and reaper.ImGui_IsWindowHovered(ctx) and REF_ANALYSIS_DONE and
+            REF_ITEM
+     then
         drag_operation_started = true
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
     end
@@ -1566,19 +1650,30 @@ function dragOutEnvelope()
         reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Arrow())
         drag_operation_started = false
 
+        local take, position = reaper.BR_TakeAtMouseCursor()
+
+        if take then
+            if REF_ITEM ~= -1 and REF_ANALYSIS_DONE == true then
+                local retval, str = reaper.GetItemStateChunk(reaper.GetMediaItemTake_Item(take), "", false)
+                reaper.SetItemStateChunk(reaper.GetMediaItemTake_Item(take), EnsureItemVolumeEnv(str), false)
+                ApplyTakeVolumeEnvelope(reaper.GetMediaItemTake_Item(take))
+                return
+            end
+        end
 
         local track, context, position = reaper.BR_TrackAtMouseCursor()
 
         if reaper.ValidatePtr(track, "MediaTrack*") and context == 2 then
-            
             local destination_envelope = reaper.GetTrackEnvelopeByName(track, "Volume")
-            
+
             if not reaper.ValidatePtr(destination_envelope, "TrackEnvelope*") then
                 local retval, str = reaper.GetTrackStateChunk(track, "", false)
                 reaper.SetTrackStateChunk(track, EnsureTrackVolumeEnvelope(str), false)
                 destination_envelope = reaper.GetTrackEnvelopeByName(track, "Volume")
             end
+            reaper.Undo_BeginBlock()
             InsertTrackEnvelope(destination_envelope, false)
+            reaper.Undo_EndBlock("Envelope Dropped", 0)
             return
         end
 
@@ -1588,27 +1683,26 @@ function dragOutEnvelope()
 
         if track_env then
             local trk, info = reaper.GetThingFromPoint(reaper.GetMousePosition())
-            local envidx = info:match('(%d+)')
+            local envidx = info:match("(%d+)")
             local track, i1, i2 = reaper.Envelope_GetParentTrack(track_env)
             local idx = math.floor(tonumber(envidx))
-            if not idx then return end
-            local env0 = reaper.GetTrackEnvelope( track, idx )
-            local retval, env_name = reaper.GetEnvelopeName(track_env)
-
-            if env_name == "Volume" then
-                InsertTrackEnvelope(env0, false)
-                return
-            else
-                InsertTrackEnvelope(env0, true)
+            if not idx then
                 return
             end
-        end
+            local env0 = reaper.GetTrackEnvelope(track, idx)
+            local retval, env_name = reaper.GetEnvelopeName(track_env)
 
-        local take, position = reaper.BR_TakeAtMouseCursor()
+            local r, s = reaper.GetEnvelopeStateChunk(env0, "", false)
 
-        if take then
-            if REF_ITEM ~= -1 and REF_ANALYSIS_DONE == true then
-                ApplyTakeVolumeEnvelope(reaper.GetMediaItemTake_Item(take))
+            if env_name == "Volume" then
+                reaper.Undo_BeginBlock()
+                InsertTrackEnvelope(env0, false)
+                reaper.Undo_EndBlock("Envelope Dropped", 0)
+                return
+            else
+                reaper.Undo_BeginBlock()
+                InsertTrackEnvelope(env0, true)
+                reaper.Undo_EndBlock("Envelope Dropped", 0)
                 return
             end
         end
