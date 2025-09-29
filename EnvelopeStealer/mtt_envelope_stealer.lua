@@ -14,7 +14,7 @@
 
 
 local major_version = 0
-local minor_version = 11
+local minor_version = 12
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -1125,7 +1125,7 @@ function updateAfterSliderValueChange(retval)
                 end
             else
                 if reaper.ValidatePtr(last_envelope, "TrackEnvelope*") then
-                    reaper.ShowConsoleMsg("12\n")
+                    --reaper.ShowConsoleMsg("12\n")
                     local retval, env_name = reaper.GetEnvelopeName(last_envelope)
                     if env_name == "Volume" then
                         --reaper.ShowConsoleMsg('13\n')
