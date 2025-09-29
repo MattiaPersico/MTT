@@ -14,7 +14,7 @@
 
 
 local major_version = 0
-local minor_version = 10
+local minor_version = 11
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -63,7 +63,7 @@ function SetButtonState(set)
     reaper.RefreshToolbar2(sec, cmd)
 end
 
-local lock_target_icon = reaper.ImGui_CreateImage((reaper.GetResourcePath() .. '/Scripts/MTT/EnvelopeStealer/icons/lock_icon.png') or (reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/EnvelopeStealer/icons/lock_icon.png'))
+--local lock_target_icon = reaper.ImGui_CreateImage((reaper.GetResourcePath() .. '/Scripts/MTT/EnvelopeStealer/icons/lock_icon.png') or (reaper.GetResourcePath() .. '/Scripts/MTT_Scripts/EnvelopeStealer/icons/lock_icon.png'))
 
 -- User Parameters
 local window_sec = 0.04 -- analysis window in seconds 0.001 - 0.4
