@@ -9,10 +9,11 @@
 - rinomina window with tipo definition o simili
 - aggiungere istruzioni
 - trovare un modo sano di integrare gli automation items
+- fare redesign per fare in modo che analizzi selezione e non item
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 13
+local minor_version = 14
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -225,10 +226,19 @@ function map_db_to_pixels(db_value, window_height, top)
 end
 
 function Process_GetBoundary(item)
+
     local i_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
     local i_len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
     local boundary_start = i_pos
     local boundary_end = i_pos + i_len
+
+--[[     local ts_start, ts_end = reaper.GetSet_LoopTimeRange(0, 0, 0, 0, 0)
+    
+    if ts_start ~= ts_end then
+        boundary_start = ts_start
+        boundary_end = ts_end
+    end ]]
+
     return true, boundary_start, boundary_end, i_pos
 end
 
@@ -245,7 +255,7 @@ function Process_GetAudioData(item, clear_envelope)
     -- clear existing take env pts
     local env = reaper.GetTakeEnvelopeByName(take, "Volume")
     if env and clear_envelope then
-        reaper.DeleteEnvelopePointRange(env, 0, math.huge)
+        reaper.DeleteEnvelopePointRange(env, -math.huge, math.huge)
         reaper.Envelope_SortPoints(env)
     end
 
@@ -259,6 +269,7 @@ function Process_GetAudioData(item, clear_envelope)
     local samplebuffer = reaper.new_array(bufsz)
 
     local ret, boundary_start, boundary_end = Process_GetBoundary(item)
+
     if not ret then
         return
     end
@@ -354,7 +365,6 @@ function Process_InsertData_reduceSameVal(output)
 end
 
 function Process_InsertPitchData(item, env, AI_idx, t, isImpose, t_offset, pitch_range)
-
     -- get boundary
     local ret, boundary_start, boundary_end, i_pos = Process_GetBoundary(item)
     if not ret then
@@ -404,7 +414,6 @@ function Process_InsertPitchData(item, env, AI_idx, t, isImpose, t_offset, pitch
 end
 
 function Process_InsertPanData(item, env, AI_idx, t, isImpose, t_offset)
-
     -- get boundary
     local ret, boundary_start, boundary_end, i_pos = Process_GetBoundary(item)
     if not ret then
@@ -454,7 +463,6 @@ function Process_InsertPanData(item, env, AI_idx, t, isImpose, t_offset)
 end
 
 function Process_InsertNormData(item, env, AI_idx, t, isImpose, t_offset)
-
     -- get boundary
     local ret, boundary_start, boundary_end, i_pos = Process_GetBoundary(item)
     if not ret then
@@ -737,45 +745,31 @@ function makeCorrectiveEnvelope(TARGET_AUDIO_DATA, REF_AUDIO_DATA)
     return CorrectiveEnvelope
 end
 
-function Process_GenerateTrackEnvelope(envelope)
-    AI_idx = reaper.InsertAutomationItem(envelope, -1, 0, reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGHT"))
-    --end
 
+function InsertTrackEnvelope(envelope, remap, cur_pos)
     if not envelope then
         return
     end
 
-    return true, envelope, AI_idx
-end
+    TARGET_ENV = envelope
 
-function InsertTrackEnvelope(envelope, remap, cur_pos)
-    local ret = nil
-    ret, TARGET_ENV, TARGET_AI_IDX = Process_GenerateTrackEnvelope(envelope)
+    local position = cur_pos
+    local handles = 0.05
+    reaper.DeleteEnvelopePointRange(envelope, position, position + reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGHT"))
 
-    if ret then
-        local position = cur_pos
-        local handles = 0.05
-        reaper.DeleteEnvelopePointRange(
-            envelope,
-            position,
-            position + reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGHT")
-        )
+    InsertEnvBoundaries(envelope, position, reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGTH"), handles)
 
-        InsertEnvBoundaries(envelope, position, reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGTH"), handles)
-
-        if remap == true then
-            Process_RemapAndInsertData(REF_ITEM, TARGET_ENV, TARGET_AI_IDX, REF_AUDIO_DATA, false, position)
-        else
-            Process_InsertVolumeData(REF_ITEM, TARGET_ENV, TARGET_AI_IDX, REF_AUDIO_DATA, false, position)
-        end
-
-        EnvelopeVis(TARGET_ENV, true)
-        reaper.UpdateTimeline()
+    if remap == true then
+        Process_RemapAndInsertData(REF_ITEM, TARGET_ENV, -1, REF_AUDIO_DATA, false, position)
+    else
+        Process_InsertVolumeData(REF_ITEM, TARGET_ENV, -1, REF_AUDIO_DATA, false, position)
     end
+
+    EnvelopeVis(TARGET_ENV, true)
+    reaper.UpdateTimeline()
 end
 
 function ApplyTakeEnvelope(take, takeEnv, isImpose)
-
     local item = reaper.GetMediaItemTake_Item(take)
 
     if item == REF_ITEM then
@@ -812,7 +806,6 @@ function ApplyTakeEnvelope(take, takeEnv, isImpose)
 end
 
 function ImposeTakeVolumeEnvelope(item)
-
     TARGET_AUDIO_DATA = Process_GetAudioData(item, true)
     TARGET_ANALYSIS_DONE, TARGET_ENV, TARGET_AI_IDX = Process_GenerateTakeVolume(item)
 
@@ -1400,7 +1393,6 @@ function mainWindow()
         impose_envelope_on_items = v
 
         if was_last_drop_on_item ~= nil and auto_update and was_last_drop_on_item == true then
-
             ApplyTakeEnvelope(last_take, last_envelope, impose_envelope_on_items)
         end
     end
@@ -1454,8 +1446,11 @@ function mainWindow()
     if was_last_drop_on_item ~= nil then
         if reaper.ImGui_IsItemClicked(ctx) then
             if was_last_drop_on_item == true then
-                
-                reaper.SetEditCurPos(reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(last_take), "D_POSITION"), true, false)
+                reaper.SetEditCurPos(
+                    reaper.GetMediaItemInfo_Value(reaper.GetMediaItemTake_Item(last_take), "D_POSITION"),
+                    true,
+                    false
+                )
                 reaper.Main_OnCommand(40289, 0)
                 reaper.SetMediaItemSelected(reaper.GetMediaItemTake_Item(last_take), true)
             else
@@ -1800,40 +1795,6 @@ PT 0 1 0
     end
 end
 
-function GetFXEnvelopeRange(env)
-    if not env then
-        return nil, nil
-    end
-
-    -- prendi la traccia
-    local track = reaper.Envelope_GetParentTrack(env)
-    if not track then
-        return nil, nil
-    end
-
-    -- nome dell’envelope (es: "ReaEQ: Band 1 Gain")
-    local retval, env_name = reaper.GetEnvelopeName(env, "")
-    if not retval then
-        return nil, nil
-    end
-
-    -- loop sugli FX della traccia
-    local fx_count = reaper.TrackFX_GetCount(track)
-    for fx = 0, fx_count - 1 do
-        local param_count = reaper.TrackFX_GetNumParams(track, fx)
-        for p = 0, param_count - 1 do
-            local _, pname = reaper.TrackFX_GetParamName(track, fx, p, "")
-            -- match sul nome (grezzo: puoi raffinare se serve)
-            if env_name:find(pname, 1, true) then
-                local minval, maxval, midval, step = reaper.TrackFX_GetParamEx(track, fx, p)
-                return minval, maxval
-            end
-        end
-    end
-
-    return nil, nil
-end
-
 function InsertEnvBoundaries(env, time, length, handles)
     if not env then
         return
@@ -1851,7 +1812,6 @@ end
 
 function SaveDropInformations(env, is_item, position)
     if is_item then
-        
         local take, index, index2 = reaper.Envelope_GetParentTake(env)
         last_take = take
         local item = reaper.GetMediaItemTake_Item(take)
@@ -1914,7 +1874,7 @@ function DragOutEnvelope()
                 end
 
                 reaper.Undo_BeginBlock()
-                 ApplyTakeEnvelope(take, takeEnv, impose_envelope_on_items)
+                ApplyTakeEnvelope(take, takeEnv, impose_envelope_on_items)
 
                 if lock_target == false then
                     SaveDropInformations(takeEnv, true, reaper.GetCursorPosition())
@@ -1925,19 +1885,18 @@ function DragOutEnvelope()
             end
         end --- BLOCCO DROP SU ITEM
 
-
-
         local take, position = reaper.BR_TakeAtMouseCursor()
 
         if reaper.ValidatePtr(take, "MediaItem_Take*") then
             if REF_ITEM ~= -1 and REF_ANALYSIS_DONE == true then
-
-                if REF_ITEM == reaper.GetMediaItemTake_Item(take) then return end
+                if REF_ITEM == reaper.GetMediaItemTake_Item(take) then
+                    return
+                end
 
                 local item = reaper.GetMediaItemTake_Item(take)
-                local ret, str = reaper.GetItemStateChunk(item, '', false)
+                local ret, str = reaper.GetItemStateChunk(item, "", false)
                 reaper.SetItemStateChunk(item, EnsureItemVolumeEnv(str), false)
-                local env = reaper.GetTakeEnvelopeByName(take, 'Volume')
+                local env = reaper.GetTakeEnvelopeByName(take, "Volume")
                 EnvelopeVis(env, true)
                 reaper.Undo_BeginBlock()
 
@@ -1951,7 +1910,6 @@ function DragOutEnvelope()
                 return
             end
         end
-
 
         local track, context, position = reaper.BR_TrackAtMouseCursor()
 
