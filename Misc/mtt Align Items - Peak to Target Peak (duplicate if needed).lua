@@ -1,5 +1,12 @@
 local major_version = 1
-local minor_version = 5
+local minor_version = 6 -- crossfade grouping
+
+-- CONFIG ------------------------------------------------------------
+-- Se true: item che si sovrappongono (overlap / crossfade) vengono trattati come un solo blocco
+local TREAT_CROSSFADED_AS_SINGLE = true
+-- Se true: anche item che solo si toccano (end == start) vengono fusi
+local INCLUDE_TOUCHING = false
+---------------------------------------------------------------------
 
 -- Selezione insufficiente
 if reaper.CountSelectedMediaItems(0) < 2 then return end
@@ -30,19 +37,71 @@ for i = 0, reaper.CountSelectedMediaItems(0)-1 do
 end
 
 -- Ordina gli item su ogni traccia in base alla posizione
+-- (manteniamo la logica originale, poi ricostruiremo gruppi)
 for track, items in pairs(track_items) do
     table.sort(items, function(a, b) return a.pos < b.pos end)
 end
 
-local ref_items = track_items[highest_track]
-track_items[highest_track] = nil  -- rimuovi la traccia di riferimento dal loop
-
--- Calcola i picchi della traccia di riferimento
-for i, t in ipairs(ref_items) do
-    local _, peak_pos = reaper.NF_GetMediaItemMaxPeakAndMaxPeakPos(t.item)
-    local item_pos = reaper.GetMediaItemInfo_Value(t.item, "D_POSITION")
-    t.peak_time = item_pos + peak_pos
+-- Utility per costruire gruppi di item sovrapposti
+local function build_groups(sorted_items)
+    if not TREAT_CROSSFADED_AS_SINGLE then
+        local single = {}
+        for _, it in ipairs(sorted_items) do
+            local pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
+            local len = reaper.GetMediaItemInfo_Value(it.item, "D_LENGTH")
+            single[#single+1] = { items = {it}, start_pos = pos, end_pos = pos + len }
+        end
+        return single
+    end
+    local groups = {}
+    local current
+    for _, it in ipairs(sorted_items) do
+        local pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
+        local len = reaper.GetMediaItemInfo_Value(it.item, "D_LENGTH")
+        local item_end = pos + len
+        if not current then
+            current = { items = {it}, start_pos = pos, end_pos = item_end }
+        else
+            local overlap
+            if INCLUDE_TOUCHING then overlap = pos <= current.end_pos else overlap = pos < current.end_pos end
+            if overlap then
+                current.items[#current.items+1] = it
+                if item_end > current.end_pos then current.end_pos = item_end end
+            else
+                groups[#groups+1] = current
+                current = { items = {it}, start_pos = pos, end_pos = item_end }
+            end
+        end
+    end
+    if current then groups[#groups+1] = current end
+    return groups
 end
+
+local function compute_group_peaks(groups)
+    for _, g in ipairs(groups) do
+        local best_amp = -math.huge
+        local best_time = g.start_pos
+        for _, it in ipairs(g.items) do
+            local amp, peak_pos = reaper.NF_GetMediaItemMaxPeakAndMaxPeakPos(it.item)
+            if amp and peak_pos then
+                if amp > best_amp then
+                    best_amp = amp
+                    local item_pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
+                    best_time = item_pos + peak_pos
+                end
+            end
+        end
+        g.peak_time = best_time
+        g.peak_amp = best_amp
+        g.rel_peak_offset = best_time - g.start_pos
+    end
+end
+
+local ref_items = nil -- evitiamo uso accidentale
+local ref_items_raw = track_items[highest_track]
+track_items[highest_track] = nil
+local ref_groups = build_groups(ref_items_raw)
+compute_group_peaks(ref_groups)
 
 -- Funzione di duplicazione migliorata
 local function duplicate_item_on_track(item)
@@ -102,78 +161,88 @@ local function duplicate_item_on_track(item)
     return new_item
 end
 
-
+-- Nuova funzione duplicazione gruppo
+local function duplicate_group_on_track(group)
+    local new_group = { items = {}, start_pos = math.huge, end_pos = -math.huge }
+    for _, it in ipairs(group.items) do
+        local new_item = duplicate_item_on_track(it.item)
+        local pos = reaper.GetMediaItemInfo_Value(new_item, "D_POSITION")
+        local len = reaper.GetMediaItemInfo_Value(new_item, "D_LENGTH")
+        if pos < new_group.start_pos then new_group.start_pos = pos end
+        if pos + len > new_group.end_pos then new_group.end_pos = pos + len end
+        new_group.items[#new_group.items+1] = { item = new_item }
+    end
+    new_group.rel_peak_offset = group.rel_peak_offset
+    new_group.peak_time = new_group.start_pos + (group.rel_peak_offset or 0)
+    return new_group
+end
 
 for track, items in pairs(track_items) do
-    local count = #items
+    table.sort(items, function(a,b) return a.pos < b.pos end)
+    local groups = build_groups(items)
+    compute_group_peaks(groups)
+    local group_count = #groups
 
-    for idx, ref in ipairs(ref_items) do
-        local source_idx = ((idx-1) % count) + 1
-        local t = items[source_idx]
+    for idx, ref_group in ipairs(ref_groups) do
+        local source_idx = ((idx-1) % group_count) + 1
+        local target_group = groups[source_idx]
 
-        -- Duplicazione se servono più item
-        if idx > count then
-            local new_item = duplicate_item_on_track(t.item)
-            t = { item = new_item }
-            table.insert(items, t)
+        if idx > group_count then
+            local new_group = duplicate_group_on_track(target_group)
+            groups[#groups+1] = new_group
+            target_group = new_group
+            group_count = #groups
         end
 
-        local _, peak_pos = reaper.NF_GetMediaItemMaxPeakAndMaxPeakPos(t.item)
-        local item_pos = reaper.GetMediaItemInfo_Value(t.item, "D_POSITION")
-        local this_peak_time = item_pos + peak_pos
-        local offset = ref.peak_time - this_peak_time
-
-        reaper.SetMediaItemInfo_Value(t.item, "D_POSITION", item_pos + offset)
+        local offset = ref_group.peak_time - target_group.peak_time
+        for _, it in ipairs(target_group.items) do
+            local item_pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
+            reaper.SetMediaItemInfo_Value(it.item, "D_POSITION", item_pos + offset)
+        end
+        target_group.start_pos = target_group.start_pos + offset
+        target_group.end_pos   = target_group.end_pos + offset
+        target_group.peak_time = target_group.peak_time + offset
     end
 
-    --- free item positioning block
-
-    local prev_item_start_pos = -1
-    local prev_item_len = -1
+    -- Free item positioning logic basata sui gruppi: consideriamo solo sovrapposizioni TRA gruppi
     local needToSetFreeItemPositioningTrue = false
-
+    -- Se la traccia è già in free mode la riportiamo a normal ma memorizziamo che andrà riattivata se necessario
     if reaper.GetMediaTrackInfo_Value(track, "I_FREEMODE") == 1 then
-        needToSetFreeItemPositioningTrue = true
+        needToSetFreeItemPositioningTrue = true -- manteniamo lo stato precedente
         reaper.SetMediaTrackInfo_Value(track, "I_FREEMODE", 0)
     end
 
-    for i=1, #items, 1 do
-
-        local item_pos = reaper.GetMediaItemInfo_Value(items[i].item, "D_POSITION")
-        local item_lenght = reaper.GetMediaItemInfo_Value(items[i].item, "D_LENGTH")
-
-        if prev_item_start_pos > -1 then
-
-            if item_pos > prev_item_start_pos and item_pos < (prev_item_start_pos + prev_item_len) then
+    -- Epsilon per considerare piccoli errori floating (es. 1 microsecondo)
+    local EPS = 1e-9
+    local prev_end = nil
+    for i, g in ipairs(groups) do
+        if prev_end then
+            local overlap
+            if INCLUDE_TOUCHING then
+                overlap = g.start_pos < prev_end - EPS -- se si toccano perfetto, nessun overlap: richiediamo meno di end
+            else
+                overlap = g.start_pos < prev_end - EPS -- stesso criterio, ma senza includere contatto
+            end
+            if overlap then
                 needToSetFreeItemPositioningTrue = true
                 break
             end
-
         end
-
-        prev_item_start_pos = item_pos
-        prev_item_len = item_lenght
-
+        prev_end = g.end_pos
     end
 
     if needToSetFreeItemPositioningTrue then
-
         local selected_tracks = {}
-
-        for i=0, reaper.CountSelectedTracks(0)-1, 1 do
+        for i=0, reaper.CountSelectedTracks(0)-1 do
             selected_tracks[i] = reaper.GetSelectedTrack(0, i)
             reaper.SetTrackSelected(selected_tracks[i], false)
         end
-
         reaper.SetTrackSelected(track, true)
         reaper.Main_OnCommand(40751, 0)
-
-        for i=0, #selected_tracks-1, 1 do
+        for i=0, #selected_tracks-1 do
             reaper.SetTrackSelected(selected_tracks[i], true)
         end
     end
-    --- free item positioning block
-
 end
 
 
