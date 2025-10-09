@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 7
+local minor_version = 8
 
 -- CONFIG ------------------------------------------------------------
 -- Se true: item che si sovrappongono (overlap / crossfade) vengono trattati come un solo blocco
@@ -172,17 +172,22 @@ for track, items in pairs(track_items) do
     table.sort(items, function(a,b) return a.pos < b.pos end)
     local groups = build_groups(items)
     compute_group_peaks(groups)
-    local group_count = #groups
+    local base_groups = {}
+    for i,g in ipairs(groups) do base_groups[i] = g end
+    local original_count = #base_groups
+    if original_count == 0 then goto continue_track end
 
     for idx, ref_group in ipairs(ref_groups) do
-        local source_idx = ((idx-1) % group_count) + 1
-        local target_group = groups[source_idx]
+        local source_idx = ((idx-1) % original_count) + 1
+        local target_group
 
-        if idx > group_count then
-            local new_group = duplicate_group_on_track(target_group)
+        if idx > original_count then
+            local seed = base_groups[source_idx]
+            local new_group = duplicate_group_on_track(seed)
             groups[#groups+1] = new_group
             target_group = new_group
-            group_count = #groups
+        else
+            target_group = groups[source_idx]
         end
 
         -- Offset = start ref - peak target
@@ -195,6 +200,7 @@ for track, items in pairs(track_items) do
         target_group.end_pos   = target_group.end_pos + offset
         target_group.peak_time = target_group.peak_time + offset
     end
+    ::continue_track::
 
     -- Free item positioning basato sui gruppi
     local needToSetFreeItemPositioningTrue = false

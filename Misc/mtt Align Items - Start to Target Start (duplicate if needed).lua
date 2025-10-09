@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 7
+local minor_version = 8
 
 if reaper.CountSelectedMediaItems(0) < 2 then return end
 
@@ -66,14 +66,18 @@ local ref_groups = build_groups(ref_items_raw)
 for track, items in pairs(track_items) do
     table.sort(items, function(a,b) return a.pos < b.pos end)
     local groups = build_groups(items)
-    local group_count = #groups
+    local base_groups = {}
+    for i,g in ipairs(groups) do base_groups[i] = g end
+    local original_count = #base_groups
+    if original_count == 0 then goto continue_track end
     for idx, ref_group in ipairs(ref_groups) do
-        local source_idx = ((idx-1) % group_count) + 1
-        local target_group = groups[source_idx]
-        if idx > group_count then
-            -- duplica gruppo (reuse prima item duplication logic)
+        local source_idx = ((idx-1) % original_count) + 1
+        local target_group
+        if idx > original_count then
+            -- duplica gruppo dal seed (sequenza originale)
+            local seed = base_groups[source_idx]
             local new_group = { items = {}, start_pos = math.huge, end_pos = -math.huge }
-            for _, it in ipairs(target_group.items) do
+            for _, it in ipairs(seed.items) do
                 local track_it = reaper.GetMediaItem_Track(it.item)
                 local new_item = reaper.AddMediaItemToTrack(track_it)
                 local item_props = {"D_LENGTH","D_SNAPOFFSET","D_FADEINLEN","D_FADEOUTLEN","D_FADEINDIR","D_FADEOUTDIR","D_FADEINSHAPE","D_FADEOUTSHAPE","D_VOL","D_PAN","D_PANLAW","C_BEATATTACHMODE","B_LOOPSRC","B_ALLTAKESLPLAY","B_UISEL","C_LOCK","B_MUTE","B_REVERSE","C_FADEIN","C_FADEOUT"}
@@ -103,8 +107,8 @@ for track, items in pairs(track_items) do
             end
             groups[#groups+1] = new_group
             target_group = new_group
-            group_count = #groups
         end
+        if not target_group then target_group = groups[source_idx] end
         local offset = ref_group.start_pos - target_group.start_pos
         for _, it in ipairs(target_group.items) do
             local item_pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
@@ -113,6 +117,7 @@ for track, items in pairs(track_items) do
         target_group.start_pos = target_group.start_pos + offset
         target_group.end_pos = target_group.end_pos + offset
     end
+    ::continue_track::
 
     local needToSetFreeItemPositioningTrue = false
     if reaper.GetMediaTrackInfo_Value(track, "I_FREEMODE") == 1 then
