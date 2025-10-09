@@ -1,5 +1,5 @@
 local major_version = 1
-local minor_version = 7
+local minor_version = 8
 
 -- CONFIG ------------------------------------------------------------
 -- Se true: item che si sovrappongono (overlap / crossfade) vengono trattati come un solo blocco
