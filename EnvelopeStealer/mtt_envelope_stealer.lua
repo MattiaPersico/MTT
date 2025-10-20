@@ -12,7 +12,7 @@
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 15
+local minor_version = 16
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -27,7 +27,7 @@ local sizeConstraintsCallback = [=[
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
 local MAIN_WINDOW_WIDTH = 400
-local MAIN_WINDOW_HEIGHT = 850
+local MAIN_WINDOW_HEIGHT = 900
 
 local PLOT_WINDOW_HEIGHT = 230
 
@@ -85,6 +85,7 @@ local envelope_bottom_limit = -150
 local attack_ms = 0.01 -- how fast it reacts to increases (ms)
 local release_ms = 0.01 -- how fast it reacts to decreases (ms)
 local compression = 0
+local gain = 0
 local update_only_on_slider_release = false
 
 -- Private Parameters
@@ -304,7 +305,7 @@ function Process_GetAudioData(item, clear_envelope)
         reaper.GetAudioAccessorSamples(accessor, SR_spls, 1, pos, bufsz, samplebuffer)
         local sum = 0
         for i = 1, bufsz do
-            local val = math.abs(samplebuffer[i])
+            local val = math.abs(samplebuffer[i] * WDL_DB2VAL(gain))
             sum = sum + val
         end
         samplebuffer.clear() -- clear for next reuse
@@ -354,11 +355,11 @@ function Process_GetAudioData(item, clear_envelope)
         rms_mean = 0
         local new_rms_sum = 0
 
-        local pivot_db = 0  -- Centro dello scaling è 0 dB
+        local pivot_db = 0 -- Centro dello scaling è 0 dB
         
         -- Applica uno scale factor uniforme a tutti i valori
         -- Questo mantiene l'ordine e non permette inversioni
-        local scale_factor = 1 - compression * 1
+        local scale_factor = 1 - compression
         
         for i = 1, #data do
             -- Scala il valore verso il pivot (0 dB)
@@ -1347,6 +1348,13 @@ function mainWindow()
     updateAfterSliderValueChange(retval)
 
     reaper.ImGui_NewLine(ctx)
+
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Gain (dB)", gain, -30, 60)
+    if retval and REF_ITEM ~= -1 then
+        gain = v
+    end
+
+    updateAfterSliderValueChange(retval)
 
     local retval, v = reaper.ImGui_SliderDouble(ctx, "Compress", compression, 0, 1)
     if retval and REF_ITEM ~= -1 then
