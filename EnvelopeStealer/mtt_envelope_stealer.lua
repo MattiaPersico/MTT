@@ -84,6 +84,7 @@ local envelope_top_limit = 90
 local envelope_bottom_limit = -150
 local attack_ms = 0.01 -- how fast it reacts to increases (ms)
 local release_ms = 0.01 -- how fast it reacts to decreases (ms)
+local compression = 0
 local update_only_on_slider_release = false
 
 -- Private Parameters
@@ -345,7 +346,31 @@ function Process_GetAudioData(item, clear_envelope)
         return data, -150
     end
 
-    return data, (rms_sum / count), max_rms
+    local rms_mean = (rms_sum / count)
+
+    --- Compressione
+    if compression > 0 then
+
+        rms_mean = 0
+        local new_rms_sum = 0
+
+        local pivot_db = 0  -- Centro dello scaling è 0 dB
+        
+        -- Applica uno scale factor uniforme a tutti i valori
+        -- Questo mantiene l'ordine e non permette inversioni
+        local scale_factor = 1 - compression * 1
+        
+        for i = 1, #data do
+            -- Scala il valore verso il pivot (0 dB)
+            data[i] = pivot_db + (data[i] - pivot_db) * scale_factor
+            new_rms_sum = new_rms_sum + data[i]
+        end
+        
+        rms_mean = new_rms_sum / count
+    end
+    --- Fine Compressione
+
+    return data, rms_mean, max_rms
 end
 
 function Process_InsertData_reduceSameVal(output)
@@ -744,7 +769,6 @@ function makeCorrectiveEnvelope(TARGET_AUDIO_DATA, REF_AUDIO_DATA)
 
     return CorrectiveEnvelope
 end
-
 
 function InsertTrackEnvelope(envelope, remap, cur_pos)
     if not envelope then
@@ -1322,15 +1346,14 @@ function mainWindow()
 
     updateAfterSliderValueChange(retval)
 
-    local retval, v = reaper.ImGui_SliderDouble(ctx, "Scaling Factor", scaling_factor, -10, 10)
+    reaper.ImGui_NewLine(ctx)
 
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Compress", compression, 0, 1)
     if retval and REF_ITEM ~= -1 then
-        scaling_factor = v
+        compression = v
     end
 
     updateAfterSliderValueChange(retval)
-
-    reaper.ImGui_NewLine(ctx)
 
     local retval, a_ms = reaper.ImGui_SliderDouble(ctx, "Attack (ms)", attack_ms, 0.01, 100)
     if retval and REF_ITEM ~= -1 then
@@ -1346,8 +1369,16 @@ function mainWindow()
 
     updateAfterSliderValueChange(retval)
 
-    reaper.ImGui_NewLine(ctx)
 
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Scale", scaling_factor, -10, 10)
+
+    if retval and REF_ITEM ~= -1 then
+        scaling_factor = v
+    end
+
+    updateAfterSliderValueChange(retval)
+
+    reaper.ImGui_NewLine(ctx)
     local retval, v1, v2 =
         reaper.ImGui_SliderDouble2(ctx, "Limits (dB)", envelope_bottom_limit, envelope_top_limit, -150, 90)
 
