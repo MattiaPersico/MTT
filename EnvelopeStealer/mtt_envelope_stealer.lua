@@ -6,14 +6,13 @@
 --[[ APPUNTI
 
 - aggiungi hint di quanto sta sforando oltre il bordo accanto a 24db
-- rinomina window with tipo definition o simili
 - aggiungere istruzioni
 - trovare un modo sano di integrare gli automation items
 - fare redesign per fare in modo che analizzi selezione e non item
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 14
+local minor_version = 15
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -27,7 +26,7 @@ local sizeConstraintsCallback = [=[
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
-local MAIN_WINDOW_WIDTH = 800
+local MAIN_WINDOW_WIDTH = 400
 local MAIN_WINDOW_HEIGHT = 850
 
 local PLOT_WINDOW_HEIGHT = 230
@@ -62,8 +61,20 @@ function SetButtonState(set)
     reaper.RefreshToolbar2(sec, cmd)
 end
 
+function remapCurve(x, k)
+    -- clamp per sicurezza
+    if x < 0 then
+        x = 0
+    end
+    if x > 1 then
+        x = 1
+    end
+    return x ^ k
+end
+
 -- User Parameters
-local window_sec = 0.04 -- analysis window in seconds 0.001 - 0.4
+local definition = 0.5 -- user fader value to control the window_sec parameter
+local window_sec = 1 - remapCurve(definition * 1, 0.05) --0.04 -- analysis window in seconds 0.001 - 0.4
 local window_overlap = 2 -- overlap factor, 2 = 50% overlap, 1-16
 local auto_update = true
 local impose_envelope_on_items = false
@@ -177,17 +188,6 @@ function Process_InsertData_PF(t, boundary_start, offs, isImpose)
     end
 
     return output
-end
-
-function remapCurve(x, k)
-    -- clamp per sicurezza
-    if x < 0 then
-        x = 0
-    end
-    if x > 1 then
-        x = 1
-    end
-    return x ^ k
 end
 
 function remapToNewRange(value, old_min, old_max, new_min, new_max, k)
@@ -1310,10 +1310,14 @@ function mainWindow()
         reaper.ImGui_BeginDisabled(ctx)
     end
 
-    local retval, v = reaper.ImGui_SliderDouble(ctx, "Window Width (ms)", window_sec, 0.001, 0.2)
-
+    
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Definition", definition, 0.001, 1)
+    
+    if v <= 0 then v = definition end
+    
     if retval and REF_ITEM ~= -1 then
-        window_sec = v
+        definition = v
+        window_sec = math.max(1 - remapCurve(definition * 1, 0.05), 0.001)
     end
 
     updateAfterSliderValueChange(retval)
