@@ -12,7 +12,7 @@
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 16
+local minor_version = 18
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -26,7 +26,7 @@ local sizeConstraintsCallback = [=[
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
-local MAIN_WINDOW_WIDTH = 400
+local MAIN_WINDOW_WIDTH = 550
 local MAIN_WINDOW_HEIGHT = 900
 
 local PLOT_WINDOW_HEIGHT = 230
@@ -54,6 +54,7 @@ end
 reaper.ImGui_Attach(ctx, comic_sans_small)
 reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, new_line_font)
+
 
 function SetButtonState(set)
     local _, _, sec, cmd = reaper.get_action_context()
@@ -1083,7 +1084,7 @@ function plotWindow()
         reaper.ImGui_TextColored(
             ctx,
             reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1),
-            "Drag and drop on Track Envelopes or Items"
+            "Drag and drop on Envelopes or Items"
         )
 
         reaper.ImGui_PopFont(ctx)
@@ -1430,7 +1431,7 @@ function mainWindow()
         reaper.ImGui_BeginDisabled(ctx)
     end
 
-    local retval, v = reaper.ImGui_Checkbox(ctx, "##Impose envelope on items", impose_envelope_on_items)
+    local retval, v = reaper.ImGui_Checkbox(ctx, "##Impose envelope on target item volume", impose_envelope_on_items)
 
     if retval then
         impose_envelope_on_items = v
@@ -1441,7 +1442,7 @@ function mainWindow()
     end
 
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_Text(ctx, "Impose envelope on items")
+    reaper.ImGui_Text(ctx, "Impose envelope on target item volume")
 
     if REF_ITEM == -1 then
         reaper.ImGui_EndDisabled(ctx)
