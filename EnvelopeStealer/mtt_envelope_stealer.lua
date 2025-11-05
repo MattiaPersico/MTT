@@ -6,14 +6,13 @@
 --[[ APPUNTI
 
 - aggiungi hint di quanto sta sforando oltre il bordo accanto a 24db
-- rinomina window with tipo definition o simili
 - aggiungere istruzioni
 - trovare un modo sano di integrare gli automation items
 - fare redesign per fare in modo che analizzi selezione e non item
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 14
+local minor_version = 18
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -27,8 +26,8 @@ local sizeConstraintsCallback = [=[
 
 local EEL_DUMMY_FUNCTION = reaper.ImGui_CreateFunctionFromEEL(sizeConstraintsCallback)
 
-local MAIN_WINDOW_WIDTH = 800
-local MAIN_WINDOW_HEIGHT = 850
+local MAIN_WINDOW_WIDTH = 550
+local MAIN_WINDOW_HEIGHT = 900
 
 local PLOT_WINDOW_HEIGHT = 230
 
@@ -56,14 +55,27 @@ reaper.ImGui_Attach(ctx, comic_sans_small)
 reaper.ImGui_Attach(ctx, comic_sans)
 reaper.ImGui_Attach(ctx, new_line_font)
 
+
 function SetButtonState(set)
     local _, _, sec, cmd = reaper.get_action_context()
     reaper.SetToggleCommandState(sec, cmd, set or 0)
     reaper.RefreshToolbar2(sec, cmd)
 end
 
+function remapCurve(x, k)
+    -- clamp per sicurezza
+    if x < 0 then
+        x = 0
+    end
+    if x > 1 then
+        x = 1
+    end
+    return x ^ k
+end
+
 -- User Parameters
-local window_sec = 0.04 -- analysis window in seconds 0.001 - 0.4
+local definition = 0.5 -- user fader value to control the window_sec parameter
+local window_sec = 1 - remapCurve(definition * 1, 0.05) --0.04 -- analysis window in seconds 0.001 - 0.4
 local window_overlap = 2 -- overlap factor, 2 = 50% overlap, 1-16
 local auto_update = true
 local impose_envelope_on_items = false
@@ -73,6 +85,8 @@ local envelope_top_limit = 90
 local envelope_bottom_limit = -150
 local attack_ms = 0.01 -- how fast it reacts to increases (ms)
 local release_ms = 0.01 -- how fast it reacts to decreases (ms)
+local compression = 0
+local gain = 0
 local update_only_on_slider_release = false
 
 -- Private Parameters
@@ -177,17 +191,6 @@ function Process_InsertData_PF(t, boundary_start, offs, isImpose)
     end
 
     return output
-end
-
-function remapCurve(x, k)
-    -- clamp per sicurezza
-    if x < 0 then
-        x = 0
-    end
-    if x > 1 then
-        x = 1
-    end
-    return x ^ k
 end
 
 function remapToNewRange(value, old_min, old_max, new_min, new_max, k)
@@ -303,7 +306,7 @@ function Process_GetAudioData(item, clear_envelope)
         reaper.GetAudioAccessorSamples(accessor, SR_spls, 1, pos, bufsz, samplebuffer)
         local sum = 0
         for i = 1, bufsz do
-            local val = math.abs(samplebuffer[i])
+            local val = math.abs(samplebuffer[i] * WDL_DB2VAL(gain))
             sum = sum + val
         end
         samplebuffer.clear() -- clear for next reuse
@@ -345,7 +348,31 @@ function Process_GetAudioData(item, clear_envelope)
         return data, -150
     end
 
-    return data, (rms_sum / count), max_rms
+    local rms_mean = (rms_sum / count)
+
+    --- Compressione
+    if compression > 0 then
+
+        rms_mean = 0
+        local new_rms_sum = 0
+
+        local pivot_db = 0 -- Centro dello scaling è 0 dB
+        
+        -- Applica uno scale factor uniforme a tutti i valori
+        -- Questo mantiene l'ordine e non permette inversioni
+        local scale_factor = 1 - compression
+        
+        for i = 1, #data do
+            -- Scala il valore verso il pivot (0 dB)
+            data[i] = pivot_db + (data[i] - pivot_db) * scale_factor
+            new_rms_sum = new_rms_sum + data[i]
+        end
+        
+        rms_mean = new_rms_sum / count
+    end
+    --- Fine Compressione
+
+    return data, rms_mean, max_rms
 end
 
 function Process_InsertData_reduceSameVal(output)
@@ -745,7 +772,6 @@ function makeCorrectiveEnvelope(TARGET_AUDIO_DATA, REF_AUDIO_DATA)
     return CorrectiveEnvelope
 end
 
-
 function InsertTrackEnvelope(envelope, remap, cur_pos)
     if not envelope then
         return
@@ -1058,7 +1084,7 @@ function plotWindow()
         reaper.ImGui_TextColored(
             ctx,
             reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1),
-            "Drag and drop on Track Envelopes or Items"
+            "Drag and drop on Envelopes or Items"
         )
 
         reaper.ImGui_PopFont(ctx)
@@ -1310,23 +1336,33 @@ function mainWindow()
         reaper.ImGui_BeginDisabled(ctx)
     end
 
-    local retval, v = reaper.ImGui_SliderDouble(ctx, "Window Width (ms)", window_sec, 0.001, 0.2)
-
+    
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Definition", definition, 0.001, 1)
+    
+    if v <= 0 then v = definition end
+    
     if retval and REF_ITEM ~= -1 then
-        window_sec = v
-    end
-
-    updateAfterSliderValueChange(retval)
-
-    local retval, v = reaper.ImGui_SliderDouble(ctx, "Scaling Factor", scaling_factor, -10, 10)
-
-    if retval and REF_ITEM ~= -1 then
-        scaling_factor = v
+        definition = v
+        window_sec = math.max(1 - remapCurve(definition * 1, 0.05), 0.001)
     end
 
     updateAfterSliderValueChange(retval)
 
     reaper.ImGui_NewLine(ctx)
+
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Gain (dB)", gain, -30, 60)
+    if retval and REF_ITEM ~= -1 then
+        gain = v
+    end
+
+    updateAfterSliderValueChange(retval)
+
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Compress", compression, 0, 1)
+    if retval and REF_ITEM ~= -1 then
+        compression = v
+    end
+
+    updateAfterSliderValueChange(retval)
 
     local retval, a_ms = reaper.ImGui_SliderDouble(ctx, "Attack (ms)", attack_ms, 0.01, 100)
     if retval and REF_ITEM ~= -1 then
@@ -1342,8 +1378,16 @@ function mainWindow()
 
     updateAfterSliderValueChange(retval)
 
-    reaper.ImGui_NewLine(ctx)
 
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Scale", scaling_factor, -10, 10)
+
+    if retval and REF_ITEM ~= -1 then
+        scaling_factor = v
+    end
+
+    updateAfterSliderValueChange(retval)
+
+    reaper.ImGui_NewLine(ctx)
     local retval, v1, v2 =
         reaper.ImGui_SliderDouble2(ctx, "Limits (dB)", envelope_bottom_limit, envelope_top_limit, -150, 90)
 
@@ -1387,7 +1431,7 @@ function mainWindow()
         reaper.ImGui_BeginDisabled(ctx)
     end
 
-    local retval, v = reaper.ImGui_Checkbox(ctx, "##Impose envelope on items", impose_envelope_on_items)
+    local retval, v = reaper.ImGui_Checkbox(ctx, "##Impose envelope on target item volume", impose_envelope_on_items)
 
     if retval then
         impose_envelope_on_items = v
@@ -1398,7 +1442,7 @@ function mainWindow()
     end
 
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_Text(ctx, "Impose envelope on items")
+    reaper.ImGui_Text(ctx, "Impose envelope on target item volume")
 
     if REF_ITEM == -1 then
         reaper.ImGui_EndDisabled(ctx)
