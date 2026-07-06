@@ -1,2 +1,4 @@
 *.DS_Store
 AudiokidsPrototypes/ak_prototipoAllineamento.lua
+Documentations/*
+.continue/rules/ReaScriptRules.md
