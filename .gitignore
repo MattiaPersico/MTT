@@ -1,2 +1,4 @@
 *.DS_Store
 AudiokidsPrototypes/ak_prototipoAllineamento.lua
+.continue/rules/ReaScriptRules.md
+.vscode/settings.json
