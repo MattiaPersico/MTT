@@ -44,7 +44,7 @@
           <source file="mtt_plastic_checkin.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_checkin.lua</source>
           <source file="mtt_plastic_checkout.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_checkout.lua</source>
           <source file="mtt_plastic_revert.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_revert.lua</source>
-          <source file="mtt_plastic_save.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_save.lua</source>
+          <source main="main" file="mtt_plastic_save.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_save.lua</source>
           <source file="mtt_plastic_settings.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_settings.lua</source>
       </version>
     </reapack>
@@ -58,22 +58,22 @@
   </category>
   <category name="Misc">
     <reapack name="mtt Align Items - Peak to Target Peak (duplicate if needed).lua" type="script" desc="Align Items - Peak to Target Peak (duplicate if needed)">
-      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:31:24Z">
+      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:37:12Z">
           <source main="main" file="mtt Align Items - Peak to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Peak%20to%20Target%20Peak%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Peak to Target Start (duplicate if needed).lua" type="script" desc="Align Items - Peak to Target Start (duplicate if needed)">
-      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:31:24Z">
+      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:37:12Z">
           <source main="main" file="mtt Align Items - Peak to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Peak%20to%20Target%20Start%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Start to Target Peak (duplicate if needed).lua" type="script" desc="Align Items - Start to Target Peak (duplicate if needed)">
-      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:31:24Z">
+      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:37:12Z">
           <source main="main" file="mtt Align Items - Start to Target Peak (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Start%20to%20Target%20Peak%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
     <reapack name="mtt Align Items - Start to Target Start (duplicate if needed).lua" type="script" desc="Align Items - Start to Target Start (duplicate if needed)">
-      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:31:24Z">
+      <version name="1.8" author="Mattia Persico" time="2026-07-20T07:37:12Z">
           <source main="main" file="mtt Align Items - Start to Target Start (duplicate if needed).lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt%20Align%20Items%20-%20Start%20to%20Target%20Start%20%28duplicate%20if%20needed%29.lua</source>
       </version>
     </reapack>
