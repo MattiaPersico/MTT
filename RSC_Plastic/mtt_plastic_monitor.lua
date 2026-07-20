@@ -22,6 +22,9 @@
 --   verde   : in repo, aggiornato, checkout disponibile
 --   giallo  : in checkout + lock (tuo)
 
+local major_version = 1
+local minor_version = 0
+
 local script_dir = debug.getinfo(1, 'S').source:match('@(.*)[/\\]')
 local LIB = dofile(script_dir .. '/mtt_plastic_lib.lua')
 
