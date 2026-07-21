@@ -341,15 +341,31 @@ end
 -- Ritorna ok(bool), messaggio errore
 function M.checkin(dir, comment)
   comment = sanitizeComment(comment)
-  local max_attempts = 100  -- solo salvagente anti-loop
-  for attempt = 1, max_attempts do
+
+  -- 1. Pre-pulizia: marca per delete i file già "Removed locally"
+  --    (tracciati ma cancellati dal disco) prima di pagare un checkin completo.
+  local scode, sout = M.run(M.cmq() .. ' partial status ' .. M.q(dir))
+  if scode == 0 then
+    for line in (sout .. '\n'):gmatch('(.-)\n') do
+      -- Status "Removed locally", poi size (numero+virgole, unità), poi il path.
+      -- Il path può contenere spazi: lo prendiamo "dal size in poi".
+      local path = line:match('^%s*Removed locally%s+[%d,]+%s+%a+%s+(.+)$')
+      if path then
+        M.run(M.cmq() .. ' remove ' .. M.q(M.trim(path)))
+      end
+    end
+  end
+
+  -- 2. Checkin. Il ciclo resta solo come rete di sicurezza per i file
+  --    checked-out spariti dal disco che lo status non segnala ancora.
+  for attempt = 1, 5 do
     local code, out = M.run(
       M.cmq() .. ' partial checkin ' .. M.q(dir) .. ' -c="' .. comment .. '" --applychanged')
 
     local has_error = (code ~= 0) or out:find('\nError:') or out:match('^Error:')
     if not has_error then return true end
 
-    -- recupero: rimuovi TUTTI i file cancellati da REAPER ma ancora tracciati
+    -- recupero: rimuovi TUTTI i file cancellati riportati nell'errore (non uno solo)
     local removed = 0
     for missing in out:gmatch('The changed (.-) is not on disk') do
       M.run(M.cmq() .. ' remove ' .. M.q(M.trim(missing)))
@@ -360,6 +376,7 @@ function M.checkin(dir, comment)
       return false, out  -- errore non recuperabile
     end
   end
+
   return false, 'too many recovery attempts during check-in'
 end
 
