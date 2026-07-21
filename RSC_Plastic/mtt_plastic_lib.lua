@@ -341,21 +341,23 @@ end
 -- Ritorna ok(bool), messaggio errore
 function M.checkin(dir, comment)
   comment = sanitizeComment(comment)
-  local attempts = 0
-  while attempts < 10 do
-    attempts = attempts + 1
+  local max_attempts = 100  -- solo salvagente anti-loop
+  for attempt = 1, max_attempts do
     local code, out = M.run(
       M.cmq() .. ' partial checkin ' .. M.q(dir) .. ' -c="' .. comment .. '" --applychanged')
 
     local has_error = (code ~= 0) or out:find('\nError:') or out:match('^Error:')
     if not has_error then return true end
 
-    -- recupero: file cancellati da REAPER ma ancora tracciati
-    local missing = out:match('The changed (.-) is not on disk')
-    if missing then
+    -- recupero: rimuovi TUTTI i file cancellati da REAPER ma ancora tracciati
+    local removed = 0
+    for missing in out:gmatch('The changed (.-) is not on disk') do
       M.run(M.cmq() .. ' remove ' .. M.q(M.trim(missing)))
-    else
-      return false, out
+      removed = removed + 1
+    end
+
+    if removed == 0 then
+      return false, out  -- errore non recuperabile
     end
   end
   return false, 'too many recovery attempts during check-in'
