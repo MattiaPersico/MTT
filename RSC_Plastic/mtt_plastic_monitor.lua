@@ -23,7 +23,7 @@
 --   giallo  : in checkout + lock (tuo)
 
 local major_version = 1
-local minor_version = 2
+local minor_version = 3
 
 local script_dir = debug.getinfo(1, 'S').source:match('@(.*)[/\\]')
 local LIB = dofile(script_dir .. '/mtt_plastic_lib.lua')

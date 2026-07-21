@@ -338,46 +338,86 @@ local function sanitizeComment(comment)
   return comment
 end
 
--- Ritorna ok(bool), messaggio errore
-function M.checkin(dir, comment)
-  comment = sanitizeComment(comment)
+-- Marca per delete, in un unico passaggio, tutti i file tracciati che non sono
+-- più fisicamente presenti sul disco (cancellati da REAPER ma ancora nel VCS).
+-- Va eseguito PRIMA del checkin: così il checkin non fallisce più con
+-- "The changed X is not on disk" e non serve ritentare per scoprirli uno a uno.
+--
+-- Note importanti (erano qui i bug precedenti):
+--   * `cm status` DEVE girare dentro il workspace -> passiamo `dir` come workdir,
+--     altrimenti gira nella cwd di REAPER e cm risponde "not in a workspace".
+--   * i path dello status sono RELATIVI alla radice del workspace: li rendiamo
+--     ASSOLUTI sia per il test di esistenza sia per `cm remove`, così non
+--     dipendono dalla working directory del processo.
+--   * le rimozioni sono in BATCH: pochi processi cm invece di uno per file.
+--
+-- Ritorna il numero di file marcati per delete.
+function M.removeMissingTracked(dir)
+  local base = tostring(dir or ''):gsub('[/\\]+$', '')
+  if base == '' then return 0 end
 
-  -- 1. Pre-pulizia: marca per delete i file già "Removed locally"
-  --    (tracciati ma cancellati dal disco) prima di pagare un checkin completo.
-  local scode, sout = M.run(M.cmq() .. ' partial status ' .. M.q(dir))
-  if scode == 0 then
-    for line in (sout .. '\n'):gmatch('(.-)\n') do
-      -- Status "Removed locally", poi size (numero+virgole, unità), poi il path.
-      -- Il path può contenere spazi: lo prendiamo "dal size in poi".
-      local path = line:match('^%s*Removed locally%s+[%d,]+%s+%a+%s+(.+)$')
-      if path then
-        M.run(M.cmq() .. ' remove ' .. M.q(M.trim(path)))
+  -- status eseguito DENTRO il workspace
+  local code, out = M.run(M.cmq() .. ' status', base)
+  if code ~= 0 then return 0 end
+
+  local function isAbsolute(p)
+    return p:match('^[/\\]') ~= nil or p:match('^%a:[/\\]') ~= nil
+  end
+  local function abspath(p)
+    if isAbsolute(p) then return p end
+    return base .. M.SEP .. p
+  end
+
+  -- Raccogli i path (ultima colonna) e tieni solo quelli assenti dal disco.
+  -- Righe-dato: contengono una colonna size ("541 bytes", "24,963 KB",
+  -- "28,395 MB"); header e titoli di sezione non hanno numeri e vengono saltati.
+  -- La cattura del path prende l'ultima colonna, separata da 2+ spazi: gestisce
+  -- sia la sezione "Changed" (Status|Size|Last Modified|Path) sia "Deleted"
+  -- (Status|Size|Path), e i path che contengono spazi singoli.
+  local missing = {}
+  for line in (out .. '\n'):gmatch('(.-)\n') do
+    if line:match('%d[%d,]*%s+%a+%s%s') then
+      local p = line:match('.*%s%s+(%S.-)%s*$')
+      if p and p ~= '' then
+        p = M.trim(p)
+        if not M.fileExists(abspath(p)) then
+          missing[#missing + 1] = p
+        end
       end
     end
   end
 
-  -- 2. Checkin. Il ciclo resta solo come rete di sicurezza per i file
-  --    checked-out spariti dal disco che lo status non segnala ancora.
-  for attempt = 1, 5 do
-    local code, out = M.run(
-      M.cmq() .. ' partial checkin ' .. M.q(dir) .. ' -c="' .. comment .. '" --applychanged')
+  if #missing == 0 then return 0 end
 
-    local has_error = (code ~= 0) or out:find('\nError:') or out:match('^Error:')
-    if not has_error then return true end
-
-    -- recupero: rimuovi TUTTI i file cancellati riportati nell'errore (non uno solo)
-    local removed = 0
-    for missing in out:gmatch('The changed (.-) is not on disk') do
-      M.run(M.cmq() .. ' remove ' .. M.q(M.trim(missing)))
-      removed = removed + 1
+  -- Rimozione in batch. Path assoluti -> cm li risolve senza dipendere dalla cwd.
+  local CHUNK = 40  -- prudenza sulla lunghezza massima della command line
+  for i = 1, #missing, CHUNK do
+    local args = {}
+    for j = i, math.min(i + CHUNK - 1, #missing) do
+      args[#args + 1] = M.q(abspath(missing[j]))
     end
-
-    if removed == 0 then
-      return false, out  -- errore non recuperabile
-    end
+    M.run(M.cmq() .. ' remove ' .. table.concat(args, ' '), base)
   end
 
-  return false, 'too many recovery attempts during check-in'
+  return #missing
+end
+
+-- Ritorna ok(bool), messaggio errore
+function M.checkin(dir, comment)
+  comment = sanitizeComment(comment)
+
+  -- Pre-pulizia: marca per delete i file tracciati ma spariti dal disco, in un
+  -- unico passaggio PRIMA del checkin. Elimina il bisogno di far fallire il
+  -- checkin per scoprirli, e quindi anche i tentativi ripetuti.
+  M.removeMissingTracked(dir)
+
+  -- Un solo checkin.
+  local code, out = M.run(
+    M.cmq() .. ' partial checkin ' .. M.q(dir) .. ' -c="' .. comment .. '" --applychanged')
+
+  local has_error = (code ~= 0) or out:find('\nError:') or out:match('^Error:')
+  if has_error then return false, out end
+  return true
 end
 
 -- ------------------------------------------------- flusso checkout completo --
@@ -618,4 +658,3 @@ M.STATE_LABEL = {
 }
 
 return M
-
