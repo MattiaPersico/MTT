@@ -1,13 +1,11 @@
-local time_selection_start_time, time_selection_end_time = reaper.GetSet_LoopTimeRange(false, 0, 0, 0, false)
 
-if time_selection_start_time == time_selection_end_time then -- se non c'é alcuna time selection.
-
+local function make_time_selection_and_play()
     if reaper.CountSelectedMediaItems(0) > 0 then
 
         local start_pos = 0
         local end_pos = 0
 
-        for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
+        for i = 0,  reaper.CountSelectedMediaItems(0) - 1 do
 
             local item = reaper.GetSelectedMediaItem(0, i)
             local item_start = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -27,13 +25,22 @@ if time_selection_start_time == time_selection_end_time then -- se non c'é alcu
         end
 
         reaper.GetSet_LoopTimeRange(true, false, start_pos, end_pos, true)
-
+ 
         local cursor_position = reaper.GetCursorPosition()
 
         if cursor_position < start_pos or cursor_position > end_pos then
-            reaper.SetEditCurPos(start_pos, true, false)
+            reaper.SetEditCurPos(start_pos, false, false)
         end
     end
+end
+
+local time_selection_start_time, time_selection_end_time = reaper.GetSet_LoopTimeRange(false, 0, 0, 0, false)
+
+if time_selection_start_time == time_selection_end_time then -- se non c'é alcuna time selection.
+  
+  --make_time_selection_and_play()
+    reaper.Main_OnCommand(reaper.NamedCommandLookup('_RS6c9b970717ae0f7ceb66e4befc07c24216c2b457'),0)
+    
 else    -- se invece c'é una time selection
     reaper.SetEditCurPos(time_selection_start_time, true, false)
 end
