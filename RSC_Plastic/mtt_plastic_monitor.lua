@@ -24,7 +24,7 @@
 --   viola   : progetto nuovo, da importare al check-in
 
 local major_version = 1
-local minor_version = 3
+local minor_version = 4
 
 local script_dir = debug.getinfo(1, 'S').source:match('@(.*)[/\\]')
 local LIB = dofile(script_dir .. '/mtt_plastic_lib.lua')
@@ -391,4 +391,3 @@ local function loop()
 end
 
 reaper.defer(loop)
-
