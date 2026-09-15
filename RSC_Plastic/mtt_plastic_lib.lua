@@ -480,7 +480,10 @@ function M.doCheckinFlow(proj_path)
   end
 
   local info = M.fileInfo(proj_path)
-  if info and not info.checked_out then
+  -- "private" (es. "private;-1;;") = mai check-inato: contenuto nuovo da
+  -- importare, non "niente da fare". L'add + il checkin seguenti lo gestiscono.
+  local is_new = info ~= nil and info.status:lower() == 'private'
+  if info and not is_new and not info.checked_out then
     reaper.ShowMessageBox(
       'The project is not checked out: nothing to commit.\nPlease checkout first.', title, 0)
     return
@@ -644,6 +647,7 @@ M.STATE = {
   AVAILABLE   = 'available',      -- up to date, no lock, checkout available
   LOCKED      = 'locked',         -- locked by another user
   CHECKED_OUT = 'checked_out',    -- in our checkout+lock
+  NEW_PROJECT = 'new_project',    -- never checked in: to import
   UNKNOWN     = 'unknown',
 }
 
@@ -654,6 +658,7 @@ M.STATE_LABEL = {
   [M.STATE.AVAILABLE]   = 'In repo - up to date, checkout available',
   [M.STATE.LOCKED]      = 'Locked by another user',
   [M.STATE.CHECKED_OUT] = 'Checked out',
+  [M.STATE.NEW_PROJECT] = 'New project - to import on check-in',
   [M.STATE.UNKNOWN]     = 'Unknown state',
 }
 

@@ -21,6 +21,7 @@
 --   blu     : in repo ma NON aggiornato all'ultima versione
 --   verde   : in repo, aggiornato, checkout disponibile
 --   giallo  : in checkout + lock (tuo)
+--   viola   : progetto nuovo, da importare al check-in
 
 local major_version = 1
 local minor_version = 3
@@ -141,7 +142,14 @@ local function startRefresh()
         return
       end
 
-      -- 3) siamo aggiornati? (best effort, confronto changeset)
+      -- 3) mai check-inato: nessun changeset esiste, la history fallirebbe
+      --    a vuoto -> stato dedicato, niente confronto col server
+      if info.status:lower() == 'private' then
+        finish(S.NEW_PROJECT)
+        return
+      end
+
+      -- 4) siamo aggiornati? (best effort, confronto changeset)
       LIB.runAsync(LIB.cmd_history(proj_path), nil, function(code3, out3)
         if not alive() then return end
         if code3 ~= 0 then
@@ -168,6 +176,7 @@ local COL = {
   [S.OUT_OF_DATE] = { 0.3, 0.6, 1.0 },
   [S.AVAILABLE]   = { 0.2, 1.0, 0.2 },
   [S.CHECKED_OUT] = { 1.0, 1.0, 0.2 },
+  [S.NEW_PROJECT] = { 0.7, 0.5, 1.0 },
   [S.UNKNOWN]     = { 0.8, 0.8, 0.8 },
 }
 
@@ -233,7 +242,7 @@ local function drawMenu(proj_path)
   local in_repo      = state == S.AVAILABLE or state == S.OUT_OF_DATE
                     or state == S.CHECKED_OUT or state == S.LOCKED
   local can_checkout = state == S.AVAILABLE or state == S.OUT_OF_DATE
-  local can_checkin  = state == S.CHECKED_OUT
+  local can_checkin  = state == S.CHECKED_OUT or state == S.NEW_PROJECT
   local can_revert   = in_repo
 
   if reaper.ImGui_MenuItem(ctx, 'Check-Out', nil, false, can_checkout) then
