@@ -4,7 +4,7 @@
 -- sono gli item di riferimento: ogni parte lunga quanto l'item di riferimento
 -- corrispondente e posizionata in corrispondenza di quell'item.
 
--- Risolve l'indice zero-based di una traccia a partire dal suo puntatore (userdata).
+-- Risolve l'indice zero-based di una traccia a partir dal suo puntatore (userdata).
 -- GetTrack torna nil per un indice fuori range, quindi il ciclo si arresta in fondo.
 local function track_index(proj, tr)
   local i = 0
@@ -14,6 +14,33 @@ local function track_index(proj, tr)
     if t == tr then return i end
     i = i + 1
   end
+end
+
+-- Unisce gli item di riferimento che si sovrappongono in un singolo item.
+-- Ordina per posizione e fonde ogni intervallo [start, start+length) che tocca o entra
+-- nel precedente: l'intervallo fuso ha start = inizio del primo e length = fine - start
+-- del più lontano temporalmente. Gli item non contigui restano separati.
+local function merge_refs(pos, length)
+  local order = {}
+  for i = 1, #pos do order[i] = i end
+  table.sort(order, function(a, b) return pos[a] < pos[b] end)
+
+  local out_pos, out_len = {}, {}
+  local cur_start, cur_end = pos[order[1]], pos[order[1]] + length[order[1]]
+  for i = 2, #pos do
+    local j = order[i]
+    local s, e = pos[j], pos[j] + length[j]
+    if s <= cur_end then
+      if e > cur_end then cur_end = e end
+    else
+      out_pos[#out_pos + 1] = cur_start
+      out_len[#out_len + 1] = cur_end - cur_start
+      cur_start, cur_end = s, e
+    end
+  end
+  out_pos[#out_pos + 1] = cur_start
+  out_len[#out_len + 1] = cur_end - cur_start
+  return out_pos, out_len
 end
 
 local function main()
@@ -68,6 +95,9 @@ local function main()
       others[#others + 1] = { item = s.item, tr = tp }
     end
   end
+
+  -- 4. Fondi gli item di riferimento che si sovrappongono in un solo item.
+  ref_pos, ref_len = merge_refs(ref_pos, ref_len)
 
   if #ref_pos == 0 then
     reaper.MB('Nessun item di riferimento sulla traccia più alta.', 'Mirror item edits', 0)
