@@ -12,7 +12,7 @@
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 18
+local minor_version = 19
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -236,7 +236,7 @@ function Process_GetBoundary(item)
     local boundary_end = i_pos + i_len
 
 --[[     local ts_start, ts_end = reaper.GetSet_LoopTimeRange(0, 0, 0, 0, 0)
-    
+
     if ts_start ~= ts_end then
         boundary_start = ts_start
         boundary_end = ts_end
@@ -357,17 +357,17 @@ function Process_GetAudioData(item, clear_envelope)
         local new_rms_sum = 0
 
         local pivot_db = 0 -- Centro dello scaling è 0 dB
-        
+
         -- Applica uno scale factor uniforme a tutti i valori
         -- Questo mantiene l'ordine e non permette inversioni
         local scale_factor = 1 - compression
-        
+
         for i = 1, #data do
             -- Scala il valore verso il pivot (0 dB)
             data[i] = pivot_db + (data[i] - pivot_db) * scale_factor
             new_rms_sum = new_rms_sum + data[i]
         end
-        
+
         rms_mean = new_rms_sum / count
     end
     --- Fine Compressione
@@ -687,6 +687,10 @@ function Process_GenerateTakeVolume(item)
 end
 
 function EnvelopeVis(envelope, bool)
+    if not reaper.ValidatePtr2(0, envelope, "TrackEnvelope*") then
+        return
+    end
+
     local retval, str = reaper.GetEnvelopeStateChunk(envelope, "VIS", false)
 
     if retval then
@@ -781,7 +785,7 @@ function InsertTrackEnvelope(envelope, remap, cur_pos)
 
     local position = cur_pos
     local handles = 0.05
-    reaper.DeleteEnvelopePointRange(envelope, position, position + reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGHT"))
+    reaper.DeleteEnvelopePointRange(envelope, position, position + reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGTH"))
 
     InsertEnvBoundaries(envelope, position, reaper.GetMediaItemInfo_Value(REF_ITEM, "D_LENGTH"), handles)
 
@@ -1336,11 +1340,11 @@ function mainWindow()
         reaper.ImGui_BeginDisabled(ctx)
     end
 
-    
+
     local retval, v = reaper.ImGui_SliderDouble(ctx, "Definition", definition, 0.001, 1)
-    
+
     if v <= 0 then v = definition end
-    
+
     if retval and REF_ITEM ~= -1 then
         definition = v
         window_sec = math.max(1 - remapCurve(definition * 1, 0.05), 0.001)
@@ -1801,20 +1805,17 @@ PT 0 1 0
     return new_chunk
 end
 
-function EnsureItemVolumeEnv(chunk)
-    -- controlla se c'è già un VOLENV
-    if chunk:find("<VOLENV") then
-        return chunk -- già presente, restituisco chunk invariato
-    end
+function EnsureItemVolumeEnv(chunk, take_index)
+    take_index = take_index or 0
 
-    -- prepara blocco VOLENV standard
+    -- prepara blocco VOLENV standard (già attivo e visibile, come quello di traccia)
     local volenv =
         [[
 <VOLENV
 EGUID ]] ..
-        reaper.genGuid() .. [[
-ACT 0 -1
-VIS 0 1 1
+        reaper.genGuid() .. "\n" .. [[
+ACT 1 -1
+VIS 1 1 1
 LANEHEIGHT 0 0
 ARM 0
 DEFSHAPE 0 -1 -1
@@ -1822,21 +1823,119 @@ VOLTYPE 1
 PT 0 1 0
 >]]
 
-    -- inserisci subito dopo il blocco <SOURCE ...>
-    -- o prima di <EXT ...> se presente
-    local before_ext = chunk:match("(.*)(<EXT.*)")
-    if before_ext then
-        return before_ext .. volenv .. "\n" .. chunk:match("(<EXT.*)")
-    else
-        -- se non c'è <EXT>, metto il VOLENV prima della chiusura >
-        local before_close = chunk:match("^(.*)\n>$")
-        if before_close then
-            return before_close .. volenv .. "\n>"
+    -- Nel chunk di un item le righe della PRIMA take (compresi i suoi
+    -- envelope: il VOLENV è direttamente sotto <ITEM) seguono le righe
+    -- dell'item, mentre ogni take successiva è un blocco <TAKE>.
+    -- I blocchi sono indentati: i match tollerano gli spazi a inizio riga.
+    local lines = {}
+    for line in chunk:gmatch("[^\r\n]*") do
+        lines[#lines + 1] = line
+    end
+
+    -- sezione con i campi della take richiesta + punto di inserimento
+    local check_start = nil
+    local check_end = nil
+    local insert_at = nil
+
+    if take_index == 0 then
+        -- prima take: dall'inizio al primo blocco <TAKE
+        -- (o fino alla chiusura di <ITEM se l'item ha una sola take)
+        check_start = 1
+        local first_take = nil
+        for idx = 2, #lines do
+            if lines[idx]:match("^%s*<TAKE%s*$") then
+                first_take = idx
+                break
+            end
+        end
+        if first_take then
+            check_end = first_take - 1
+            insert_at = first_take -- prima del primo blocco <TAKE
         else
-            -- fallback: append alla fine
-            return chunk .. volenv
+            insert_at = #lines
+            while insert_at >= 1 and lines[insert_at] == "" do
+                insert_at = insert_at - 1
+            end
+            check_end = insert_at - 1 -- riga prima della > che chiude <ITEM
+        end
+    else
+        -- take_index = 1 è il primo blocco <TAKE, e così via
+        local depth = 0
+        local take_idx = 0
+        local target_depth = nil
+        for idx, line in ipairs(lines) do
+            if line:match("^%s*<[A-Z]") then
+                if line:match("^%s*<TAKE%s*$") and target_depth == nil then
+                    take_idx = take_idx + 1
+                    if take_idx == take_index then
+                        check_start = idx
+                        target_depth = depth + 1
+                    end
+                end
+                depth = depth + 1
+            elseif line:match("^%s*>%s*$") then
+                depth = depth - 1
+                if target_depth ~= nil and depth == target_depth - 1 then
+                    check_end = idx
+                    insert_at = idx -- prima della > che chiude il blocco <TAKE
+                    break
+                end
+            end
         end
     end
+
+    if not check_start or not check_end or check_end < check_start then
+        return chunk -- take non trovata: chunk invariato
+    end
+
+    -- la take ha già un VOLENV? se è disattivo, lo attivo (ACT 1)
+    local env_start = nil
+    local env_depth = 0
+    local env_end = nil
+    for idx = check_start, check_end do
+        if env_start == nil then
+            if lines[idx]:match("^%s*<VOLENV%s*$") then
+                env_start = idx
+                env_depth = 1
+            end
+        else
+            if lines[idx]:match("^%s*<[A-Z]") then
+                env_depth = env_depth + 1
+            elseif lines[idx]:match("^%s*>%s*$") then
+                env_depth = env_depth - 1
+                if env_depth == 0 then
+                    env_end = idx
+                    break
+                end
+            end
+        end
+    end
+
+    if env_start and env_end then
+        local changed = false
+        for idx = env_start + 1, env_end - 1 do
+            local new_line = lines[idx]:gsub("^(%s*)ACT %d", "%1ACT 1")
+            if new_line ~= lines[idx] then
+                lines[idx] = new_line
+                changed = true
+            end
+        end
+        if changed then
+            return table.concat(lines, "\n")
+        end
+        return chunk -- già attivo
+    end
+
+    -- nessun VOLENV: lo inserisco nel punto di inserimento
+    local volenv_lines = {}
+    for line in volenv:gmatch("[^\r\n]*") do
+        volenv_lines[#volenv_lines + 1] = line
+    end
+    for i = #volenv_lines, 1, -1 do
+        table.insert(lines, insert_at, volenv_lines[i])
+    end
+
+    return table.concat(lines, "\n")
 end
 
 function InsertEnvBoundaries(env, time, length, handles)
@@ -1938,9 +2037,29 @@ function DragOutEnvelope()
                 end
 
                 local item = reaper.GetMediaItemTake_Item(take)
-                local ret, str = reaper.GetItemStateChunk(item, "", false)
-                reaper.SetItemStateChunk(item, EnsureItemVolumeEnv(str), false)
                 local env = reaper.GetTakeEnvelopeByName(take, "Volume")
+
+                if not reaper.ValidatePtr2(0, env, "TrackEnvelope*") then
+                    local ret, str = reaper.GetItemStateChunk(item, "", false)
+                    if ret then
+                        local take_index = 0
+                        for i = 0, reaper.CountTakes(item) - 1 do
+                            if reaper.GetMediaItemTake(item, i) == take then
+                                take_index = i
+                                break
+                            end
+                        end
+                        reaper.SetItemStateChunk(item, EnsureItemVolumeEnv(str, take_index), false)
+                        -- la take può essere ricreata dal chunk: la ricavano per indice
+                        take = reaper.GetMediaItemTake(item, take_index)
+                        env = reaper.GetTakeEnvelopeByName(take, "Volume")
+                    end
+                end
+
+                if not reaper.ValidatePtr2(0, env, "TrackEnvelope*") then
+                    return
+                end
+
                 EnvelopeVis(env, true)
                 reaper.Undo_BeginBlock()
 
