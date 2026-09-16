@@ -51,7 +51,7 @@
   </category>
       <category name="EnvelopeStealer">
     <reapack name="mtt_envelope_stealer.lua" type="script" desc="Envelope Stealer">
-      <version name="0.18" author="Mattia Persico" time="2025-11-05T16:08:15Z">
+      <version name="0.19" author="Mattia Persico" time="2026-09-16T14:07:26Z">
           <source main="main" file="mtt_envelope_stealer.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/EnvelopeStealer/mtt_envelope_stealer.lua</source>
       </version>
     </reapack>

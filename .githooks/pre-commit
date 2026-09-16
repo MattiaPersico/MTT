@@ -1,0 +1,129 @@
+#!/bin/sh
+# ReaPack version guard.
+#
+# Two failures this exists to stop, both seen in this repo's history:
+#   1. a script edited without bumping its major/minor, which needs a second
+#      commit whose only purpose is to move the number;
+#   2. a commit landing on main, which is the branch index.xml serves its
+#      downloads from - whatever sits there is live for every ReaPack user.
+#
+# Everything it checks is derived from index.xml: each <reapack> and the files
+# listed under its <source> tags. Adding a package to index.xml is enough;
+# this file never needs editing.
+
+set -u
+
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(git rev-parse --show-toplevel)
+. "$HOOK_DIR/lib/reapack-common.sh"
+
+INDEX="$REPO_ROOT/index.xml"
+
+# --- 1. branch guard ---------------------------------------------------------
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ "$branch" = "main" ] && [ "${ALLOW_MAIN_COMMIT:-0}" != "1" ]; then
+  rp_die "You are on main. Work happens on DEV; main only ever moves by merge.
+  What is on main is what ReaPack serves, so a commit here publishes itself.
+
+  Nothing committed yet, so nothing is lost:
+    git stash && git switch DEV && git stash pop
+
+  If this really is a merge-conflict resolution on main:
+    ALLOW_MAIN_COMMIT=1 git commit ..."
+fi
+
+[ -f "$INDEX" ] || exit 0
+
+# --- 2. gather ---------------------------------------------------------------
+
+work=$(mktemp -d) || exit 1
+trap 'rm -rf "$work"' EXIT
+
+awk -f "$HOOK_DIR/lib/reapack-index.awk" < "$INDEX" > "$work/records"
+git -c core.quotepath=false diff --cached --name-only > "$work/staged"
+
+# On the very first commit there is no HEAD to compare against, and a package
+# whose main script is being added for the first time is new, not stale: its
+# version legitimately matches the entry just written for it in index.xml.
+has_head=no
+git rev-parse --verify -q HEAD >/dev/null 2>&1 && has_head=yes
+
+: > "$work/errors"
+: > "$work/map"
+: > "$work/report"
+
+# --- 3. one pass per package -------------------------------------------------
+
+grep '^P'"$TAB" "$work/records" | while IFS="$TAB" read -r _ pkg idxver mainpath; do
+  [ -n "$mainpath" ] || {
+    printf '  %s: no <source main="..."> in index.xml, skipped\n' "$pkg" >> "$work/report"
+    continue
+  }
+
+  # The version being committed: the staged blob, not the working copy. An edit
+  # made after `git add` is not part of this commit and must not be indexed.
+  script=$(git show ":$mainpath" 2>/dev/null || cat "$REPO_ROOT/$mainpath" 2>/dev/null || true)
+  [ -n "$script" ] || {
+    printf '  %s: %s not found, skipped\n' "$pkg" "$mainpath" >> "$work/report"
+    continue
+  }
+
+  newver=$(printf '%s\n' "$script" | rp_script_version)
+  [ -n "$newver" ] || {
+    printf '  %s: no local major_version / minor_version, skipped\n' "$pkg" >> "$work/report"
+    continue
+  }
+
+  # A package is more than its main script: a change to any of its <source>
+  # files is a change to the package.
+  changed=no
+  while IFS="$TAB" read -r kind spkg spath; do
+    [ "$kind" = "S" ] || continue
+    [ "$spkg" = "$pkg" ] || continue
+    if grep -Fxq -- "$spath" "$work/staged"; then changed=yes; break; fi
+  done < "$work/records"
+
+  published=no
+  if [ "$has_head" = "yes" ] && git cat-file -e "HEAD:$mainpath" 2>/dev/null; then published=yes; fi
+
+  if [ "$newver" = "$idxver" ]; then
+    if [ "$changed" = "yes" ] && [ "$published" = "yes" ]; then
+      printf '  %s is %s in index.xml and its files changed in this commit.\n' "$pkg" "$idxver" >> "$work/errors"
+      printf '      bump minor_version in %s\n' "$mainpath" >> "$work/errors"
+    fi
+    continue
+  fi
+
+  if rp_version_lt "$newver" "$idxver"; then
+    printf '  %s goes backwards: index.xml has %s, %s declares %s.\n' "$pkg" "$idxver" "$mainpath" "$newver" >> "$work/errors"
+    continue
+  fi
+
+  printf '%s\t%s\n' "$pkg" "$newver" >> "$work/map"
+  printf '  %s  %s -> %s\n' "$pkg" "$idxver" "$newver" >> "$work/report"
+done
+
+# --- 4. verdict --------------------------------------------------------------
+
+if [ -s "$work/errors" ]; then
+  printf '\nCommit refused - index.xml would ship a stale version:\n\n' >&2
+  cat "$work/errors" >&2
+  printf '\nBump the version, or commit with --no-verify only if you mean to\npublish the old number with new code.\n\n' >&2
+  exit 1
+fi
+
+if [ -s "$work/map" ]; then
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  awk -v MAP="$work/map" -v AUTHOR="$RP_AUTHOR" -v TIME="$now" \
+      -f "$HOOK_DIR/lib/reapack-update.awk" < "$INDEX" > "$work/index.xml"
+  # Written through a temp file: `sed -i` spells its backup argument
+  # differently on BSD and GNU, and this hook should not care which one runs it.
+  cat "$work/index.xml" > "$INDEX"
+  git add "$INDEX"
+  printf '\nindex.xml updated:\n'
+  grep -v ', skipped$' "$work/report" || true
+  printf '\n'
+fi
+
+exit 0

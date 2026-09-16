@@ -1,0 +1,54 @@
+#!/bin/sh
+# Last gate before the repo becomes downloadable.
+#
+# index.xml serves its <source> URLs from the main branch, so pushing main
+# publishes. This refuses that push when any package's declared version and
+# its entry in index.xml disagree in the commit being pushed - which is what a
+# commit made with --no-verify leaves behind.
+#
+# Keeps the Git LFS pre-push it replaced: stdin is captured and handed on.
+
+set -u
+
+HOOK_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(git rev-parse --show-toplevel)
+. "$HOOK_DIR/lib/reapack-common.sh"
+
+refs=$(mktemp) || exit 1
+work=$(mktemp -d) || exit 1
+trap 'rm -f "$refs"; rm -rf "$work"' EXIT
+cat > "$refs"
+
+zero=0000000000000000000000000000000000000000
+
+while read -r localref localsha remoteref remotesha; do
+  [ "${remoteref:-}" = "refs/heads/main" ] || continue
+  [ -n "${localsha:-}" ] && [ "$localsha" != "$zero" ] || continue
+
+  git show "$localsha:index.xml" > "$work/index.xml" 2>/dev/null || continue
+  awk -f "$HOOK_DIR/lib/reapack-index.awk" < "$work/index.xml" > "$work/records"
+
+  : > "$work/errors"
+  grep '^P'"$TAB" "$work/records" | while IFS="$TAB" read -r _ pkg idxver mainpath; do
+    [ -n "$mainpath" ] || continue
+    script=$(git show "$localsha:$mainpath" 2>/dev/null || true)
+    [ -n "$script" ] || continue
+    newver=$(printf '%s\n' "$script" | rp_script_version)
+    [ -n "$newver" ] || continue
+    [ "$newver" = "$idxver" ] || \
+      printf '  %s: script says %s, index.xml says %s\n' "$pkg" "$newver" "$idxver" >> "$work/errors"
+  done
+
+  if [ -s "$work/errors" ]; then
+    printf '\nPush to main refused - these would go live mislabelled:\n\n' >&2
+    cat "$work/errors" >&2
+    printf '\nRun a commit on DEV so the hook rewrites index.xml, merge that into\nmain, and push again.\n\n' >&2
+    exit 1
+  fi
+done < "$refs"
+
+command -v git-lfs >/dev/null 2>&1 || {
+  printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path."
+  exit 2
+}
+git lfs pre-push "$@" < "$refs"
