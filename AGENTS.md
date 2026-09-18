@@ -51,14 +51,18 @@ thread, and do not restate its rules anywhere else.
   code; leave "Ruled out" and "Wanted" empty: you were not there for the first, and the
   second is not yours to write.
 - **When the work would be reported as done, rewrite "Where we left off" in full**, in that
-  same reply — not a turn later. Rewriting means the previous Done lines are gone, not
-  pushed down: anything still open moves to "Waiting on". No git state goes in the note —
-  `updated:` is the date and nothing else.
+  same reply — not a turn later. In full means the edit replaces everything from that
+  heading to the line before `## Wanted`: an edit anchored on a bullet is an append, and it
+  is how the previous session's Done lines survive while "Waiting on" gets dropped. The
+  previous Done lines go; anything still open moves to "Waiting on". No git state goes in
+  the note — `updated:` is the date and nothing else.
 - **The note is committed with the change it describes**, in the same commit: a note that
   lands a commit later describes a tree that no longer exists.
-- **"Wanted" is the user's list.** Implementing an entry and leaving it in the list is a
-  failed pass: delete it in the same reply and renumber what remains. Never add, reword,
-  reorder or prune one.
+- **"Wanted" is the user's list, and it is a menu, not a queue.** Do the entry you were
+  asked for and stop — a second entry implemented unasked is a change nobody wanted yet,
+  and asking about it afterwards does not give the time back. Delete the entry you did
+  implement, in the same reply, renumbering what remains. Never add, reword, reorder or
+  prune one.
 
 ## Scratch
 

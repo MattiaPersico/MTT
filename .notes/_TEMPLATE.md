@@ -12,8 +12,9 @@ FOUR SECTIONS, FOUR LIFETIMES
   Wanted              the user's list; the agent may delete from it, never write to it
 
 WRITING RULES
-- Impersonal third person. Say "the user" when a person must be named at all; never "I",
-  never a name. Most sentences need neither.
+- Written in English, in impersonal third person. Say "the user" when a person must be
+  named at all; never "I", never a name. Most sentences need neither. A note that drifts
+  into another language mid-bullet is a note that was appended to rather than rewritten.
 
 - "What it is" is purpose, not implementation. One short paragraph. If it names a
   function, that belongs in the code instead.
@@ -38,8 +39,12 @@ WRITING RULES
                    older change still awaiting its check moves here as one short line —
                    it does not stay behind as a Done bullet.
 
-  It is rewritten whole at the same moment the work would be reported as done. If the
-  section is longer after a session than before, it was appended to.
+  It is rewritten whole at the same moment the work would be reported as done, and
+  "whole" is mechanical: **the edit replaces everything from the `## Where we left off`
+  heading down to the line before the next heading.** An edit anchored on one bullet is an
+  append whatever the intent — that is how a previous session's Done lines survive and how
+  "Waiting on" ends up dropped instead of carried. If the section is longer after a session
+  than before, or "Waiting on" is gone while checks are still open, it was appended to.
 
 - `updated:` is the date and nothing else. **Git does not belong in this file**: which
   commit contains what is a repository question, and `git log -- <this note>` answers it
@@ -56,6 +61,15 @@ WRITING RULES
   section in the same turn rather than trusting a listing from earlier in the conversation.
   What the implementation still needs — a check in REAPER, a decision — goes in "Where we
   left off". If an entry is unclear, ask; do not guess it into something else.
+
+- **Do only the entry you were asked for.** This list is a menu the user picks from, not a
+  queue to work through. Implementing a second entry because it looks related, trivial or
+  already half-done by your change is not initiative: it is a change nobody asked for, in a
+  file the user is the only one who can test, and it spends the session on work that was
+  not wanted yet. Observed 18/09: asked for one entry, delivered two, then asked afterwards
+  whether to keep the second — permission requested after the cost was already paid. If
+  another entry is genuinely opened up by what you just did, say so in one line and leave
+  it in the list.
 
 - Do not copy these rules into the note. The two lines in the skeleton are enough; this
   file is the single place they live.

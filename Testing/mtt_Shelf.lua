@@ -20,6 +20,10 @@ local open_fx_popup = false
 -- Un formato controlla anche la versione instrument omonima (VST filtra VSTi, ecc.)
 local format_filters = {VST = true, VST3 = true, AU = true, JS = true, CLAP = true}
 
+-- Prefissi di formato riconosciuti: servono a strappare il nome pulito
+-- dall'estetica del bottone (strip_fx_prefix).
+local FORMAT_PREFIXES = {VST = true, VST3 = true, AU = true, JS = true, CLAP = true}
+
 function LoadAllFX()
     local raw_fx = {}
     local idx = 0
@@ -32,7 +36,10 @@ function LoadAllFX()
         idx = idx + 1
     end
 
+    -- Priorità: più basso è il numero, più alta è la priorità. CLAP entra in cima,
+    -- così un plugin presente in più formati mantiene la versione CLAP.
     local priority_map = {
+        ["CLAP"] = 0,
         ["VST3"] = 1,
         ["AU"] = 2,
         ["VST"] = 3,
@@ -48,7 +55,9 @@ function LoadAllFX()
 
         -- Extract format from identifier (e.g., "VST3:...", "AU:...", etc.)
         local format = ""
-        if string.find(ident, "^VST3:") then
+        if string.find(ident, "^CLAP:") then
+            format = "CLAP"
+        elseif string.find(ident, "^VST3:") then
             format = "VST3"
         elseif string.find(ident, "^AU:") then
             format = "AU"
@@ -63,6 +72,7 @@ function LoadAllFX()
         local prio = priority_map[format] or 5
 
         local clean_name = name
+        clean_name = string.gsub(clean_name, "^CLAP: ", "")
         clean_name = string.gsub(clean_name, "^VST3: ", "")
         clean_name = string.gsub(clean_name, "^AU: ", "")
         clean_name = string.gsub(clean_name, "^VST: ", "")
@@ -255,6 +265,37 @@ function fx_visible(fx)
     return format_filters[format] ~= false
 end
 
+-- Strappa il prefisso di formato dall'estetica ("VST3: Foo" -> "Foo"), inclusa la
+-- versione instrument ("VSTi: " -> "Foo"). Se il prefisso non è riconosciuto il nome
+-- torna così com'è.
+function strip_fx_prefix(name)
+    local prefix = name:match("^(%w+): ")
+    if not prefix then
+        return name
+    end
+    local base = prefix
+    if base:sub(-1) == "i" then
+        base = base:sub(1, -2)
+    end
+    if FORMAT_PREFIXES[base] then
+        return name:sub(#prefix + 3)
+    end
+    return name
+end
+
+-- Strappa il prefisso di sezione (e, se presente, il suffisso ".lua") dal nome di un'azione
+-- ("Script: Toggle play" -> "Toggle play", "aescript: mtt_Shelf.lua" -> "mtt_Shelf"):
+-- REAPER prepende sempre un prefisso "<sezione>: ", quindi strappare il testo prima della
+-- prima ": " restituisce il nome pulito; se non c'è prefisso, si stratta solo il suffisso
+-- ".lua" finale; un nome che non ha nulla di tutto questo torna così com'è.
+function strip_action_prefix(name)
+    local prefix = name:match("^(%S+): ")
+    if prefix then
+        name = name:sub(#prefix + 3)
+    end
+    return (name:gsub("%.lua$", ""))
+end
+
 function add_favorite_action()
     if is_adding_action then
         return
@@ -370,7 +411,14 @@ function render_favorite_button(i)
         return
     end
 
-    local btn_id = string.format("%s##fav_btn_%d", fav.name, i)
+    local display_name = fav.name
+    if fav.type == "fx" then
+        display_name = strip_fx_prefix(fav.name)
+    elseif fav.type == "action" then
+        display_name = strip_action_prefix(fav.name)
+    end
+
+    local btn_id = string.format("%s##fav_btn_%d", display_name, i)
 
     -- Colora il bottone in base al tipo
     local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
@@ -391,7 +439,7 @@ function render_favorite_button(i)
         reaper.ImGui_Button(
         ctx,
         btn_id,
-        reaper.ImGui_CalcTextSize(ctx, fav.name) + 10,
+        reaper.ImGui_CalcTextSize(ctx, display_name) + 10,
         reaper.ImGui_GetWindowHeight(ctx)
     )
 
@@ -418,7 +466,7 @@ function render_favorite_button(i)
         if reaper.ImGui_BeginDragDropSource(ctx) then
             isDraggingFx = true
             draggedFx = fav
-            reaper.ImGui_Text(ctx, "Drag: " .. fav.name)
+            reaper.ImGui_Text(ctx, "Drag: " .. display_name)
             reaper.ImGui_EndDragDropSource(ctx)
         end
     end
