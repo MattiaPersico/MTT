@@ -265,22 +265,25 @@ function fx_visible(fx)
     return format_filters[format] ~= false
 end
 
--- Strappa il prefisso di formato dall'estetica ("VST3: Foo" -> "Foo"), inclusa la
--- versione instrument ("VSTi: " -> "Foo"). Se il prefisso non è riconosciuto il nome
--- torna così com'è.
+-- Stratta il prefisso di formato dall'estetica ("VST3: Foo" -> "Foo"), inclusa la
+-- versione instrument ("VSTi: " -> "Foo"), e il suffisso "(manufacturer)" alla fine
+-- ("ReaComp (REAPER)" -> "ReaComp"): i bottone degli fx mostrano il nome del plugin,
+-- non il produttore, che nel drag-and-drop e nel tooltip è già visibile via `ident`.
+-- Il prefisso di formato viene stratto solo se riconosciuto (le versioni "i" seguono
+-- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
+-- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
 function strip_fx_prefix(name)
     local prefix = name:match("^(%w+): ")
-    if not prefix then
-        return name
+    if prefix then
+        local base = prefix
+        if base:sub(-1) == "i" then
+            base = base:sub(1, -2)
+        end
+        if FORMAT_PREFIXES[base] then
+            name = name:sub(#prefix + 3)
+        end
     end
-    local base = prefix
-    if base:sub(-1) == "i" then
-        base = base:sub(1, -2)
-    end
-    if FORMAT_PREFIXES[base] then
-        return name:sub(#prefix + 3)
-    end
-    return name
+    return (name:gsub("%s*%b()", ""))
 end
 
 -- Strappa il prefisso di sezione (e, se presente, il suffisso ".lua") dal nome di un'azione
@@ -309,6 +312,25 @@ function remove_favorite(index)
         table.remove(favorites, index)
         save_favorites()
     end
+end
+
+-- Identificatore unico del favorite: id per un'azione, ident per un FX. Prima di
+-- aggiungerne uno nuovo si controlla che non esista già un favorite dello stesso tipo
+-- con lo stesso identificatore; se è già presente l'inserimento viene scarto senza alcun
+-- aviso, così un duplicato non si accumula nella lista.
+function has_favorite(fav_list, fav_type, key)
+    for _, fav in ipairs(fav_list or {}) do
+        if fav.type == fav_type then
+            if fav_type == "action" then
+                if fav.id == key then
+                    return true
+                end
+            elseif fav.ident == key then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 -- ==========================================
@@ -385,7 +407,9 @@ function update_action_selection_state()
             action_name = "Action #" .. pending_action_id
         end
 
-        table.insert(favorites, {type = "action", id = pending_action_id, name = action_name})
+        if not has_favorite(favorites, "action", pending_action_id) then
+            table.insert(favorites, {type = "action", id = pending_action_id, name = action_name})
+        end
 
         reaper.PromptForAction(-1, 0, 0)
         is_adding_action = false
@@ -653,9 +677,11 @@ function main_loop()
                     if fx_visible(Fx) and (fx_filter == "" or Fx.name:lower():find(fx_filter:lower(), 1, true)) then
                         found = true
                         if reaper.ImGui_Selectable(ctx, Fx.name) then
-                            table.insert(favorites, {type = "fx", ident = Fx.ident, name = Fx.name})
-                            save_favorites()
-                            -- Chiude il popup dopo l'aggiunta: il pulsante è stato
+                            if not has_favorite(favorites, "fx", Fx.ident) then
+                                table.insert(favorites, {type = "fx", ident = Fx.ident, name = Fx.name})
+                                save_favorites()
+                            end
+                            -- Chiude il popup dopo la selezione: il pulsante è stato
                             -- salvato come favorite, la selezione non serve più.
                             reaper.ImGui_CloseCurrentPopup(ctx)
                         end

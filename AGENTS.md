@@ -1,72 +1,29 @@
 # MTT — REAPER scripts published through ReaPack
 
-## Branches
-
-- **`DEV` is where work happens.** Commit here, always.
-- **`main` is the distribution branch, not a milestone.** `index.xml` serves its
-  `<source>` URLs from `raw.githubusercontent.com/MattiaPersico/MTT/main/...`, so
-  whatever sits on `main` is what users download. It moves only by publishing.
-
-## Publishing
-
-`./publish.sh` is the whole procedure: push DEV, move main onto it, push main.
-`--dry-run` prints the steps without doing them, `--no-ff` leaves one merge
-commit per release. Never assemble the sequence by hand.
+## Branches and publishing
+- Work and commit on `DEV`, always.
+- `main` is what ReaPack users download (`index.xml` serves `raw.githubusercontent.com/MattiaPersico/MTT/main/...`). It moves only through `./publish.sh`: push DEV, move main onto it, push main (`--dry-run` shows the steps, `--no-ff` = one merge commit per release). Never do the sequence by hand.
 
 ## Versions
-
-A published script declares `local major_version` / `local minor_version` near
-the top. `index.xml` carries the same number in `<version name="...">`, and the
-`pre-commit` hook copies it there — that number is never edited by hand.
-
-**A change to a published script needs its `minor_version` bumped in the same
-commit.** ReaPack offers an update only when the number changes: new code under
-an old number reaches nobody.
+- A published script declares `local major_version` / `local minor_version` near the top. The `pre-commit` hook copies them into `index.xml` (`<version name="...">`): never edit that number by hand.
+- A change to a published script bumps its `minor_version` in the same commit: ReaPack offers an update only when the number changes.
 
 ## Hooks
-
-Enabled per clone with `git config core.hooksPath .githooks` (see
-`.githooks/README.md`).
-
-- `pre-commit` refuses a commit on `main`, and refuses a commit that changes a
-  published package without a bump.
-- `pre-push` refuses a push to `main` whose versions disagree with `index.xml`.
-
-**Never pass `--no-verify`.** It skips exactly the checks that keep `index.xml`
-honest, and what it leaves behind is a repo publishing new code under an old
-version number.
+`.githooks/` (enable per clone: `git config core.hooksPath .githooks`). `pre-commit` refuses a commit on `main` and a changed published script without a bump; `pre-push` refuses a push to `main` whose versions disagree with `index.xml`. Never `--no-verify`.
 
 ## Script notes
+Every script has three notes beside it — same folder, same base name, `.lua` swapped for the suffix. `Testing/mtt_Shelf.lua` →
 
-Every script has a note at `.notes/<its path>.md` — `Testing/mtt_Shelf.lua` becomes
-`.notes/Testing/mtt_Shelf.md`. The format and every rule for writing one live in
-`.notes/_TEMPLATE.md`: read that file before writing to a note for the first time in a
-thread, and do not restate its rules anywhere else.
+    Testing/mtt_Shelf.md          what it is + ruled out
+    Testing/mtt_Shelf.state.md    where the work left off
+    Testing/mtt_Shelf.wanted.md   the user's list
 
-- **Before changing a script, read its note.** It carries what has already been ruled out,
-  where the last session stopped, and what the user still wants. Answering a question
-  about a script is not changing it.
-- **If the note does not exist, create it from the template in the same pass.** `mkdir -p`
-  its folder first — `write_file` does not create directories. Fill "What it is" from the
-  code; leave "Ruled out" and "Wanted" empty: you were not there for the first, and the
-  second is not yours to write.
-- **When the work would be reported as done, rewrite "Where we left off" in full**, in that
-  same reply — not a turn later. In full means the edit replaces everything from that
-  heading to the line before `## Wanted`: an edit anchored on a bullet is an append, and it
-  is how the previous session's Done lines survive while "Waiting on" gets dropped. The
-  previous Done lines go; anything still open moves to "Waiting on". No git state goes in
-  the note — `updated:` is the date and nothing else.
-- **The note is committed with the change it describes**, in the same commit: a note that
-  lands a commit later describes a tree that no longer exists.
-- **"Wanted" is the user's list, and it is a menu, not a queue.** Do the entry you were
-  asked for and stop — a second entry implemented unasked is a change nobody wanted yet,
-  and asking about it afterwards does not give the time back. Delete the entry you did
-  implement, in the same reply, renumbering what remains. Never add, reword, reorder or
-  prune one.
+Three files because each is replaced with `write_file`, whole, in one call: nothing to locate or match, so a rewrite cannot degrade into an append. Format and rules: `_NOTE_TEMPLATE.md` at the repo root — read it before your first note write in a thread. All three in English, impersonal third person.
+- Before changing a script, read its `.state.md` and `.wanted.md` (and its `.md` if unfamiliar). A question about a script is not a change.
+- A failed read is not proof the notes are missing: list the script's folder before concluding it. Really missing → create all three from the template in the same pass, filling "What it is" from the code and leaving "Ruled out" and the wanted list empty.
+- Work done → in the same reply, `write_file` its whole `.state.md`, never `edit_file` it: Done = only what this session changed (the previous lines go), Not done = asked for and not delivered + why, Waiting on = still open, including an older change whose check has not come back. `updated:` = the date only, no git state.
+- Its `.wanted.md` is the user's menu, not a queue: do only the entry asked for; when you implement one, remove it and renumber, rewriting that file whole. Never add, reword, reorder or prune an entry. Re-read it in the same turn before acting on "number 3".
+- Commit the notes in the same commit as the change they describe.
 
 ## Scratch
-
-`.scratch/` at the repo root is this project's scratch directory: disposable, gitignored,
-never committed. Pure Lua logic that can be tried outside REAPER is extracted and run
-there (see the `reaper-lua` skill); nothing else belongs in it, and nothing in it is ever
-part of the work.
+`.scratch/` (gitignored, never committed) is only for running pure-Lua logic outside REAPER (see `reaper-lua`). Nothing in it is part of the work.
