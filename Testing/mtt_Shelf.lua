@@ -16,6 +16,10 @@ local hasToBeRemoved = {}
 -- Flag richiesta apertura popup FX (aperto a livello window, non dentro i child)
 local open_fx_popup = false
 
+-- Filtro dei formati nel popup FX: lo stato sopravvive alla apertura/chiusura dello script.
+-- Un formato controlla anche la versione instrument omonima (VST filtra VSTi, ecc.)
+local format_filters = {VST = true, VST3 = true, AU = true, JS = true, CLAP = true}
+
 function LoadAllFX()
     local raw_fx = {}
     local idx = 0
@@ -89,6 +93,7 @@ function LoadAllFX()
 end
 
 local fx_list = LoadAllFX()
+local fx_filter = ""
 
 if os:find("Win") then
     superKeyString = "Ctrl"
@@ -201,6 +206,55 @@ function save_favorites()
     end
     file:close()
 end
+-- Il filtro formati è una preferenza della libreria di plugin, non del progetto:
+-- viene salvato nella config directory di REAPER, non nel progetto come i favorites.
+local FORMAT_FILTERS_FILENAME = ".mtt_shelf_format_filters.txt"
+
+function load_format_filters()
+    local filepath = reaper.GetResourcePath() .. FORMAT_FILTERS_FILENAME
+    local file, err = io.open(filepath, "r")
+    if not file then
+        return
+    end
+
+    local content = file:read("*a")
+    file:close()
+
+    for line in content:gmatch("[^\n]+") do
+        local format, value = line:match("^(%S+)|([01])$")
+        if format and format_filters[format] ~= nil then
+            format_filters[format] = (value == "1")
+        end
+    end
+end
+
+function save_format_filters()
+    local filepath = reaper.GetResourcePath() .. FORMAT_FILTERS_FILENAME
+    local file, err = io.open(filepath, "w")
+    if not file then
+        return
+    end
+
+    for _, format in ipairs({"VST", "VST3", "AU", "JS", "CLAP"}) do
+        file:write(string.format("%s|%d\n", format, format_filters[format] and 1 or 0))
+    end
+    file:close()
+end
+
+-- Il formato è il prefisso all'inizio del nome ("AU: kHs Gate"); un prefisso
+-- sconosciuto non filtra mai, e le versioni instrument (VSTi, VST3i, AUi, CLAPi)
+-- seguono il filtro della versione omonima.
+function fx_visible(fx)
+    local format = fx.name:match("^(%w+): ")
+    if format == nil then
+        return true
+    end
+    if format:sub(-1) == "i" then
+        format = format:sub(1, -2)
+    end
+    return format_filters[format] ~= false
+end
+
 function add_favorite_action()
     if is_adding_action then
         return
@@ -409,6 +463,7 @@ function draw_action_fx_buttons()
     -- Setta il flag; l'apertura avviene a livello window (vedi main_loop).
     if reaper.ImGui_Button(ctx, "+Fx", 60, reaper.ImGui_GetWindowHeight(ctx)) then
         open_fx_popup = true
+        fx_filter = ""
     end
 end
 
@@ -507,12 +562,58 @@ function main_loop()
             open_fx_popup = false
         end
 
+        -- Limita la width del popup alla larghezza del nome FX piú lungo tra quelli
+        -- filtrati, cosí non si allarga con il contenuto scorrevole della child. La
+        -- altezza resta in adattamento automatico (0 sull'asse y).
+        local max_name_w = 0
+        for _, Fx in ipairs(fx_list) do
+            if fx_visible(Fx) and (fx_filter == "" or Fx.name:lower():find(fx_filter:lower(), 1, true)) then
+                local w = reaper.ImGui_CalcTextSize(ctx, Fx.name)
+                if w > max_name_w then max_name_w = w end
+            end
+        end
+        reaper.ImGui_SetNextWindowSize(ctx, max_name_w + 40, 0, reaper.ImGui_Cond_Appearing())
+
         if reaper.ImGui_BeginPopup(ctx, "##FxContextPopup") then
-            for _, Fx in ipairs(fx_list) do
-                if reaper.ImGui_Selectable(ctx, Fx.name) then
-                    table.insert(favorites, {type = "fx", ident = Fx.ident, name = Fx.name})
-                    save_favorites()
+            -- Focus automatico sul campo filtro quando il popup si apre
+            if reaper.ImGui_IsWindowAppearing(ctx) then
+                reaper.ImGui_SetKeyboardFocusHere(ctx, 0)
+            end
+            -- Larghezza fissa: con quella di default (~65% della finestra) i
+            -- checkbox sulla stessa riga non ci starebbero
+            reaper.ImGui_SetNextItemWidth(ctx, 100)
+            local _, filter_buf = reaper.ImGui_InputTextWithHint(ctx, "##fx_filter", "Filtra FX...", fx_filter)
+            fx_filter = filter_buf
+
+            -- Checkbox dei formati sulla stessa riga della barra di ricerca:
+            -- uno non spuntato esclude i plugin di quel formato (e della versione
+            -- instrument omonima) dalla lista
+            for _, format in ipairs({"VST", "VST3", "AU", "JS", "CLAP"}) do
+                reaper.ImGui_SameLine(ctx)
+                local pressed, v = reaper.ImGui_Checkbox(ctx, format, format_filters[format])
+                if pressed then
+                    format_filters[format] = v
+                    save_format_filters()
                 end
+            end
+
+            -- Lista in una child window con altezza fissa: scorre internamente
+            -- invece di far gonfiare il popup con tutti gli FX
+            if reaper.ImGui_BeginChild(ctx, "##fx_list", 0, 300) then
+                local found = false
+                for _, Fx in ipairs(fx_list) do
+                    if fx_visible(Fx) and (fx_filter == "" or Fx.name:lower():find(fx_filter:lower(), 1, true)) then
+                        found = true
+                        if reaper.ImGui_Selectable(ctx, Fx.name) then
+                            table.insert(favorites, {type = "fx", ident = Fx.ident, name = Fx.name})
+                            save_favorites()
+                        end
+                    end
+                end
+                if not found then
+                    reaper.ImGui_Text(ctx, "Nessun FX trovato")
+                end
+                reaper.ImGui_EndChild(ctx)
             end
 
             if reaper.ImGui_MenuItem(ctx, "Annulla") then
@@ -533,6 +634,7 @@ function main_loop()
 end
 
 -- Start
+load_format_filters()
 SetButtonState(1)
 main_loop()
 reaper.atexit(onExit)
