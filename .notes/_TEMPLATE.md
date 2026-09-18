@@ -27,23 +27,35 @@ WRITING RULES
 
   A section that stays empty for months is this filter working, not failing.
 
-- "Where we left off" answers one question: if a new session picked this work up right
-  now, what would it need to know? So it carries what is NOT done as much as what is, and
-  what the work is waiting on. It is rewritten whole — never added to — at the same moment
-  the work would be reported as done.
+- "Where we left off" is state, not a log. It answers one question: if a new session
+  picked this work up right now, what would it need to know? So:
 
-- The `updated:` line records the commit AND the state of the working tree. A note
-  pointing at a commit that does not contain the code it describes is worse than no note.
+      Done         only what THIS session changed. Earlier work is in the file and in
+                   git history — it does not belong here. Rewriting this section means
+                   deleting the previous Done lines, not adding one below them.
+      Not done     asked for and not delivered, with why.
+      Waiting on   what is still open: a check in REAPER, a decision, an answer. An
+                   older change still awaiting its check moves here as one short line —
+                   it does not stay behind as a Done bullet.
+
+  It is rewritten whole at the same moment the work would be reported as done. If the
+  section is longer after a session than before, it was appended to.
+
+- `updated:` is the date and nothing else. **Git does not belong in this file**: which
+  commit contains what is a repository question, and `git log -- <this note>` answers it
+  better than any hand-written field. Never record a commit hash, a branch, a working-tree
+  state, or "still needs committing" — none of it is about the work on this script, and
+  all of it is stale the moment it is written.
 
 - "Wanted" belongs to the user. Do not add to it, do not reword, reorder, split, merge or
   "clarify" an entry, and do not delete one because it looks obsolete — a line you did not
-  write is not yours to interpret. The only permitted edit is removing an entry in the
-  same pass that implements it, renumbering what remains so the list stays 1..n. A number
-  is therefore a pointer to the list **as just read**, not a lasting name: before acting on
-  "do number 3", re-read this section in the same turn rather than trusting a listing from
-  earlier in the conversation. What the implementation still needs — a run in REAPER, a
-  decision — goes in "Where we left off", not here. If an entry is unclear, ask; do not
-  guess it into something else.
+  write is not yours to interpret. The one permitted edit is **removing an entry in the
+  same pass that implements it**, renumbering what remains so the list stays 1..n; leaving
+  an implemented entry in place is the failure this section has. A number is a pointer to
+  the list as just read, not a lasting name: before acting on "do number 3", re-read this
+  section in the same turn rather than trusting a listing from earlier in the conversation.
+  What the implementation still needs — a check in REAPER, a decision — goes in "Where we
+  left off". If an entry is unclear, ask; do not guess it into something else.
 
 - Do not copy these rules into the note. The two lines in the skeleton are enough; this
   file is the single place they live.
@@ -63,7 +75,7 @@ WRITING RULES
 
 ## Where we left off
 
-updated: YYYY-MM-DD · commit <sha> · tree: <clean | modified: path, path>
+updated: YYYY-MM-DD
 
 - Done:
 - Not done:

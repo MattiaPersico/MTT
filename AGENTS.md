@@ -51,12 +51,14 @@ thread, and do not restate its rules anywhere else.
   code; leave "Ruled out" and "Wanted" empty: you were not there for the first, and the
   second is not yours to write.
 - **When the work would be reported as done, rewrite "Where we left off" in full**, in that
-  same reply — not a turn later. Run `git status --short` and `git rev-parse --short HEAD`
-  first, so the `updated:` line states the tree as it really is.
+  same reply — not a turn later. Rewriting means the previous Done lines are gone, not
+  pushed down: anything still open moves to "Waiting on". No git state goes in the note —
+  `updated:` is the date and nothing else.
 - **The note is committed with the change it describes**, in the same commit: a note that
   lands a commit later describes a tree that no longer exists.
-- **"Wanted" is the user's list.** Delete an entry when you implement it and renumber what
-  remains; never add, reword, reorder or prune one.
+- **"Wanted" is the user's list.** Implementing an entry and leaving it in the list is a
+  failed pass: delete it in the same reply and renumber what remains. Never add, reword,
+  reorder or prune one.
 
 ## Scratch
 

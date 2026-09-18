@@ -607,6 +607,9 @@ function main_loop()
                         if reaper.ImGui_Selectable(ctx, Fx.name) then
                             table.insert(favorites, {type = "fx", ident = Fx.ident, name = Fx.name})
                             save_favorites()
+                            -- Chiude il popup dopo l'aggiunta: il pulsante è stato
+                            -- salvato come favorite, la selezione non serve più.
+                            reaper.ImGui_CloseCurrentPopup(ctx)
                         end
                     end
                 end
