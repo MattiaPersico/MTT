@@ -7,16 +7,9 @@ This dependency is used to calculate the Voronoi diagram.
 For information about the MIT-licensed dependency, refer to the file voronoi.lua.
 ]]
 
--- Appunti:
--- BUG: se la traccia di controllo non c'é e si disattiva la modalitá controllo la traccia controllo viene creata (teoricamente non serve)
--- aggiungere supporto a fx dentro container
--- provare ad aggiungere modalita che lavora solo su tracce selezionate
--- sistema filtri specifico oppure...
--- ... sistema di edit snapshots
-
 
 local major_version = 0
-local minor_version = 55
+local minor_version = 56
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
