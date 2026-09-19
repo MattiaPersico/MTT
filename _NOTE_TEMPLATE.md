@@ -1,15 +1,15 @@
 <!--
-NOTE TEMPLATE — this file lives at .notes/_TEMPLATE.md and is never filled in itself.
+NOTE TEMPLATE — this file lives at the repo root as _NOTE_TEMPLATE.md and is never filled in itself.
 
 A script gets THREE note files, named after it, beside each other:
 
-    .notes/<same relative path as the script>.md          what it is, what was ruled out
-    .notes/<same relative path as the script>.state.md    where the work left off
-    .notes/<same relative path as the script>.wanted.md   the user's list
+    <same path as the script>.md          what it is, what was ruled out
+    <same path as the script>.state.md    where the work left off
+    <same path as the script>.wanted.md   the user's list
 
-  Testing/mtt_Shelf.lua  ->  .notes/Testing/mtt_Shelf.md
-                             .notes/Testing/mtt_Shelf.state.md
-                             .notes/Testing/mtt_Shelf.wanted.md
+  Testing/mtt_Shelf.lua  ->  Testing/mtt_Shelf.md
+                             Testing/mtt_Shelf.state.md
+                             Testing/mtt_Shelf.wanted.md
 
 WHY THREE FILES AND NOT THREE SECTIONS
 
@@ -95,11 +95,11 @@ RULES — <name>.wanted.md
 
 ---
 
-<!-- ============ .notes/<path>/<script>.md ============ -->
+<!-- ============ <path>/<script>.md ============ -->
 
 # <script file name>
 
-<!-- state: <script>.state.md · wanted: <script>.wanted.md · format: .notes/_TEMPLATE.md
+<!-- state: <script>.state.md · wanted: <script>.wanted.md · format: _NOTE_TEMPLATE.md
      if a note and the code disagree, the code is right and the note is fixed now. -->
 
 ## What it is
@@ -108,7 +108,7 @@ RULES — <name>.wanted.md
 
 ---
 
-<!-- ============ .notes/<path>/<script>.state.md ============ -->
+<!-- ============ <path>/<script>.state.md ============ -->
 
 # <script file name> — where we left off
 
@@ -122,7 +122,7 @@ updated: YYYY-MM-DD
 
 ---
 
-<!-- ============ .notes/<path>/<script>.wanted.md ============ -->
+<!-- ============ <path>/<script>.wanted.md ============ -->
 
 # <script file name> — wanted
 
