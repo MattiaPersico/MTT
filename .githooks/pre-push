@@ -3,8 +3,10 @@
 #
 # index.xml serves its <source> URLs from the main branch, so pushing main
 # publishes. This refuses that push when any package's declared version and
-# its entry in index.xml disagree in the commit being pushed - which is what a
-# commit made with --no-verify leaves behind.
+# its entry in index.xml disagree in the commit being pushed, or when an entry
+# lists a main script the commit no longer has (a deleted package whose entry
+# the pre-commit hook should have dropped) - which is what a commit made with
+# --no-verify leaves behind.
 #
 # Keeps the Git LFS pre-push it replaced: stdin is captured and handed on.
 
@@ -31,6 +33,10 @@ while read -r localref localsha remoteref remotesha; do
   : > "$work/errors"
   grep '^P'"$TAB" "$work/records" | while IFS="$TAB" read -r _ pkg idxver mainpath; do
     [ -n "$mainpath" ] || continue
+    if ! git cat-file -e "$localsha:$mainpath" 2>/dev/null; then
+      printf '  %s: %s is in index.xml but missing from the commit.\n' "$pkg" "$mainpath" >> "$work/errors"
+      continue
+    fi
     script=$(git show "$localsha:$mainpath" 2>/dev/null || true)
     [ -n "$script" ] || continue
     newver=$(printf '%s\n' "$script" | rp_script_version)

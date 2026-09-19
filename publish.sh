@@ -71,6 +71,10 @@ if [ -f "$LIB/reapack-common.sh" ] && [ -f "$ROOT/index.xml" ]; then
   : > "$tmp/bad"; : > "$tmp/list"
   grep '^P'"$TAB" "$tmp/records" | while IFS="$TAB" read -r _ pkg idxver mainpath; do
     [ -n "$mainpath" ] || continue
+    if ! git cat-file -e "$SOURCE:$mainpath" 2>/dev/null; then
+      printf '  %s: %s is in index.xml but missing from %s\n' "$pkg" "$mainpath" "$SOURCE" >> "$tmp/bad"
+      continue
+    fi
     sv=$(git show "$SOURCE:$mainpath" 2>/dev/null | rp_script_version) || true
     [ -n "$sv" ] || continue
     if [ "$sv" = "$idxver" ]; then

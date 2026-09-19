@@ -12,8 +12,8 @@ once per clone:
 
 | hook | what it does |
 |---|---|
-| `pre-commit` | refuses a commit on `main`; refuses a commit that changes a published package without bumping its version; otherwise syncs `<version>` in `index.xml` and stages it |
-| `pre-push` | refuses a push to `main` whose commit has a package version disagreeing with `index.xml`, then runs the LFS hook |
+| `pre-commit` | refuses a commit on `main`; refuses a commit that changes a published package without bumping its version; drops the `index.xml` entry of a package whose main script is deleted; otherwise syncs `<version>` in `index.xml` and stages it |
+| `pre-push` | refuses a push to `main` whose commit has a package version disagreeing with `index.xml`, or an entry whose main script is missing from the commit, then runs the LFS hook |
 
 Both derive everything from `index.xml`: each `<reapack>`, its version, and the
 repo paths in its `<source>` URLs. Adding a package to `index.xml` is enough —
