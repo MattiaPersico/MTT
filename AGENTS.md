@@ -1,29 +1,34 @@
 # MTT — REAPER scripts published through ReaPack
 
-## Branches and publishing
-- Work and commit on `DEV`, always.
-- `main` is what ReaPack users download (`index.xml` serves `raw.githubusercontent.com/MattiaPersico/MTT/main/...`). It moves only through `./publish.sh`: push DEV, move main onto it, push main (`--dry-run` shows the steps, `--no-ff` = one merge commit per release). Never do the sequence by hand.
-
-## Versions
-- A published script declares `local major_version` / `local minor_version` near the top. The `pre-commit` hook copies them into `index.xml` (`<version name="...">`): never edit that number by hand.
-- A change to a published script bumps its `minor_version` in the same commit: ReaPack offers an update only when the number changes.
-
-## Hooks
-`.githooks/` (enable per clone: `git config core.hooksPath .githooks`). `pre-commit` refuses a commit on `main` and a changed published script without a bump; `pre-push` refuses a push to `main` whose versions disagree with `index.xml`. Never `--no-verify`.
+## Branches, versions, hooks
+- Work and commit on `DEV`, always. `main` is what ReaPack users download (through `index.xml`); it moves only through `./publish.sh`, never by hand.
+- Published script = it declares `local major_version` / `local minor_version` near the top. A change to it bumps `minor_version` in the same commit: ReaPack offers an update only when the number changes. The `pre-commit` hook copies the versions into `index.xml`: never edit that number by hand.
+- `.githooks/` (per clone: `git config core.hooksPath .githooks`) refuse a commit on `main`, a changed published script without a bump, and a push to `main` whose versions disagree with `index.xml`. Never `--no-verify`.
 
 ## Script notes
-Every script has three notes beside it — same folder, same base name, `.lua` swapped for the suffix. `Testing/mtt_Shelf/mtt_Shelf.lua` →
+Every script has three notes in its folder:
 
-    Testing/mtt_Shelf/mtt_Shelf.md            what it is + ruled out
-    Testing/mtt_Shelf/mtt_Shelf.state.md      where the work left off
-    Testing/mtt_Shelf/mtt_Shelf.wanted.md     the user's list
+    <dir>/<name>.lua          e.g. Testing/mtt_Shelf/mtt_Shelf.lua
+    <dir>/<name>.md           what it is + ruled out
+    <dir>/<name>.state.md     where the work left off
+    <dir>/<name>.wanted.md    the user's list
 
-Three files because each is replaced with `write_file`, whole, in one call: nothing to locate or match, so a rewrite cannot degrade into an append. Format and rules: `_NOTE_TEMPLATE.md` at the repo root — read it before your first note write in a thread. All three in English, impersonal third person.
-- Before changing a script, read its `.state.md` and `.wanted.md` (and its `.md` if unfamiliar). A question about a script is not a change.
-- A failed read is not proof the notes are missing: list the script's folder before concluding it. Really missing → create all three from the template in the same pass, filling "What it is" from the code and leaving "Ruled out" and the wanted list empty.
-- Work done → in the same reply, `write_file` its whole `.state.md`, never `edit_file` it: Done = only what this session changed (the previous lines go), Not done = asked for and not delivered + why, Waiting on = still open, including an older change whose check has not come back. `updated:` = the date only, no git state.
-- Its `.wanted.md` is the user's menu, not a queue: do only the entry asked for; when you implement one, remove it and renumber, rewriting that file whole. Never add, reword, reorder or prune an entry. Re-read it in the same turn before acting on "number 3".
+English, impersonal third person ("the user"; never "I" or a name). A note that disagrees with the code is wrong: fix the note.
+- Before changing a script, read its `.state.md` and `.wanted.md` (its `.md` too if unfamiliar). A question about a script is not a change.
+- A failed read is not proof a note is missing: list the folder first. Really missing → create all three from `_NOTE_TEMPLATE.md` (repo root) in the same pass: "What it is" from the code, the rest empty.
+- Work done → before replying, rewrite the whole `.state.md` with `write_file`, never `edit_file` (a partial edit ends up appending):
+
+      # <name> — where we left off
+
+      updated: YYYY-MM-DD
+      - Done:
+      - Not done:
+      - Waiting on:
+
+  Done = only what this session changed (older lines go). Not done = asked for, not delivered, and why. Waiting on = still open, incl. an older change whose check has not come back. `updated:` = the date only: no commit, branch or "to commit".
+- `.wanted.md` is the user's menu, not a queue: do only the entry asked for. Implemented → remove it and renumber, rewriting the file whole. Never add, reword, reorder or prune an entry. Re-read it in the same turn before acting on "number 3".
+- `.md`: "What it is" = purpose in one short paragraph, not implementation. "Ruled out" = only a wrong diagnosis with no code line to comment on, one line each: `- YYYY-MM-DD — <symptom>: NOT <wrong cause>. <real cause>`. Any other decision is a comment on its code line.
 - Commit the notes in the same commit as the change they describe.
 
 ## Scratch
-`.scratch/` (gitignored, never committed) is only for running pure-Lua logic outside REAPER (see `reaper-lua`). Nothing in it is part of the work.
+`.scratch/` (gitignored, never committed) is only for running pure-Lua logic outside REAPER (see `reaper-lua`). Nothing in it is part of the work; never clean it up.
