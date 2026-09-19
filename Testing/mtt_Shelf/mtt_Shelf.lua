@@ -265,6 +265,18 @@ function fx_visible(fx)
     return format_filters[format] ~= false
 end
 
+-- Ricerca testuale che ignora la punteggiatura: "Pro Q" trova "Pro-Q 3".
+-- Entrambi i lati vengono ridotti a sole lettere/cifre e poi confrontati a sottostringa;
+-- un filtro vuoto (o fatto solo di punteggiatura) mostra tutto.
+function fx_matches(fx, filter)
+    local f = (filter:lower():gsub("[^%a%d]", ""))
+    if f == "" then
+        return true
+    end
+    local n = (fx.name:lower():gsub("[^%a%d]", ""))
+    return n:find(f, 1, true) ~= nil
+end
+
 -- Stratta il prefisso di formato dall'estetica ("VST3: Foo" -> "Foo"), inclusa la
 -- versione instrument ("VSTi: " -> "Foo"), e il suffisso "(manufacturer)" alla fine
 -- ("ReaComp (REAPER)" -> "ReaComp"): i bottone degli fx mostrano il nome del plugin,
@@ -639,7 +651,7 @@ function main_loop()
         -- altezza resta in adattamento automatico (0 sull'asse y).
         local max_name_w = 0
         for _, Fx in ipairs(fx_list) do
-            if fx_visible(Fx) and (fx_filter == "" or Fx.name:lower():find(fx_filter:lower(), 1, true)) then
+            if fx_visible(Fx) and fx_matches(Fx, fx_filter) then
                 local w = reaper.ImGui_CalcTextSize(ctx, Fx.name)
                 if w > max_name_w then max_name_w = w end
             end
@@ -674,7 +686,7 @@ function main_loop()
             if reaper.ImGui_BeginChild(ctx, "##fx_list", 0, 300) then
                 local found = false
                 for _, Fx in ipairs(fx_list) do
-                    if fx_visible(Fx) and (fx_filter == "" or Fx.name:lower():find(fx_filter:lower(), 1, true)) then
+                    if fx_visible(Fx) and fx_matches(Fx, fx_filter) then
                         found = true
                         if reaper.ImGui_Selectable(ctx, Fx.name) then
                             if not has_favorite(favorites, "fx", Fx.ident) then
