@@ -12,11 +12,11 @@
 `.githooks/` (enable per clone: `git config core.hooksPath .githooks`). `pre-commit` refuses a commit on `main` and a changed published script without a bump; `pre-push` refuses a push to `main` whose versions disagree with `index.xml`. Never `--no-verify`.
 
 ## Script notes
-Every script has three notes beside it — same folder, same base name, `.lua` swapped for the suffix. `Testing/mtt_Shelf.lua` →
+Every script has three notes beside it — same folder, same base name, `.lua` swapped for the suffix. `Testing/mtt_Shelf/mtt_Shelf.lua` →
 
-    Testing/mtt_Shelf.md          what it is + ruled out
-    Testing/mtt_Shelf.state.md    where the work left off
-    Testing/mtt_Shelf.wanted.md   the user's list
+    Testing/mtt_Shelf/mtt_Shelf.md            what it is + ruled out
+    Testing/mtt_Shelf/mtt_Shelf.state.md      where the work left off
+    Testing/mtt_Shelf/mtt_Shelf.wanted.md     the user's list
 
 Three files because each is replaced with `write_file`, whole, in one call: nothing to locate or match, so a rewrite cannot degrade into an append. Format and rules: `_NOTE_TEMPLATE.md` at the repo root — read it before your first note write in a thread. All three in English, impersonal third person.
 - Before changing a script, read its `.state.md` and `.wanted.md` (and its `.md` if unfamiliar). A question about a script is not a change.

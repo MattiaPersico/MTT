@@ -7,9 +7,9 @@ A script gets THREE note files, named after it, beside each other:
     <same path as the script>.state.md    where the work left off
     <same path as the script>.wanted.md   the user's list
 
-  Testing/mtt_Shelf.lua  ->  Testing/mtt_Shelf.md
-                             Testing/mtt_Shelf.state.md
-                             Testing/mtt_Shelf.wanted.md
+  Testing/mtt_Shelf/mtt_Shelf.lua  ->  Testing/mtt_Shelf/mtt_Shelf.md
+                                      Testing/mtt_Shelf/mtt_Shelf.state.md
+                                      Testing/mtt_Shelf/mtt_Shelf.wanted.md
 
 WHY THREE FILES AND NOT THREE SECTIONS
 
