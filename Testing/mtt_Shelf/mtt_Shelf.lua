@@ -529,9 +529,6 @@ function render_favorite_button(i)
             table.insert(hasToBeRemoved, i)
             else
                 if fav.type == "action" and fav.id and fav.id > 0 then
-                    -- Main_OnCommand esegue un action ReaScript nel contesto del chiamante:
-                    -- se lo script errori a runtime, l'errore propaga nel callback defer di main_loop
-                    -- e muore la shelf. Il pcall lo contiene qui.
                     --reaper.ShowConsoleMsg("[MTT_Shelf] Action clicked: type='" .. fav.type .. "', id=" .. fav.id .. ", name='" .. fav.name .. "'\n")
                     reaper.defer(function() reaper.Main_OnCommand(fav.id, -1) end)
                 elseif fav.type == "fx" and fav.ident then
