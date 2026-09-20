@@ -1,7 +1,10 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-19
+updated: 2026-09-20
 - Done:
-  - The FX popup text search is punctuation- and space-insensitive on both sides (new `fx_matches`): "Pro Q" finds "Pro-Q 3", and "Rea Comp" finds "ReaComp"; a filter with no letters or digits (e.g. "-" or empty) shows everything.
+  - Recorded the rule the user asked for in mtt_Shelf.md (Ruled out): there is currently no guarantee that a favorite action that does not work, crashes or is no longer at its path auto-closes the shelf; there is no current solution.
+  - Closed the open diagnostic `reaper.ShowConsoleMsg` in the action dispatch; the other two in the file were already commented out.
 - Not done:
+  - A defined, reliable behavior of the shelf when a favorite action fails, crashes or is missing from its path: no current solution, the dispatch stays as-is.
 - Waiting on:
+  - None.

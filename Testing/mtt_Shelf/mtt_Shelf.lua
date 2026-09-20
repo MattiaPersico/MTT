@@ -24,6 +24,14 @@ local format_filters = {VST = true, VST3 = true, AU = true, JS = true, CLAP = tr
 -- dall'estetica del bottone (strip_fx_prefix).
 local FORMAT_PREFIXES = {VST = true, VST3 = true, AU = true, JS = true, CLAP = true}
 
+-- Dimensioni del layout a scaffale: altezza fissa dei bottoni favorite (la
+-- larghezza la definisce il testo) e distanza orizzontale tra due bottoni
+-- della stessa riga, passata esplicitamente a SameLine così il calcolo del
+-- wrapping si basa su un valore noto.
+local FAV_BTN_H = 34
+local FAV_BTN_PAD_X = 10
+local ITEM_SP_X = 8
+
 function LoadAllFX()
     local raw_fx = {}
     local idx = 0
@@ -421,6 +429,7 @@ function update_action_selection_state()
 
         if not has_favorite(favorites, "action", pending_action_id) then
             table.insert(favorites, {type = "action", id = pending_action_id, name = action_name})
+            --reaper.ShowConsoleMsg("[MTT_Shelf] Nuovo Action Favorite: type='action', id=" .. pending_action_id .. ", name='" .. action_name .. "'\n")
         end
 
         reaper.PromptForAction(-1, 0, 0)
@@ -440,6 +449,17 @@ end
 -- UI: Render singolo bottone favorite
 -- ==========================================
 
+-- Nome visualizzato dal bottone: prefisso di formato (FX) o di sezione
+-- (action) già strappati
+function favorite_display_name(fav)
+    if fav.type == "fx" then
+        return strip_fx_prefix(fav.name)
+    elseif fav.type == "action" then
+        return strip_action_prefix(fav.name)
+    end
+    return fav.name
+end
+
 function render_favorite_button(i)
     local fav = favorites[i]
 
@@ -447,12 +467,7 @@ function render_favorite_button(i)
         return
     end
 
-    local display_name = fav.name
-    if fav.type == "fx" then
-        display_name = strip_fx_prefix(fav.name)
-    elseif fav.type == "action" then
-        display_name = strip_action_prefix(fav.name)
-    end
+    local display_name = favorite_display_name(fav)
 
     local btn_id = string.format("%s##fav_btn_%d", display_name, i)
 
@@ -475,8 +490,8 @@ function render_favorite_button(i)
         reaper.ImGui_Button(
         ctx,
         btn_id,
-        reaper.ImGui_CalcTextSize(ctx, display_name) + 10,
-        reaper.ImGui_GetWindowHeight(ctx)
+        reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X,
+        FAV_BTN_H
     )
 
     -- Pop dei colori spinti sopra (3 volte: Button, Hovered, Active)
@@ -512,13 +527,17 @@ function render_favorite_button(i)
 
         if is_alt then
             table.insert(hasToBeRemoved, i)
-        else
-            if fav.type == "action" and fav.id and fav.id > 0 then
-                reaper.Main_OnCommand(fav.id, -1)
-            elseif fav.type == "fx" and fav.ident then
-            -- Nessuna azione al click: l'FX si aggiunge solo tramite drag-and-drop
+            else
+                if fav.type == "action" and fav.id and fav.id > 0 then
+                    -- Main_OnCommand esegue un action ReaScript nel contesto del chiamante:
+                    -- se lo script errori a runtime, l'errore propaga nel callback defer di main_loop
+                    -- e muore la shelf. Il pcall lo contiene qui.
+                    --reaper.ShowConsoleMsg("[MTT_Shelf] Action clicked: type='" .. fav.type .. "', id=" .. fav.id .. ", name='" .. fav.name .. "'\n")
+                    reaper.defer(function() reaper.Main_OnCommand(fav.id, -1) end)
+                elseif fav.type == "fx" and fav.ident then
+                -- Nessuna azione al click: l'FX si aggiunge solo tramite drag-and-drop
+                end
             end
-        end
     end
 end
 
@@ -536,18 +555,44 @@ function onExit()
     SetButtonState(0)
 end
 
+-- Barra di controllo fissa in cima alla finestra: due bottoni compatti per
+-- aggiungere favorite, tenuti separati dai bottoni trascinabili del scaffale.
 function draw_action_fx_buttons()
-    if reaper.ImGui_Button(ctx, "+Action", 60, reaper.ImGui_GetWindowHeight(ctx)) then
+    if reaper.ImGui_Button(ctx, "+Action") then
         add_favorite_action()
     end
 
-    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
 
-    -- Non chiamare OpenPopup qui: siamo dentro un child window.
-    -- Setta il flag; l'apertura avviene a livello window (vedi main_loop).
-    if reaper.ImGui_Button(ctx, "+Fx", 60, reaper.ImGui_GetWindowHeight(ctx)) then
+    -- Setta il flag; l'apertura avviene più avanti in main_loop, a livello
+    -- window (ID stack coerente con BeginPopup).
+    if reaper.ImGui_Button(ctx, "+Fx") then
         open_fx_popup = true
         fx_filter = ""
+    end
+end
+
+-- I favorite scorrono su righe che si riempiono fino alla larghezza
+-- disponibile e poi vanno a capo; quando le righe non entrano più, la child
+-- (docked) fa apparire lo scrollbar verticale e quello orizzontale copre i
+-- nomi troppo lunghi.
+function render_favorites_flow()
+    local limit = reaper.ImGui_GetWindowWidth(ctx) - ITEM_SP_X
+    local row_used = 0
+
+    for i = 1, #favorites do
+        local w = reaper.ImGui_CalcTextSize(ctx, favorite_display_name(favorites[i])) + FAV_BTN_PAD_X
+
+        if row_used > 0 and row_used + w > limit then
+            row_used = 0
+        else
+            if row_used > 0 then
+                reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
+            end
+        end
+
+        render_favorite_button(i)
+        row_used = row_used + w + ITEM_SP_X
     end
 end
 
@@ -573,43 +618,26 @@ function main_loop()
     if visible then
         hasToBeRemoved = {}
 
-        local total_items = #favorites + 1
+        draw_action_fx_buttons()
 
         if reaper.ImGui_IsWindowDocked(ctx) then
-            local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
-
-            -- Top child: odd indices (1, 3, ...)
-            reaper.ImGui_BeginChild(ctx, "##top_row", 0, win_h * 0.4)
-            for i = 1, #favorites do
-                if i % 2 ~= 0 then
-                    reaper.ImGui_SameLine(ctx)
-                    render_favorite_button(i)
-                end
+            -- La child riempie il resto della finestra; gli scrollbar
+            -- appaiono solo quando le righe di favorite non ci stanno
+            if
+                reaper.ImGui_BeginChild(
+                ctx,
+                "##shelf",
+                0,
+                0,
+                0,
+                reaper.ImGui_WindowFlags_HorizontalScrollbar()
+            )
+            then
+                render_favorites_flow()
+                reaper.ImGui_EndChild(ctx)
             end
-            if total_items % 2 ~= 0 then
-                reaper.ImGui_SameLine(ctx)
-                draw_action_fx_buttons()
-            end
-            reaper.ImGui_EndChild(ctx)
-
-            -- Bottom child: even indices (2, 4, ...)
-            reaper.ImGui_BeginChild(ctx, "##bottom_row", 0, win_h * 0.4)
-            for i = 1, #favorites do
-                if i % 2 == 0 then
-                    reaper.ImGui_SameLine(ctx)
-                    render_favorite_button(i)
-                end
-            end
-            if total_items % 2 == 0 then
-                reaper.ImGui_SameLine(ctx)
-                draw_action_fx_buttons()
-            end
-            reaper.ImGui_EndChild(ctx)
         else
-            for i = 1, #favorites do
-                render_favorite_button(i)
-            end
-            draw_action_fx_buttons()
+            render_favorites_flow()
         end
 
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
@@ -619,7 +647,7 @@ function main_loop()
 
         -- Gestione del drop FX sulla finestra
         if ImGui.IsMouseReleased(ctx, 0) and isDraggingFx == true then
-            
+
             isDraggingFx = false
 
             local payload = draggedFx.ident
