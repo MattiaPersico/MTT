@@ -24,6 +24,15 @@ local format_filters = {VST = true, VST3 = true, AU = true, JS = true, CLAP = tr
 -- dall'estetica del bottone (strip_fx_prefix).
 local FORMAT_PREFIXES = {VST = true, VST3 = true, AU = true, JS = true, CLAP = true}
 
+-- Preset: istantanee nominate dello scaffale (la lista favorites), conservate in un
+-- unico file nella resource path di REAPER, condiviso tra tutti i progetti: permettono
+-- di caricare un setup premade in un progetto con scaffale vuoto.
+local PRESETS_FILENAME = ".mtt_shelf_presets.txt"
+local presets = {}            -- nome -> lista di favorite
+local preset_names = {}       -- nomi ordinati, per l'elenco in UI
+local preset_name_input = ""  -- campo "salva come"
+local open_preset_popup = false
+
 -- Dimensioni del layout a scaffale: altezza fissa dei bottoni favorite (la
 -- larghezza la definisce il testo) e distanza orizzontale tra due bottoni
 -- della stessa riga, passata esplicitamente a SameLine così il calcolo del
@@ -257,6 +266,128 @@ function save_format_filters()
         file:write(string.format("%s|%d\n", format, format_filters[format] and 1 or 0))
     end
     file:close()
+end
+
+-- Preset: un file globale in resource path, condiviso tra tutti i progetti.
+-- Formato: una riga "P|<nome>" apre un blocco, seguito dalle favorite in formato
+-- identico a quello del file dei favorites (A|id||nome / F||ident|nome).
+function preset_path()
+    return reaper.GetResourcePath() .. "/" .. PRESETS_FILENAME
+end
+
+function load_presets()
+    presets = {}
+    preset_names = {}
+
+    local file = io.open(preset_path(), "r")
+    if not file then
+        return
+    end
+
+    local content = file:read("*a")
+    file:close()
+
+    local current = nil
+    for line in content:gmatch("[^\n\r]+") do
+        if line == "" then
+            goto continue
+        end
+
+        -- Apertura di un blocco preset
+        local name = line:match("^P|(.+)$")
+        if name then
+            current = name
+            presets[current] = {}
+            table.insert(preset_names, current)
+            goto continue
+        end
+
+        -- Favorite del preset corrente (stesso formato del file dei favorites)
+        if current then
+            local fav_type, part2, part3, name_val = line:match("^([AF])|([^|]*)|([^|]*)|(.+)$")
+            if fav_type == "A" then
+                local id_val = tonumber(part2)
+                if id_val and id_val > 0 then
+                    table.insert(presets[current], {type = "action", id = id_val, name = name_val})
+                end
+            elseif fav_type == "F" then
+                local fx_ident = part3
+                if fx_ident and fx_ident ~= "" then
+                    table.insert(presets[current], {type = "fx", ident = fx_ident, name = name_val})
+                end
+            end
+        end
+
+        ::continue::
+    end
+end
+
+function save_presets_file()
+    local file = io.open(preset_path(), "w")
+    if not file then
+        return
+    end
+
+    for _, name in ipairs(preset_names) do
+        file:write(string.format("P|%s\n", name))
+        for _, fav in ipairs(presets[name]) do
+            if fav.type == "action" and fav.id and fav.id > 0 and fav.name then
+                file:write(string.format("A|%d||%s\n", fav.id, fav.name))
+            elseif fav.type == "fx" and fav.ident and fav.name then
+                file:write(string.format("F||%s|%s\n", fav.ident, fav.name))
+            end
+        end
+    end
+    file:close()
+end
+
+function has_preset(name)
+    return presets[name] ~= nil
+end
+
+-- Salva lo scaffale corrente come istantanea sotto un nome (copia profonda:
+-- le modifiche successive ai favorite non alterano il preset già salvato).
+function save_current_as_preset(name)
+    if name == "" then
+        return
+    end
+
+    local copy = {}
+    for _, fav in ipairs(favorites) do
+        table.insert(copy, {type = fav.type, id = fav.id, ident = fav.ident, name = fav.name})
+    end
+
+    local is_new = not has_preset(name)
+    presets[name] = copy
+    if is_new then
+        table.insert(preset_names, name)
+    end
+    save_presets_file()
+end
+
+-- Carica un preset nello scaffale corrente (sostituendo i favorite) e lo
+-- consolida nel file del progetto: il progetto da ora mantiene quel setup.
+function load_preset(name)
+    local p = presets[name]
+    if not p then
+        return
+    end
+
+    favorites = {}
+    for _, fav in ipairs(p) do
+        table.insert(favorites, {type = fav.type, id = fav.id, ident = fav.ident, name = fav.name})
+    end
+    save_favorites()
+end
+
+function delete_preset(name)
+    presets[name] = nil
+    for i = #preset_names, 1, -1 do
+        if preset_names[i] == name then
+            table.remove(preset_names, i)
+        end
+    end
+    save_presets_file()
 end
 
 -- Il formato è il prefisso all'inizio del nome ("AU: kHs Gate"); un prefisso
@@ -567,6 +698,14 @@ function draw_action_fx_buttons()
         open_fx_popup = true
         fx_filter = ""
     end
+
+    reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
+
+    -- Apre il menu preset (flag consumato in main_loop, a livello window)
+    if reaper.ImGui_Button(ctx, "+Preset") then
+        open_preset_popup = true
+        preset_name_input = ""
+    end
 end
 
 -- I favorite scorrono su righe che si riempiono fino alla larghezza
@@ -737,6 +876,64 @@ function main_loop()
             reaper.ImGui_EndPopup(ctx)
         end
 
+        -- Menu preset: salva lo scaffale come istantanea nominata, elenca i preset
+        -- (click = carica, x = elimina). Aperto a livello window come il popup FX.
+        if open_preset_popup then
+            reaper.ImGui_OpenPopup(ctx, "##PresetPopup")
+            open_preset_popup = false
+        end
+
+        reaper.ImGui_SetNextWindowSize(ctx, 300, 0, reaper.ImGui_Cond_Appearing())
+
+        if reaper.ImGui_BeginPopup(ctx, "##PresetPopup") then
+            if reaper.ImGui_IsWindowAppearing(ctx) then
+                reaper.ImGui_SetKeyboardFocusHere(ctx, 0)
+            end
+
+            reaper.ImGui_SetNextItemWidth(ctx, 170)
+            local _, name_buf = reaper.ImGui_InputTextWithHint(ctx, "##preset_name", "Nome preset...", preset_name_input)
+            preset_name_input = name_buf
+
+            reaper.ImGui_SameLine(ctx)
+            if reaper.ImGui_Button(ctx, "Salva") then
+                save_current_as_preset(preset_name_input)
+                preset_name_input = ""
+            end
+
+            reaper.ImGui_Separator(ctx)
+
+            if reaper.ImGui_BeginChild(ctx, "##preset_list", 0, 220) then
+                local names = {}
+                for _, name in ipairs(preset_names) do
+                    table.insert(names, name)
+                end
+
+                if #names == 0 then
+                    reaper.ImGui_Text(ctx, "Nessun preset salvato")
+                end
+
+                for _, name in ipairs(names) do
+                    if reaper.ImGui_Selectable(ctx, name) then
+                        load_preset(name)
+                        reaper.ImGui_CloseCurrentPopup(ctx)
+                    end
+
+                    reaper.ImGui_SameLine(ctx)
+                    if reaper.ImGui_Button(ctx, "x##preset_del_" .. name) then
+                        delete_preset(name)
+                    end
+                end
+
+                reaper.ImGui_EndChild(ctx)
+            end
+
+            if reaper.ImGui_MenuItem(ctx, "Annulla") then
+                reaper.ImGui_CloseCurrentPopup(ctx)
+            end
+
+            reaper.ImGui_EndPopup(ctx)
+        end
+
         reaper.ImGui_End(ctx)
     end
 
@@ -749,6 +946,7 @@ end
 
 -- Start
 load_format_filters()
+load_presets()
 SetButtonState(1)
 main_loop()
 reaper.atexit(onExit)

@@ -1,10 +1,9 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-20
+updated: 2026-09-21
 - Done:
-  - Recorded the rule the user asked for in mtt_Shelf.md (Ruled out): there is currently no guarantee that a favorite action that does not work, crashes or is no longer at its path auto-closes the shelf; there is no current solution.
-  - Closed the open diagnostic `reaper.ShowConsoleMsg` in the action dispatch; the other two in the file were already commented out.
+  - Preset system (was wanted 1): a `+Preset` popup in the shelf window saves the current favorites list as a named snapshot into a single global file `.mtt_shelf_presets.txt` in REAPER's resource path, shared across all projects so a project with an empty shelf can load a premade setup; the popup lists saved presets, click loads one (replaces the favorites and consolidates them into the project file) and `x` deletes one.
 - Not done:
-  - A defined, reliable behavior of the shelf when a favorite action fails, crashes or is missing from its path: no current solution, the dispatch stays as-is.
-- Waiting on:
   - None.
+- Waiting on:
+  - The in-REAPER run: save a preset from a shelf with favorites, load it in a project with an empty shelf, delete one with `x`; the list is re-read only when the script restarts.
