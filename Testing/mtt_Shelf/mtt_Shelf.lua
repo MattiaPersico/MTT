@@ -34,12 +34,16 @@ local preset_name_input = ""  -- campo "salva come"
 local open_preset_popup = false
 
 -- Dimensioni del layout a scaffale: altezza fissa dei bottoni favorite (la
--- larghezza la definisce il testo) e distanza orizzontale tra due bottoni
--- della stessa riga, passata esplicitamente a SameLine così il calcolo del
--- wrapping si basa su un valore noto.
+-- larghezza la definisce il testo), distanza orizzontale tra due bottoni della
+-- stessa riga e effetto "rilievo" all'hover: font a 1.1x e 4px di altezza in più.
+-- Ogni favorite occupa sempre uno slot delle dimensioni hover: il bottone non
+-- hoverato è disegnato centrato dentro lo slot, così la crescita all'hover è
+-- centrale e i bottoni alla destra non si spostano.
 local FAV_BTN_H = 28
 local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 8
+local FAV_HOVER_FONT = 1.1
+local FAV_HOVER_H = 4
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 
@@ -593,7 +597,7 @@ function favorite_display_name(fav)
     return fav.name
 end
 
-function render_favorite_button(i)
+function render_favorite_button(i, btn_w, btn_h)
     local fav = favorites[i]
 
     if not fav then
@@ -621,22 +625,19 @@ function render_favorite_button(i)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
     end
 
-    -- Se questo è il button hoverato nell'frame precedente: bordo 3px, font e
-    -- dimensioni leggermente ingrandite per dare un effetto "rilievo".
+    -- Se questo è il button hoverato nell'frame precedente: bordo 3px e font
+    -- ingrandito per dare un effetto "rilievo" (le dimensioni arrivano da
+    -- render_favorites_flow, che centra il bottone nello slot).
     local is_hover = (i == hovered_favorite_idx)
     local extra_border = is_hover and 2 or 0  -- 1 base + 2 = 3
     if is_hover then
         local fs = reaper.ImGui_GetFontSize(ctx)
-        reaper.ImGui_PushFont(ctx, nil, fs * 1.1)
+        reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
     end
     if extra_border > 0 then
         reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1 + extra_border)
     end
 
-    -- La larghezza è misurata col font eventualmente ingrandito: il bottone
-    -- cresce insieme alla scritta.
-    local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
-    local btn_h = FAV_BTN_H + (is_hover and 4 or 0)
     local clicked =
         reaper.ImGui_Button(
         ctx,
@@ -736,29 +737,63 @@ end
 -- disponibile e poi vanno a capo; quando le righe non entrano più, la child
 -- (docked) fa apparire lo scrollbar verticale e quello orizzontale copre i
 -- nomi troppo lunghi.
+-- Ogni favorite occupa uno slot fisso delle dimensioni hover: il bottone non
+-- hoverato è centrato dentro lo slot, così all'hover cresce in posto e i
+-- bottoni alla destra non si spostano; le righe non si ricollocano mai perché
+-- il wrapping usa sempre la dimensione hover.
 function render_favorites_flow()
     local limit = reaper.ImGui_GetWindowWidth(ctx) - ITEM_SP_X
-    local row_used = 0
+    local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
+
+    local row_origin_x, row_origin_y = reaper.ImGui_GetCursorPos(ctx)
+    local row_used = 0   -- offset orizzontale del prossimo slot da row_origin_x
+    local content_max_x = 0
 
     for i = 1, #favorites do
-        local w = reaper.ImGui_CalcTextSize(ctx, favorite_display_name(favorites[i])) + FAV_BTN_PAD_X
+        local display_name = favorite_display_name(favorites[i])
+        local is_hover = (i == hovered_favorite_idx)
 
-        -- Il button hoverato è disegnato più grande: riservo la stessa crescita
-        -- nel wrapping così il bottone accanto non si sovrappone.
-        if i == hovered_favorite_idx then
-            w = w * 1.1
+        -- Slot: le dimensioni del bottone hover, costanti per questa favorite.
+        reaper.ImGui_PushFont(ctx, nil, reaper.ImGui_GetFontSize(ctx) * FAV_HOVER_FONT)
+        local slot_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
+        reaper.ImGui_PopFont(ctx)
+        local slot_h = FAV_BTN_H + FAV_HOVER_H
+
+        local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
+        local btn_h = FAV_BTN_H
+        if is_hover then
+            btn_w, btn_h = slot_w, slot_h
         end
 
-        if row_used > 0 and row_used + w > limit then
+        if row_used > 0 and row_used + slot_w > limit then
+            row_origin_y = row_origin_y + slot_h + row_sp_y
             row_used = 0
-        else
-            if row_used > 0 then
-                reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
-            end
         end
 
-        render_favorite_button(i)
-        row_used = row_used + w + ITEM_SP_X
+        local slot_x = row_origin_x + row_used
+
+        -- Centera il bottone nello slot (compensa la crescita dell'hover su
+        -- entrambi gli assi: padding verticale e orizzontale attorno al bottone).
+        reaper.ImGui_SetCursorPos(ctx, slot_x + (slot_w - btn_w) / 2, row_origin_y + (slot_h - btn_h) / 2)
+
+        render_favorite_button(i, btn_w, btn_h)
+
+        row_used = row_used + slot_w + ITEM_SP_X
+        content_max_x = math.max(content_max_x, slot_x + slot_w)
+    end
+
+    if #favorites > 0 then
+        -- Il cursore finisce sul max del contenuto: gli scrollbar della child e
+        -- l'altezza automatica (undocked) si dimensionano a tutti gli slot, non
+        -- all'ultima riga (probabilmente più corta, 2px più bassa se non hover).
+        reaper.ImGui_SetCursorPos(ctx, content_max_x, row_origin_y + FAV_BTN_H + FAV_HOVER_H)
+        -- Un item a dimensione zero registra il cursore esteso come contenuto, altrimenti
+        -- End/EndChild segnala che SetCursorPos ha allargato i confini senza nulla disegnato.
+        reaper.ImGui_Dummy(ctx, 0, 0)
+        -- Registra il cursore esteso come contenuto: senza un item dopo la
+        -- SetCursorPos, End() lamenta che i confini sono stati estesi senza
+        -- crescere la finestra.
+        reaper.ImGui_Dummy(ctx, 0, 0)
     end
 end
 
