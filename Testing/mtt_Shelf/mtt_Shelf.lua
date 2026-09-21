@@ -37,9 +37,11 @@ local open_preset_popup = false
 -- larghezza la definisce il testo) e distanza orizzontale tra due bottoni
 -- della stessa riga, passata esplicitamente a SameLine così il calcolo del
 -- wrapping si basa su un valore noto.
-local FAV_BTN_H = 34
+local FAV_BTN_H = 28
 local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 8
+local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
+local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 
 function LoadAllFX()
     local raw_fx = {}
@@ -606,41 +608,50 @@ function render_favorite_button(i)
     local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
 
     if fav.type == "action" then
-        -- Colore per Action (Bluastro/Grigio)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.15, 0.2, 0.3, 1))
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.25, 0.3, 0.4, 1))
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.1, 0.15, 0.2, 1))
+        -- Bordo colorato, interno trasparente (Action — Bluastro/Grigio)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.5, 0.55, 0.65, 1))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.15, 0.2, 0.3, 0))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.25, 0.3, 0.4, 0.2))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.1, 0.15, 0.2, 0))
     elseif fav.type == "fx" then
-        -- Colore per FX (Verde scuro)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 1))
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 1))
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 1))
+        -- Bordo colorato, interno trasparente (FX — Verde scuro)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.3, 0.5, 0.35, 1))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
     end
 
+    -- Se questo è il button hoverato nell'frame precedente: bordo 3px, font e
+    -- dimensioni leggermente ingrandite per dare un effetto "rilievo".
+    local is_hover = (i == hovered_favorite_idx)
+    local extra_border = is_hover and 2 or 0  -- 1 base + 2 = 3
+    if is_hover then
+        local fs = reaper.ImGui_GetFontSize(ctx)
+        reaper.ImGui_PushFont(ctx, nil, fs * 1.1)
+    end
+    if extra_border > 0 then
+        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1 + extra_border)
+    end
+
+    -- La larghezza è misurata col font eventualmente ingrandito: il bottone
+    -- cresce insieme alla scritta.
+    local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
+    local btn_h = FAV_BTN_H + (is_hover and 4 or 0)
     local clicked =
         reaper.ImGui_Button(
         ctx,
         btn_id,
-        reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X,
-        FAV_BTN_H
+        btn_w,
+        btn_h
     )
 
-    -- Pop dei colori spinti sopra (3 volte: Button, Hovered, Active)
-    reaper.ImGui_PopStyleColor(ctx, 3)
-
-    if reaper.ImGui_IsItemHovered(ctx) then
-        local tooltip_info = ""
-        if fav.type == "action" then
-            tooltip_info = string.format("Type: Action\nID: %d\nLeft Click: Run Action\nAlt+Click: Remove", fav.id)
-        elseif fav.type == "fx" then
-            tooltip_info =
-                string.format(
-                "Type: FX\nIdent: %s\nDrag: Add to track under cursor\nAlt+Click: Remove",
-                fav.ident or ""
-            )
-        end
-
-        reaper.ImGui_SetTooltip(ctx, tooltip_info)
+    -- Pop dei colori spinti sopra (4 volte: Border, Button, Hovered, Active)
+    reaper.ImGui_PopStyleColor(ctx, 4)
+    if extra_border > 0 then
+        reaper.ImGui_PopStyleVar(ctx)
+    end
+    if is_hover then
+        reaper.ImGui_PopFont(ctx)
     end
 
     -- Drag and Drop per gli FX
@@ -666,7 +677,20 @@ function render_favorite_button(i)
                 -- Nessuna azione al click: l'FX si aggiunge solo tramite drag-and-drop
                 end
             end
+        end
+
+    -- Traccia il button attualmente hoverato (frame corrente)
+    if reaper.ImGui_IsItemHovered(ctx) then
+        current_hovered_idx = i
     end
+end
+
+-- Dopo il render di tutti i button: sincronizza `hovered_favorite_idx` col
+-- button hoverato in questo frame, così il frame prossimo lo disegna col
+-- bordo spesso; se il mouse non è su nessun button torna al bordo standard.
+function reset_hovered_if_none()
+    hovered_favorite_idx = current_hovered_idx
+    current_hovered_idx = -1
 end
 
 -- ==========================================
@@ -719,6 +743,12 @@ function render_favorites_flow()
     for i = 1, #favorites do
         local w = reaper.ImGui_CalcTextSize(ctx, favorite_display_name(favorites[i])) + FAV_BTN_PAD_X
 
+        -- Il button hoverato è disegnato più grande: riservo la stessa crescita
+        -- nel wrapping così il bottone accanto non si sovrappone.
+        if i == hovered_favorite_idx then
+            w = w * 1.1
+        end
+
         if row_used > 0 and row_used + w > limit then
             row_used = 0
         else
@@ -752,6 +782,15 @@ function main_loop()
     local visible, is_open = reaper.ImGui_Begin(ctx, "Shelf", true, window_flags)
 
     if visible then
+        -- Stile specifico per finestra docked: bordi netti, bottoni solo bordati,
+        -- altezza ridotta, nessuna rotondità.
+        local docked = reaper.ImGui_IsWindowDocked(ctx)
+        if docked then
+            reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 1)
+            reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowRounding(), 0)
+            reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
+            reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 4, 1)
+        end
         hasToBeRemoved = {}
 
         draw_action_fx_buttons()
@@ -770,10 +809,12 @@ function main_loop()
             )
             then
                 render_favorites_flow()
+                reset_hovered_if_none()
                 reaper.ImGui_EndChild(ctx)
             end
         else
             render_favorites_flow()
+            reset_hovered_if_none()
         end
 
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
@@ -934,6 +975,10 @@ function main_loop()
             end
 
             reaper.ImGui_EndPopup(ctx)
+        end
+
+        if docked then
+            reaper.ImGui_PopStyleVar(ctx, 4)
         end
 
         reaper.ImGui_End(ctx)
