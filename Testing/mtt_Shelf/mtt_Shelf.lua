@@ -46,6 +46,9 @@ local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 0
 local FAV_HOVER_FONT = 1.1
 local FAV_HOVER_H = 4
+local FAV_HOVER_HUE_PERIOD = 2.0  -- secondi per un ciclo completo RGB del bordo hover
+local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
+local FAV_HOVER_BORDER_EXTRA = 2  -- extra hover: 1 + 2 = 3px
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 
@@ -631,13 +634,22 @@ function render_favorite_button(i, btn_w, btn_h)
     -- ingrandito per dare un effetto "rilievo" (le dimensioni arrivano da
     -- render_favorites_flow, che centra il bottone nello slot).
     local is_hover = (i == hovered_favorite_idx)
-    local extra_border = is_hover and 2 or 0  -- 1 base + 2 = 3
+    local extra_border = is_hover and FAV_HOVER_BORDER_EXTRA or 0
+    local n_pushed_col = 4
     if is_hover then
         local fs = reaper.ImGui_GetFontSize(ctx)
         reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
+        -- Bordo che cicla i colori RGB (sopra al colore tipo di sopra):
+        -- tre sinusoidi sfasate di 120° ruotano l'arcobaleno in modo continuo
+        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_HUE_PERIOD
+        local r = 0.5 + 0.5 * math.sin(t)
+        local g = 0.5 + 0.5 * math.sin(t - 2 * math.pi / 3)
+        local b = 0.5 + 0.5 * math.sin(t - 4 * math.pi / 3)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(r, g, b, 1))
+        n_pushed_col = n_pushed_col + 1
     end
     if extra_border > 0 then
-        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1 + extra_border)
+        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), FAV_HOVER_BORDER_BASE + extra_border)
     end
 
     local clicked =
@@ -648,8 +660,9 @@ function render_favorite_button(i, btn_w, btn_h)
         btn_h
     )
 
-    -- Pop dei colori spinti sopra (4 volte: Border, Button, Hovered, Active)
-    reaper.ImGui_PopStyleColor(ctx, 4)
+    -- Pop dei colori spinti sopra (4 base: Border, Button, Hovered, Active;
+    -- +1 per il bordo RGB ciclabile se hover)
+    reaper.ImGui_PopStyleColor(ctx, n_pushed_col)
     if extra_border > 0 then
         reaper.ImGui_PopStyleVar(ctx)
     end
