@@ -43,7 +43,7 @@ local open_preset_popup = false
 -- delle righe restano costanti.
 local FAV_BTN_H = 28
 local FAV_BTN_PAD_X = 10
-local ITEM_SP_X = 8
+local ITEM_SP_X = 0
 local FAV_HOVER_FONT = 1.1
 local FAV_HOVER_H = 4
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
