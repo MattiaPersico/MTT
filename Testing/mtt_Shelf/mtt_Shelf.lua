@@ -48,7 +48,7 @@ local FAV_HOVER_FONT = 1.1
 local FAV_HOVER_H = 4
 local FAV_HOVER_HUE_PERIOD = 1.0  -- secondi per un ciclo completo RGB del bordo hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
-local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 2 = 3px
+local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 
@@ -602,6 +602,70 @@ function favorite_display_name(fav)
     return fav.name
 end
 
+-- Bordo hover: anello cromatico attorno a un rettangolo arrotondato.
+-- Col_Border è un singolo colore e non può variare attorno al perimetro,
+-- quindi l'anelo è disegnato sulla draw list: il perimetro è spezzato in
+-- segmenti e la tinta di ciascuno segue la ruota cromatica a tre sinusoidi
+-- (la stessa formula del vecchio bordo ciclabile) sfasata della posizione
+-- lungo il perimetro — le tinte girano attorno al bottone mentre `t` fa
+-- ruotare la ruota nel tempo.
+local function draw_hue_ring(ctx, x0, y0, x1, y1, rounding, thickness, t)
+    local r = math.min(rounding, (x1 - x0) / 2, (y1 - y0) / 2)
+
+    -- Perimetro ordinato: 4 lati dritti (segmenti da ~6px) + 4 angoli
+    -- (quarti di cerchio, 4 segmenti ciascuno: con r piccolo la corda
+    -- approssima l'arco senza essere visibile).
+    local seg_px = 6
+    local pts = {}
+    local function add_edge(ax, ay, bx, by)
+        local n = math.max(2, math.floor(math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2) / seg_px))
+        for k = 1, n do
+            local s = k / n
+            pts[#pts + 1] = {ax + (bx - ax) * s, ay + (by - ay) * s}
+        end
+    end
+    local function add_corner(cx, cy, a0, a1)
+        for k = 1, 4 do
+            local a = a0 + (a1 - a0) * k / 4
+            pts[#pts + 1] = {cx + r * math.cos(a), cy + r * math.sin(a)}
+        end
+    end
+
+    add_edge(x0 + r, y0, x1 - r, y0)                 -- alto, sx → dx
+    add_corner(x1 - r, y0 + r, -math.pi / 2, 0)     -- angolo alto-destra
+    add_edge(x1, y0 + r, x1, y1 - r)                -- destro, su → giù
+    add_corner(x1 - r, y1 - r, 0, math.pi / 2)      -- angolo basso-destra
+    add_edge(x1 - r, y1, x0 + r, y1)                -- basso, dx → sx
+    add_corner(x0 + r, y1 - r, math.pi / 2, math.pi) -- angolo basso-sinistra
+    add_edge(x0, y1 - r, x0, y0 + r)                -- sinistro, giù → su
+    add_corner(x0 + r, y0 + r, math.pi, math.pi * 1.5) -- angolo alto-sinistra (chiude)
+
+    -- Lunghezza cumulativa di ogni punto: la fase spaziale della ruota.
+    local cum = {}
+    cum[1] = 0
+    for i = 2, #pts do
+        cum[i] = cum[i - 1] + math.sqrt((pts[i][1] - pts[i - 1][1]) ^ 2 + (pts[i][2] - pts[i - 1][2]) ^ 2)
+    end
+    local total = cum[#pts] + math.sqrt((pts[1][1] - pts[#pts][1]) ^ 2 + (pts[1][2] - pts[#pts][2]) ^ 2)
+
+    local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
+    local dl = reaper.ImGui_GetWindowDrawList(ctx)
+    for i = 1, #pts do
+        local j = i % #pts + 1
+        local ph = t + 2 * math.pi * cum[i] / total
+        local cr = 0.5 + 0.5 * math.sin(ph)
+        local cg = 0.5 + 0.5 * math.sin(ph - 2 * math.pi / 3)
+        local cb = 0.5 + 0.5 * math.sin(ph - 4 * math.pi / 3)
+        reaper.ImGui_DrawList_AddLine(
+            dl,
+            pts[i][1], pts[i][2],
+            pts[j][1], pts[j][2],
+            col_convert(cr, cg, cb, 1),
+            thickness
+        )
+    end
+end
+
 function render_favorite_button(i, btn_w, btn_h)
     local fav = favorites[i]
 
@@ -630,26 +694,17 @@ function render_favorite_button(i, btn_w, btn_h)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
     end
 
-    -- Se questo è il button hoverato nell'frame precedente: bordo 3px e font
-    -- ingrandito per dare un effetto "rilievo" (le dimensioni arrivano da
-    -- render_favorites_flow, che centra il bottone nello slot).
+    -- Se questo è il button hoverato nell'frame precedente: font ingrandito
+    -- per dare un effetto "rilievo" (le dimensioni arrivano da
+    -- render_favorites_flow, che centra il bottone nello slot) e bordo nativo
+    -- trasparente: il bordo visibile è l'anelo cromatico di draw_hue_ring.
     local is_hover = (i == hovered_favorite_idx)
-    local extra_border = is_hover and FAV_HOVER_BORDER_EXTRA or 0
     local n_pushed_col = 4
     if is_hover then
         local fs = reaper.ImGui_GetFontSize(ctx)
         reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
-        -- Bordo che cicla i colori RGB (sopra al colore tipo di sopra):
-        -- tre sinusoidi sfasate di 120° ruotano l'arcobaleno in modo continuo
-        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_HUE_PERIOD
-        local r = 0.5 + 0.5 * math.sin(t)
-        local g = 0.5 + 0.5 * math.sin(t - 2 * math.pi / 3)
-        local b = 0.5 + 0.5 * math.sin(t - 4 * math.pi / 3)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(r, g, b, 1))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0, 0, 0, 0))
         n_pushed_col = n_pushed_col + 1
-    end
-    if extra_border > 0 then
-        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), FAV_HOVER_BORDER_BASE + extra_border)
     end
 
     local clicked =
@@ -659,15 +714,30 @@ function render_favorite_button(i, btn_w, btn_h)
         btn_w,
         btn_h
     )
+    local rect_min_x, rect_min_y = reaper.ImGui_GetItemRectMin(ctx)
+    local rect_max_x, rect_max_y = reaper.ImGui_GetItemRectMax(ctx)
 
     -- Pop dei colori spinti sopra (4 base: Border, Button, Hovered, Active;
-    -- +1 per il bordo RGB ciclabile se hover)
+    -- +1 per il bordo trasparente se hover)
     reaper.ImGui_PopStyleColor(ctx, n_pushed_col)
-    if extra_border > 0 then
-        reaper.ImGui_PopStyleVar(ctx)
-    end
     if is_hover then
         reaper.ImGui_PopFont(ctx)
+    end
+
+    -- L'anelo (spessore = base + extra) è arretrato di metà spessore: sta
+    -- dentro al bordo del button, dove stava il vecchio bordo.
+    if is_hover then
+        local bw = FAV_HOVER_BORDER_BASE + FAV_HOVER_BORDER_EXTRA
+        local rounding = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding())
+        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_HUE_PERIOD
+        draw_hue_ring(
+            ctx,
+            rect_min_x + bw / 2, rect_min_y + bw / 2,
+            rect_max_x - bw / 2, rect_max_y - bw / 2,
+            math.max(0, rounding - bw / 2),
+            bw,
+            t
+        )
     end
 
     -- Drag and Drop per gli FX
