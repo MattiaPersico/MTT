@@ -46,9 +46,9 @@ local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 0
 local FAV_HOVER_FONT = 1.1
 local FAV_HOVER_H = 4
-local FAV_HOVER_HUE_PERIOD = 2.0  -- secondi per un ciclo completo RGB del bordo hover
+local FAV_HOVER_HUE_PERIOD = 1.0  -- secondi per un ciclo completo RGB del bordo hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
-local FAV_HOVER_BORDER_EXTRA = 2  -- extra hover: 1 + 2 = 3px
+local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 2 = 3px
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 
