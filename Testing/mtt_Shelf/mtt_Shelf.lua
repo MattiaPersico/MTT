@@ -795,9 +795,11 @@ function main_loop()
                 local take = reaper.BR_GetMouseCursorContext_Take()
 
                 if take then
-                    reaper.TakeFX_AddByName(take, payload, -1)
+                    local idx = reaper.TakeFX_AddByName(take, payload, -1)
+                    if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
                 elseif track then
-                    reaper.TrackFX_AddByName(track, payload, false, -1)
+                    local idx = reaper.TrackFX_AddByName(track, payload, false, -1)
+                    if idx >= 0 then reaper.TrackFX_SetOpen(track, idx, true) end
                 else
                     --reaper.ShowConsoleMsg("No track found under cursor.\n")
                 end
