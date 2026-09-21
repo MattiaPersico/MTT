@@ -2,11 +2,11 @@
 
 updated: 2026-09-21
 - Done:
-  - Hover enlargement now centered via a fixed slot: every favorite occupies a slot of the hover dimensions (font × `FAV_HOVER_FONT`, height `FAV_BTN_H + FAV_HOVER_H`), the un-hovered button is drawn centered inside it (`SetCursorPos` offset), so the hovered button grows in place, the buttons to the right never shift, and the rows never reflow (the wrap math always uses the hover width). The flow no longer uses `SameLine`: the row origin is captured with `GetCursorPos`, each wrap advances the row by `slot_h + ItemSpacing.y` (read via `ImGui_GetStyleVar`), and a final `SetCursorPos` pins the content max so scrollbars and undocked auto-height don't depend on which button is hovered. `render_favorite_button(i, btn_w, btn_h)` now receives its size from the flow instead of measuring it.
-  - The final slot-bottom `SetCursorPos` pin now has a zero-size `ImGui_Dummy` after it: the pin leaves the cursor past the registered content max (slot padding below/right of the last button) with no item submitted, and `ImGui_End`/`EndChild` raised the "Code uses SetCursorPos()/SetCursorScreenPos() to extend window/parent boundaries" user-assertion. The dummy registers the extended position without drawing or taking clicks.
+  - Constant slot inset in the favorites flow: the unhovered button was centered inside a slot sized to its own hover footprint (1.1x font), so the inset — and therefore both the gap between buttons and the left edge of each row — varied with name length. `render_favorites_flow` now does a first pass computing `max_extra` (the largest hover width growth across all favorites) and sizes every slot as `btn_w + max_extra`: the centering inset is identical for all buttons, so inter-button gaps, row left edges and row wrapping are uniform. The hovered button still fills its slot and grows in place; for the longest name the slot coincides with its hover size, shorter ones get a bit of extra breathing room.
 - Not done:
   - None.
 - Waiting on:
+  - In-REAPER run: with favorites of very different name lengths (e.g. "RBass" next to "mtt_QuickLoopPreview" and "Custom Transport - Play/Stop"), check the gaps between buttons are equal across rows and every row's first button starts at the same x.
   - In-REAPER run of the case that raised the assertion (undocked shelf with favorites; hover the last favorite then move away): no `ImGui_End` boundary error, and the undocked auto-height still covers the whole slot.
   - In-REAPER run, docked shelf: hover a favorite button (font +10%, +4px, 3px border, subtle fill, centered in its slot) and check the buttons to the right don't move, rows don't jump, and no `Missing Pop*` console errors.
   - Testing the FX-drag-and-open behavior.

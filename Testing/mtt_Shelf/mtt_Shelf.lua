@@ -36,9 +36,11 @@ local open_preset_popup = false
 -- Dimensioni del layout a scaffale: altezza fissa dei bottoni favorite (la
 -- larghezza la definisce il testo), distanza orizzontale tra due bottoni della
 -- stessa riga e effetto "rilievo" all'hover: font a 1.1x e 4px di altezza in più.
--- Ogni favorite occupa sempre uno slot delle dimensioni hover: il bottone non
--- hoverato è disegnato centrato dentro lo slot, così la crescita all'hover è
--- centrale e i bottoni alla destra non si spostano.
+-- Ogni favorite occupa uno slot: dimensioni del bottone + un extra costante
+-- (il massimo extra hover tra i nomi). Il bottone non hoverato è disegnato
+-- centrato dentro lo slot con un inserimento uguale per tutti, così la crescita
+-- all'hover è centrale, i bottoni alla destra non si spostano e spazi e bordi
+-- delle righe restano costanti.
 local FAV_BTN_H = 28
 local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 8
@@ -733,17 +735,35 @@ function draw_action_fx_buttons()
     end
 end
 
--- I favorite scorrono su righe che si riempiono fino alla larghezza
+-- I favorite scorrono su righe che si riempono fino alla larghezza
 -- disponibile e poi vanno a capo; quando le righe non entrano più, la child
 -- (docked) fa apparire lo scrollbar verticale e quello orizzontale copre i
 -- nomi troppo lunghi.
--- Ogni favorite occupa uno slot fisso delle dimensioni hover: il bottone non
--- hoverato è centrato dentro lo slot, così all'hover cresce in posto e i
+-- Ogni favorite occupa uno slot: il suo bottone + un extra costante, uguale
+-- per tutti (il massimo extra hover, che cresce col font 1.1x del nome più
+-- lungo). L'inserimento del bottone nello slot è quindi costante: lo spazio
+-- tra due bottoni e il bordo sinistro di ogni riga sono gli stessi per tutte
+-- le righe, indipendentemente dai nomi. L'hover cresce comunque in posto e i
 -- bottoni alla destra non si spostano; le righe non si ricollocano mai perché
--- il wrapping usa sempre la dimensione hover.
+-- il wrapping usa sempre la dimensione slot.
 function render_favorites_flow()
     local limit = reaper.ImGui_GetWindowWidth(ctx) - ITEM_SP_X
     local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
+
+    -- Extra orizzontale dell'hover (font 1.1x) per ogni nome: lo slot lo
+    -- riserva a tutti, così l'inserimento del bottone centrato è costante.
+    local fs = reaper.ImGui_GetFontSize(ctx)
+    local max_extra = 0
+    for i = 1, #favorites do
+        local display_name = favorite_display_name(favorites[i])
+        reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
+        local hover_w = reaper.ImGui_CalcTextSize(ctx, display_name)
+        reaper.ImGui_PopFont(ctx)
+        local extra = hover_w - reaper.ImGui_CalcTextSize(ctx, display_name)
+        if extra > max_extra then
+            max_extra = extra
+        end
+    end
 
     local row_origin_x, row_origin_y = reaper.ImGui_GetCursorPos(ctx)
     local row_used = 0   -- offset orizzontale del prossimo slot da row_origin_x
@@ -753,14 +773,12 @@ function render_favorites_flow()
         local display_name = favorite_display_name(favorites[i])
         local is_hover = (i == hovered_favorite_idx)
 
-        -- Slot: le dimensioni del bottone hover, costanti per questa favorite.
-        reaper.ImGui_PushFont(ctx, nil, reaper.ImGui_GetFontSize(ctx) * FAV_HOVER_FONT)
-        local slot_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
-        reaper.ImGui_PopFont(ctx)
-        local slot_h = FAV_BTN_H + FAV_HOVER_H
-
         local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
         local btn_h = FAV_BTN_H
+        -- Slot: bottone + extra costante. Per il nome più lungo coincide con le
+        -- dimensioni hover; gli altri ci stanno dentro con un po' di respiro.
+        local slot_w = btn_w + max_extra
+        local slot_h = FAV_BTN_H + FAV_HOVER_H
         if is_hover then
             btn_w, btn_h = slot_w, slot_h
         end
