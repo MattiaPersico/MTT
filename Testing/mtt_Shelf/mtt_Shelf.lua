@@ -52,8 +52,12 @@ local FAV_HOVER_H = 4       -- extra di altezza dello slot per l'hover
 local FAV_HOVER_PALETTE_PERIOD = 0.8 -- secondi per un giro completo della palette dell'anello hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
+local FAV_PRESSED_SHRINK_X = 4  -- riduzione di larghezza del bottone alla pressione
+local FAV_PRESSED_SHRINK_Y = 2  -- riduzione di altezza del bottone alla pressione
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
+local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
+local current_pressed_idx = -1   -- indice del button attualmente premuto (frame corrente)
 
 function LoadAllFX()
     local raw_fx = {}
@@ -717,12 +721,27 @@ function render_favorite_button(i, btn_w, btn_h)
     -- render_favorites_flow, che centra il bottone nello slot) e bordo nativo
     -- trasparente: il bordo visibile è l'anelo di draw_palette_ring.
     local is_hover = (i == hovered_favorite_idx)
+    local is_pressed = (i == pressed_favorite_idx)
     local n_pushed_col = 4
     if is_hover then
         local fs = reaper.ImGui_GetFontSize(ctx)
         reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0, 0, 0, 0))
         n_pushed_col = n_pushed_col + 1
+    end
+    if is_pressed then
+        -- Feedback di pressione: riempimento e bordo più chiari (colore del tipo),
+        -- font torna alla dimensione base (inverso del "rilievo" dell'hover)
+        local fs = reaper.ImGui_GetFontSize(ctx)
+        reaper.ImGui_PushFont(ctx, nil, fs)
+        if fav.type == "action" then
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.7, 0.75, 0.9, 1))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.28, 0.4, 0.35))
+        else
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.45, 0.75, 0.5, 1))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.4, 0.25, 0.35))
+        end
+        n_pushed_col = n_pushed_col + 2
     end
 
     local clicked =
@@ -735,8 +754,19 @@ function render_favorite_button(i, btn_w, btn_h)
     local rect_min_x, rect_min_y = reaper.ImGui_GetItemRectMin(ctx)
     local rect_max_x, rect_max_y = reaper.ImGui_GetItemRectMax(ctx)
 
+    -- Traccia il button premuto nel frame corrente: il feedback si applica dal
+    -- frame prossimo, come per l'hover
+    if reaper.ImGui_IsItemActive(ctx) then
+        current_pressed_idx = i
+    end
+
+    -- Press: pop prima il font (è stato spinto dopo quello dell'hover)
+    if is_pressed then
+        reaper.ImGui_PopFont(ctx)
+    end
+
     -- Pop dei colori spinti sopra (4 base: Border, Button, Hovered, Active;
-    -- +1 per il bordo trasparente se hover)
+    -- +1 per il bordo trasparente se hover; +2 per i colori della pressione)
     reaper.ImGui_PopStyleColor(ctx, n_pushed_col)
     if is_hover then
         reaper.ImGui_PopFont(ctx)
@@ -807,6 +837,13 @@ end
 function reset_hovered_if_none()
     hovered_favorite_idx = current_hovered_idx
     current_hovered_idx = -1
+end
+
+-- Stesso sync per la pressione: dal frame prossimo il bottone è disegnato
+-- premuto (ridotto + riempito) o torna normale se il mouse è stato rilasciato
+function reset_pressed_if_none()
+    pressed_favorite_idx = current_pressed_idx
+    current_pressed_idx = -1
 end
 
 -- ==========================================
@@ -887,6 +924,7 @@ function render_favorites_flow()
     for i = 1, #favorites do
         local display_name = favorite_display_name(favorites[i])
         local is_hover = (i == hovered_favorite_idx)
+        local is_pressed = (i == pressed_favorite_idx)
 
         local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
         local btn_h = FAV_BTN_H
@@ -896,6 +934,12 @@ function render_favorites_flow()
         local slot_h = FAV_BTN_H + FAV_HOVER_H
         if is_hover then
             btn_w, btn_h = slot_w, slot_h
+        end
+        -- Pressione: riduci il bottone dentro lo slot (che resta di dimensioni
+        -- costanti): nessun ricollocamento, i bottoni vicini non si spostano
+        if is_pressed then
+            btn_w = math.max(btn_w - FAV_PRESSED_SHRINK_X, 8)
+            btn_h = math.max(btn_h - FAV_PRESSED_SHRINK_Y, 8)
         end
 
         if row_used > 0 and row_used + slot_w > limit then
@@ -978,11 +1022,13 @@ function main_loop()
             then
                 render_favorites_flow()
                 reset_hovered_if_none()
+                reset_pressed_if_none()
                 reaper.ImGui_EndChild(ctx)
             end
         else
             render_favorites_flow()
             reset_hovered_if_none()
+            reset_pressed_if_none()
         end
 
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
