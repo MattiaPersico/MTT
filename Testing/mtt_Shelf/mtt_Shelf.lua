@@ -54,6 +54,7 @@ local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
 local FAV_PRESSED_SHRINK_X = 4  -- riduzione di larghezza del bottone alla pressione
 local FAV_PRESSED_SHRINK_Y = 2  -- riduzione di altezza del bottone alla pressione
+local FAV_DRAG_SRC_GRAY = 0.3  -- "negativo" in drag: luminosità di bordo + scritta del button d'origine
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
@@ -725,8 +726,13 @@ function render_favorite_button(i, btn_w, btn_h)
     -- per dare un effetto "rilievo" (le dimensioni arrivano da
     -- render_favorites_flow, che centra il bottone nello slot) e bordo nativo
     -- trasparente: il bordo visibile è l'anelo di draw_palette_ring.
-    local is_hover = (i == hovered_favorite_idx)
-    local is_pressed = (i == pressed_favorite_idx)
+    -- In drag il button d'origine diventa "negativo": resta la sua sagoma —
+    -- bordo + scritta grigi chiari (più chiari del bg della finestra),
+    -- dimensione standard. Qui sopprime hover e press per lo stile
+    -- (come in render_favorites_flow).
+    local is_drag_src = (isDraggingFx and fav == draggedFx)
+    local is_hover = (i == hovered_favorite_idx) and not is_drag_src
+    local is_pressed = (i == pressed_favorite_idx) and not is_drag_src
     local n_pushed_col = 4
     if is_hover then
         local fs = reaper.ImGui_GetFontSize(ctx)
@@ -746,6 +752,15 @@ function render_favorite_button(i, btn_w, btn_h)
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.45, 0.75, 0.5, 1))
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.4, 0.25, 0.35))
         end
+        n_pushed_col = n_pushed_col + 2
+    end
+    if is_drag_src then
+        -- "Negativo": l'elemento è stato portato via, resta la sua sagoma —
+        -- bordo e scritta grigi chiari (più chiari del bg della finestra),
+        -- dimensione standard, nessun anello
+        -- (il ring colorato sta solo sulla preview che segue il mouse).
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(FAV_DRAG_SRC_GRAY, FAV_DRAG_SRC_GRAY, FAV_DRAG_SRC_GRAY, 1))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col_convert(FAV_DRAG_SRC_GRAY, FAV_DRAG_SRC_GRAY, FAV_DRAG_SRC_GRAY, 1))
         n_pushed_col = n_pushed_col + 2
     end
 
@@ -934,8 +949,9 @@ function render_favorites_flow()
 
     for i = 1, #favorites do
         local display_name = favorite_display_name(favorites[i])
-        local is_hover = (i == hovered_favorite_idx)
-        local is_pressed = (i == pressed_favorite_idx)
+        local is_drag_src = (isDraggingFx and favorites[i] == draggedFx)
+        local is_hover = (i == hovered_favorite_idx) and not is_drag_src
+        local is_pressed = (i == pressed_favorite_idx) and not is_drag_src
 
         local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
         local btn_h = FAV_BTN_H
@@ -952,7 +968,6 @@ function render_favorites_flow()
             btn_w = math.max(btn_w - FAV_PRESSED_SHRINK_X, 8)
             btn_h = math.max(btn_h - FAV_PRESSED_SHRINK_Y, 8)
         end
-
         if row_used > 0 and row_used + slot_w > limit then
             row_origin_y = row_origin_y + slot_h + row_sp_y
             row_used = 0
