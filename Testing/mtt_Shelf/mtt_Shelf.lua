@@ -58,6 +58,10 @@ local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
 local current_pressed_idx = -1   -- indice del button attualmente premuto (frame corrente)
+local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
+local draggedFx = nil            -- favorite in corso di drag
+local drag_grab_x = 0            -- punto di presa: offset del mouse dal bordo del button (screen space)
+local drag_grab_y = 0
 
 function LoadAllFX()
     local raw_fx = {}
@@ -788,24 +792,20 @@ function render_favorite_button(i, btn_w, btn_h)
         )
     end
 
-    -- Drag and Drop per gli FX
+    -- Drag and Drop per gli FX: la preview è render_fx_drag_preview (finestra
+    -- invisibile sopra la shelf); qui si registra solo lo stato e, una volta,
+    -- al primo frame di drag, il punto di presa.
     if fav.type == "fx" then
         if reaper.ImGui_BeginDragDropSource(ctx) then
+            if not isDraggingFx then
+                -- Offset del mouse dal bordo del button: per tutto il drag la
+                -- finestra mobile tiene il centro del mouse su quelle coordinate.
+                local mx, my = reaper.ImGui_GetMousePos(ctx)
+                drag_grab_x = mx - rect_min_x
+                drag_grab_y = my - rect_min_y
+            end
             isDraggingFx = true
             draggedFx = fav
-            -- La finestra che segue il cursore disegna il bottone che si sta
-            -- trascinando (stesso aspetto della favorite FX), non il testo "Drag: nome".
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.3, 0.5, 0.35, 1))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
-            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
-            reaper.ImGui_Button(
-                ctx,
-                string.format("%s##fav_btn_drag_%d", display_name, i),
-                reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X,
-                FAV_BTN_H
-            )
-            reaper.ImGui_PopStyleColor(ctx, 4)
             reaper.ImGui_EndDragDropSource(ctx)
         end
     end
@@ -972,6 +972,45 @@ function render_favorites_flow()
         -- crescere la finestra.
         reaper.ImGui_Dummy(ctx, 0, 0)
     end
+end
+
+-- Preview del drag di un favorite FX: finestra invisibile (niente background,
+-- bordo e padding) che contiene solo il bottone, posizionata a mouse - punto di
+-- presa, così il centro del mouse resta sulle stesse coordinate relative del
+-- bottone per tutto il drag. Il bottone riporta il nome della favorite, così
+-- legge come copia del button di origine (il quadratino visibile durante il
+-- drag è lui, non la finestra, che resta trasparente).
+function render_fx_drag_preview()
+    local name = favorite_display_name(draggedFx)
+    local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X
+
+    local mx, my = reaper.ImGui_GetMousePos(ctx)
+    reaper.ImGui_SetNextWindowPos(ctx, mx - drag_grab_x, my - drag_grab_y, reaper.ImGui_Cond_Always())
+    reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 0, 0)
+
+    -- Stesso aspetto della favorite FX
+    local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.3, 0.5, 0.35, 1))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
+
+    local flags =
+        reaper.ImGui_WindowFlags_NoDecoration() |
+        reaper.ImGui_WindowFlags_NoBackground() |
+        reaper.ImGui_WindowFlags_NoMove() |
+        reaper.ImGui_WindowFlags_NoSavedSettings() |
+        reaper.ImGui_WindowFlags_AlwaysAutoResize()
+
+    if reaper.ImGui_Begin(ctx, "##ShelfDragPreview", true, flags) then
+        reaper.ImGui_Button(ctx, name .. "##shelf_drag_preview", btn_w, FAV_BTN_H)
+        reaper.ImGui_End(ctx)
+    end
+
+    reaper.ImGui_PopStyleColor(ctx, 4)
+    reaper.ImGui_PopStyleVar(ctx, 2)
 end
 
 function main_loop()
@@ -1196,6 +1235,12 @@ function main_loop()
         end
 
         reaper.ImGui_End(ctx)
+
+        -- Preview del drag FX: dopo l'End della shelf (così sta sopra),
+        -- ancora dentro if visible, prima di pop_style()
+        if isDraggingFx then
+            render_fx_drag_preview()
+        end
     end
 
     pop_style()
