@@ -52,8 +52,8 @@ local FAV_HOVER_H = 4       -- extra di altezza dello slot per l'hover
 local FAV_HOVER_PALETTE_PERIOD = 0.8 -- secondi per un giro completo della palette dell'anello hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
-local FAV_PRESSED_SHRINK_X = 4  -- riduzione di larghezza del bottone alla pressione
-local FAV_PRESSED_SHRINK_Y = 2  -- riduzione di altezza del bottone alla pressione
+local FAV_PRESSED_SHRINK_X = 6  -- riduzione di larghezza del bottone alla pressione
+local FAV_PRESSED_SHRINK_Y = 4  -- riduzione di altezza del bottone alla pressione
 local FAV_DRAG_SRC_GRAY = 0.3  -- "negativo" in drag: luminosità di bordo + scritta del button d'origine
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
