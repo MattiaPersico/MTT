@@ -1005,9 +1005,10 @@ function render_fx_drag_preview()
     -- Come su render_favorite_button: garante il bordo in ogni tema
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
 
-    -- Stesso aspetto della favorite FX
+    -- Stesso aspetto della favorite FX in hover: bordo nativo trasparente,
+    -- il bordo visibile è l'anello cromatico (come su render_favorite_button)
     local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.3, 0.5, 0.35, 1))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0, 0, 0, 0))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
@@ -1024,6 +1025,23 @@ function render_fx_drag_preview()
         reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
         reaper.ImGui_Button(ctx, name .. "##shelf_drag_preview", btn_w, btn_h)
         reaper.ImGui_PopFont(ctx)
+
+        -- Anello cromatico ruotato, identico a quello dell'hover sul bottone
+        -- originale: spessore base+extra, arretrato di metà spessore.
+        local bw = FAV_HOVER_BORDER_BASE + FAV_HOVER_BORDER_EXTRA
+        local rx0, ry0 = reaper.ImGui_GetItemRectMin(ctx)
+        local rx1, ry1 = reaper.ImGui_GetItemRectMax(ctx)
+        local rounding = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding())
+        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_PALETTE_PERIOD
+        draw_palette_ring(
+            ctx,
+            rx0 + bw / 2, ry0 + bw / 2,
+            rx1 - bw / 2, ry1 - bw / 2,
+            math.max(0, rounding - bw / 2),
+            bw,
+            t
+        )
+
         reaper.ImGui_End(ctx)
     end
 
