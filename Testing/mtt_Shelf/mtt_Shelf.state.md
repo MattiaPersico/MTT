@@ -6,8 +6,4 @@ updated: 2026-09-22
 - Not done:
   - None.
 - Waiting on:
-  - In-REAPER run: hover a favorite button, then move the mouse away: the 1px per-type border (blue-grey / dark-green) comes back.
-  - In-REAPER run of the case that raised the assertion (undocked shelf with favorites; hover the last favorite then move away): no `ImGui_End` boundary error, and the undocked auto-height still covers the whole slot.
-  - Testing the FX-drag-and-open behavior.
   - Preset save from a shelf with favorites, load in a project with an empty shelf, delete one with `x`.
-  - In-REAPER run: drag an FX favorite out with a fast flick — the floating preview appears with the cursor on the point where the press happened (no initial slip); the 30fps trailing at high speed remains by design.
