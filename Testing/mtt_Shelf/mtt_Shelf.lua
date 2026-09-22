@@ -42,11 +42,14 @@ local open_preset_popup = false
 -- all'hover è centrale, i bottoni alla destra non si spostano e spazi e bordi
 -- delle righe restano costanti.
 local FAV_BTN_H = 28        -- altezza fissa del bottone (px)
-local FAV_BTN_PAD_X = 10    -- padding orizzontale attorno al nome
-local ITEM_SP_X = 0         -- spazio extra tra slot e bottoni in alto
+local FAV_BTN_PAD_X = 15    -- padding orizzontale attorno al nome
+local UPPER_BTN_SP_X = 0    -- distanza tra pulsanti superiori (+Action, +Fx, +Preset)
+local UPPER_SECTION_PAD_X = 10  -- margine sinistro della sezione pulsanti superiori
+local FAV_BTN_SP_X = -4      -- distanza orizzontale tra due favorite button della stessa riga
+local FAV_SECTION_PAD_X = 0    -- margine sinistro della child window che contiene i favorite button
 local FAV_HOVER_FONT = 1.1  -- font 1.1x all'hover (effetto "rilievo")
 local FAV_HOVER_H = 4       -- extra di altezza dello slot per l'hover
-local FAV_HOVER_PALETTE_PERIOD = 1.0 -- secondi per un giro completo della palette dell'anello hover
+local FAV_HOVER_PALETTE_PERIOD = 0.8 -- secondi per un giro completo della palette dell'anello hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
@@ -811,11 +814,12 @@ end
 -- Barra di controllo fissa in cima alla finestra: due bottoni compatti per
 -- aggiungere favorite, tenuti separati dai bottoni trascinabili del scaffale.
 function draw_action_fx_buttons()
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + UPPER_SECTION_PAD_X)
     if reaper.ImGui_Button(ctx, "+Action") then
         add_favorite_action()
     end
 
-    reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
+    reaper.ImGui_SameLine(ctx, 0, UPPER_BTN_SP_X)
 
     -- Setta il flag; l'apertura avviene più avanti in main_loop, a livello
     -- window (ID stack coerente con BeginPopup).
@@ -824,7 +828,7 @@ function draw_action_fx_buttons()
         fx_filter = ""
     end
 
-    reaper.ImGui_SameLine(ctx, 0, ITEM_SP_X)
+    reaper.ImGui_SameLine(ctx, 0, UPPER_BTN_SP_X)
 
     -- Apre il menu preset (flag consumato in main_loop, a livello window)
     if reaper.ImGui_Button(ctx, "+Preset") then
@@ -845,7 +849,8 @@ end
 -- bottoni alla destra non si spostano; le righe non si ricollocano mai perché
 -- il wrapping usa sempre la dimensione slot.
 function render_favorites_flow()
-    local limit = reaper.ImGui_GetWindowWidth(ctx) - ITEM_SP_X
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X)
+    local limit = reaper.ImGui_GetWindowWidth(ctx) - FAV_BTN_SP_X
     local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
 
     -- Extra orizzontale dell'hover (font 1.1x) per ogni nome: lo slot lo
@@ -894,7 +899,7 @@ function render_favorites_flow()
 
         render_favorite_button(i, btn_w, btn_h)
 
-        row_used = row_used + slot_w + ITEM_SP_X
+        row_used = row_used + slot_w + FAV_BTN_SP_X
         content_max_x = math.max(content_max_x, slot_x + slot_w)
     end
 
@@ -949,7 +954,7 @@ function main_loop()
         if reaper.ImGui_IsWindowDocked(ctx) then
             -- La child riempie il resto della finestra; gli scrollbar
             -- appaiono solo quando le righe di favorite non ci stanno
-            if
+                if
                 reaper.ImGui_BeginChild(
                 ctx,
                 "##shelf",

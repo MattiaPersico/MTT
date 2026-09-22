@@ -2,7 +2,9 @@
 
 updated: 2026-09-22
 - Done:
-  - Added a trailing comment next to the five layout constants (`FAV_BTN_H`, `FAV_BTN_PAD_X`, `ITEM_SP_X`, `FAV_HOVER_FONT`, `FAV_HOVER_H`), so each is self-describing.
+  - Split `ITEM_SP_X` into `UPPER_BTN_SP_X` (spacing between +Action, +Fx, +Preset buttons) and `FAV_BTN_SP_X` (horizontal distance between favorite buttons of the same row).
+  - Added `FAV_SECTION_PAD_X` macro for the left margin of the favorites button section (applied via `SetCursorPosX` in `render_favorites_flow`).
+  - Added `UPPER_SECTION_PAD_X` macro for the left margin of the upper button section (applied via `SetCursorPosX` in `draw_action_fx_buttons`).
 - Not done:
   - None.
 - Waiting on:
