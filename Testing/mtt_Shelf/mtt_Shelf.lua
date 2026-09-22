@@ -46,7 +46,7 @@ local FAV_BTN_PAD_X = 10
 local ITEM_SP_X = 0
 local FAV_HOVER_FONT = 1.1
 local FAV_HOVER_H = 4
-local FAV_HOVER_HUE_PERIOD = 1.0  -- secondi per un ciclo completo RGB del bordo hover
+local FAV_HOVER_PALETTE_PERIOD = 1.0 -- secondi per un giro completo della palette dell'anello hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
@@ -602,14 +602,24 @@ function favorite_display_name(fav)
     return fav.name
 end
 
--- Bordo hover: anello cromatico attorno a un rettangolo arrotondato.
+-- Bordo hover: anello attorno a un rettangolo arrotondato.
 -- Col_Border è un singolo colore e non può variare attorno al perimetro,
 -- quindi l'anelo è disegnato sulla draw list: il perimetro è spezzato in
--- segmenti e la tinta di ciascuno segue la ruota cromatica a tre sinusoidi
--- (la stessa formula del vecchio bordo ciclabile) sfasata della posizione
--- lungo il perimetro — le tinte girano attorno al bottone mentre `t` fa
--- ruotare la ruota nel tempo.
-local function draw_hue_ring(ctx, x0, y0, x1, y1, rounding, thickness, t)
+-- segmenti e il colore di ciascuno viene interpolato in `ring_palette`
+-- (5 tinte in ordine ciclico) sfasato della posizione lungo il perimetro —
+-- la palette fa un giro completo attorno al bottone mentre `t` la fa
+-- avanzare nel tempo.
+-- Palette dell'anello: #ff7a00 #ffb36b #0b4f6c #1b85b8 #f6f2ea,
+-- già convertite in float 0..1.
+local ring_palette = {
+    {1.000, 0.478, 0.000}, -- #ff7a00
+    {1.000, 0.702, 0.420}, -- #ffb36b
+    {0.043, 0.310, 0.424}, -- #0b4f6c
+    {0.106, 0.522, 0.722}, -- #1b85b8
+    {0.965, 0.949, 0.918}, -- #f6f2ea
+}
+
+local function draw_palette_ring(ctx, x0, y0, x1, y1, rounding, thickness, t)
     local r = math.min(rounding, (x1 - x0) / 2, (y1 - y0) / 2)
 
     -- Perimetro ordinato: 4 lati dritti (segmenti da ~6px) + 4 angoli
@@ -652,10 +662,15 @@ local function draw_hue_ring(ctx, x0, y0, x1, y1, rounding, thickness, t)
     local dl = reaper.ImGui_GetWindowDrawList(ctx)
     for i = 1, #pts do
         local j = i % #pts + 1
-        local ph = t + 2 * math.pi * cum[i] / total
-        local cr = 0.5 + 0.5 * math.sin(ph)
-        local cg = 0.5 + 0.5 * math.sin(ph - 2 * math.pi / 3)
-        local cb = 0.5 + 0.5 * math.sin(ph - 4 * math.pi / 3)
+        local ph = (t + 2 * math.pi * cum[i] / total) % (2 * math.pi)
+        local s = ph / (2 * math.pi) * #ring_palette
+        local k = math.floor(s)
+        local f = s - k
+        local c0 = ring_palette[k + 1]
+        local c1 = ring_palette[(k + 1) % #ring_palette + 1]
+        local cr = c0[1] + (c1[1] - c0[1]) * f
+        local cg = c0[2] + (c1[2] - c0[2]) * f
+        local cb = c0[3] + (c1[3] - c0[3]) * f
         reaper.ImGui_DrawList_AddLine(
             dl,
             pts[i][1], pts[i][2],
@@ -697,7 +712,7 @@ function render_favorite_button(i, btn_w, btn_h)
     -- Se questo è il button hoverato nell'frame precedente: font ingrandito
     -- per dare un effetto "rilievo" (le dimensioni arrivano da
     -- render_favorites_flow, che centra il bottone nello slot) e bordo nativo
-    -- trasparente: il bordo visibile è l'anelo cromatico di draw_hue_ring.
+    -- trasparente: il bordo visibile è l'anelo di draw_palette_ring.
     local is_hover = (i == hovered_favorite_idx)
     local n_pushed_col = 4
     if is_hover then
@@ -729,8 +744,8 @@ function render_favorite_button(i, btn_w, btn_h)
     if is_hover then
         local bw = FAV_HOVER_BORDER_BASE + FAV_HOVER_BORDER_EXTRA
         local rounding = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding())
-        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_HUE_PERIOD
-        draw_hue_ring(
+        local t = reaper.ImGui_GetTime(ctx) * 2 * math.pi / FAV_HOVER_PALETTE_PERIOD
+        draw_palette_ring(
             ctx,
             rect_min_x + bw / 2, rect_min_y + bw / 2,
             rect_max_x - bw / 2, rect_max_y - bw / 2,
