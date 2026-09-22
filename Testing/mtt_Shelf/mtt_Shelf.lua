@@ -63,6 +63,7 @@ local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
 local draggedFx = nil            -- favorite in corso di drag
 local drag_grab_x = 0            -- punto di presa: offset del mouse dal bordo del button (screen space)
 local drag_grab_y = 0
+local drag_grab_captured = false -- presa catturata al frame della press (vale per il gesto corrente)
 local fav_hover_extra = 0        -- extra di larghezza hover (font 1.1x): massimo tra le favorite, set in render_favorites_flow
 
 function LoadAllFX()
@@ -782,6 +783,16 @@ function render_favorite_button(i, btn_w, btn_h)
     -- Traccia il button premuto nel frame corrente: il feedback si applica dal
     -- frame prossimo, come per l'hover
     if reaper.ImGui_IsItemActive(ctx) then
+        if pressed_favorite_idx ~= i then
+            -- Primo frame della press: il mouse è fermo sul punto di presa.
+            -- Si cattura qui, non all'attivazione del drag (1-2 frame dopo,
+            -- quando in uno scatto è già spostato di 10-20px e quell'offset
+            -- resterebbe per tutto il drag).
+            local mx, my = reaper.ImGui_GetMousePos(ctx)
+            drag_grab_x = mx - rect_min_x
+            drag_grab_y = my - rect_min_y
+            drag_grab_captured = true
+        end
         current_pressed_idx = i
     end
 
@@ -814,15 +825,16 @@ function render_favorite_button(i, btn_w, btn_h)
     end
 
     -- Drag and Drop per gli FX: la preview è render_fx_drag_preview (finestra
-    -- invisibile sopra la shelf); qui si registra solo lo stato e, una volta,
-    -- al primo frame di drag, il punto di presa.
+    -- invisibile sopra la shelf); qui si registra lo stato. Il punto di presa
+    -- è catturato al frame della press (vedi IsItemActive), col mouse ancora
+    -- fermo sul punto in cui l'utente ha afferrato.
     if fav.type == "fx" then
         -- SourceNoPreviewTooltip: senza di esso BeginDragDropSource apre un
         -- tooltip integrato (etichetta + riquadro vuoto) sopra al vero bottone.
         if reaper.ImGui_BeginDragDropSource(ctx, reaper.ImGui_DragDropFlags_SourceNoPreviewTooltip()) then
-            if not isDraggingFx then
-                -- Offset del mouse dal bordo del button: per tutto il drag la
-                -- finestra mobile tiene il centro del mouse su quelle coordinate.
+            if not isDraggingFx and not drag_grab_captured then
+                -- Fallback (non dovrebbe scattare): presa sul mouse corrente,
+                -- comportamento precedente.
                 local mx, my = reaper.ImGui_GetMousePos(ctx)
                 drag_grab_x = mx - rect_min_x
                 drag_grab_y = my - rect_min_y
@@ -1124,6 +1136,12 @@ function main_loop()
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
         for j = #hasToBeRemoved, 1, -1 do
             remove_favorite(hasToBeRemoved[j])
+        end
+
+        -- Fine del gesto: la presa catturata al frame della press vale solo
+        -- per il gesto corrente
+        if reaper.ImGui_IsMouseReleased(ctx, 0) then
+            drag_grab_captured = false
         end
 
         -- Gestione del drop FX sulla finestra
