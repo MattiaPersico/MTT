@@ -62,6 +62,7 @@ local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
 local draggedFx = nil            -- favorite in corso di drag
 local drag_grab_x = 0            -- punto di presa: offset del mouse dal bordo del button (screen space)
 local drag_grab_y = 0
+local fav_hover_extra = 0        -- extra di larghezza hover (font 1.1x): massimo tra le favorite, set in render_favorites_flow
 
 function LoadAllFX()
     local raw_fx = {}
@@ -923,6 +924,9 @@ function render_favorites_flow()
             max_extra = extra
         end
     end
+    -- Condiviso con render_fx_drag_preview: il bottone della preview usa le
+    -- dimensioni ingrandite (hover), non quelle base.
+    fav_hover_extra = max_extra
 
     local row_origin_x, row_origin_y = reaper.ImGui_GetCursorPos(ctx)
     local row_used = 0   -- offset orizzontale del prossimo slot da row_origin_x
@@ -984,12 +988,14 @@ end
 -- Preview del drag di un favorite FX: finestra invisibile (niente background,
 -- bordo e padding) che contiene solo il bottone, posizionata a mouse - punto di
 -- presa, così il centro del mouse resta sulle stesse coordinate relative del
--- bottone per tutto il drag. Il bottone riporta il nome della favorite, così
--- legge come copia del button di origine (il quadratino visibile durante il
--- drag è lui, non la finestra, che resta trasparente).
+-- bottone per tutto il drag. Il bottone usa le dimensioni ingrandite (stato
+-- hover: nome a font 1.1x, larghezza e altezza slot), non quelle base del
+-- button. Il quadratino visibile durante il drag è lui, non la finestra, che
+-- resta trasparente.
 function render_fx_drag_preview()
     local name = favorite_display_name(draggedFx)
-    local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X
+    local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X + fav_hover_extra
+    local btn_h = FAV_BTN_H + FAV_HOVER_H
 
     local mx, my = reaper.ImGui_GetMousePos(ctx)
     reaper.ImGui_SetNextWindowPos(ctx, mx - drag_grab_x, my - drag_grab_y, reaper.ImGui_Cond_Always())
@@ -1014,7 +1020,10 @@ function render_fx_drag_preview()
         reaper.ImGui_WindowFlags_AlwaysAutoResize()
 
     if reaper.ImGui_Begin(ctx, "##ShelfDragPreview", true, flags) then
-        reaper.ImGui_Button(ctx, name .. "##shelf_drag_preview", btn_w, FAV_BTN_H)
+        local fs = reaper.ImGui_GetFontSize(ctx)
+        reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
+        reaper.ImGui_Button(ctx, name .. "##shelf_drag_preview", btn_w, btn_h)
+        reaper.ImGui_PopFont(ctx)
         reaper.ImGui_End(ctx)
     end
 

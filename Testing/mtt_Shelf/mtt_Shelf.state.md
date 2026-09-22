@@ -2,7 +2,7 @@
 
 updated: 2026-09-22
 - Done:
-  - User confirmed the drag preview reads as a copy of the source favorite button (name + green frame, locked at the grab point); removed wanted #4.
+  - User confirmed the drag preview now shows the enlarged (hover) button dimensions: width = slot width (base text + shared 1.1x extra from `render_favorites_flow`), height = slot height, name at `fs * 1.1`.
 - Not done:
   - None.
 - Waiting on:
