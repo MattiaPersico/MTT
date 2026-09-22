@@ -1,8 +1,8 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-21
+updated: 2026-09-22
 - Done:
-  - The hover ring now follows a 5-color palette instead of the RGB hue wheel: `draw_hue_ring` is renamed `draw_palette_ring` and each perimeter segment's color is linearly interpolated between adjacent stops of `ring_palette` (#ff7a00 → #ffb36b → #0b4f6c → #1b85b8 → #f6f2ea, pre-converted to 0..1 floats, cyclic order), phase-shifted by position along the perimeter — the palette runs once around the button and rotates over time exactly as before (`FAV_HOVER_HUE_PERIOD` renamed `FAV_HOVER_PALETTE_PERIOD`, still 1.0s). The phase is taken modulo 2π and the second palette stop is `ring_palette[(k+1) % n + 1]`, so the lap seam stays color-continuous. Geometry (segments, corners, thickness) unchanged. Mapping tested in plain Lua straight out of the file: all 5 stops exact, max per-step channel delta over a 200-sample lap 0.024 (no band jumps), colors in [0,1] including at large `t`; an earlier index slip (`k % n + 1`) turned 4 of the 5 legs into flat bands with a full stop-to-stop jump — caught by the sweep.
+  - Added a trailing comment next to the five layout constants (`FAV_BTN_H`, `FAV_BTN_PAD_X`, `ITEM_SP_X`, `FAV_HOVER_FONT`, `FAV_HOVER_H`), so each is self-describing.
 - Not done:
   - None.
 - Waiting on:

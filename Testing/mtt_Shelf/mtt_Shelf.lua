@@ -41,11 +41,11 @@ local open_preset_popup = false
 -- centrato dentro lo slot con un inserimento uguale per tutti, così la crescita
 -- all'hover è centrale, i bottoni alla destra non si spostano e spazi e bordi
 -- delle righe restano costanti.
-local FAV_BTN_H = 28
-local FAV_BTN_PAD_X = 10
-local ITEM_SP_X = 0
-local FAV_HOVER_FONT = 1.1
-local FAV_HOVER_H = 4
+local FAV_BTN_H = 28        -- altezza fissa del bottone (px)
+local FAV_BTN_PAD_X = 10    -- padding orizzontale attorno al nome
+local ITEM_SP_X = 0         -- spazio extra tra slot e bottoni in alto
+local FAV_HOVER_FONT = 1.1  -- font 1.1x all'hover (effetto "rilievo")
+local FAV_HOVER_H = 4       -- extra di altezza dello slot per l'hover
 local FAV_HOVER_PALETTE_PERIOD = 1.0 -- secondi per un giro completo della palette dell'anello hover
 local FAV_HOVER_BORDER_BASE = 1   -- spessore bordo non hover (FrameBorderSize)
 local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'anelo cromatico)
