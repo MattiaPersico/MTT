@@ -748,6 +748,10 @@ function render_favorite_button(i, btn_w, btn_h)
         n_pushed_col = n_pushed_col + 2
     end
 
+    -- FrameBorderSize esplicito: col default del tema (0) il bordo del
+    -- bottone non si disegna e la copia nella preview drag non assomiglia
+    -- all'originale.
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
     local clicked =
         reaper.ImGui_Button(
         ctx,
@@ -755,6 +759,7 @@ function render_favorite_button(i, btn_w, btn_h)
         btn_w,
         btn_h
     )
+    reaper.ImGui_PopStyleVar(ctx, 1)
     local rect_min_x, rect_min_y = reaper.ImGui_GetItemRectMin(ctx)
     local rect_max_x, rect_max_y = reaper.ImGui_GetItemRectMax(ctx)
 
@@ -796,7 +801,9 @@ function render_favorite_button(i, btn_w, btn_h)
     -- invisibile sopra la shelf); qui si registra solo lo stato e, una volta,
     -- al primo frame di drag, il punto di presa.
     if fav.type == "fx" then
-        if reaper.ImGui_BeginDragDropSource(ctx) then
+        -- SourceNoPreviewTooltip: senza di esso BeginDragDropSource apre un
+        -- tooltip integrato (etichetta + riquadro vuoto) sopra al vero bottone.
+        if reaper.ImGui_BeginDragDropSource(ctx, reaper.ImGui_DragDropFlags_SourceNoPreviewTooltip()) then
             if not isDraggingFx then
                 -- Offset del mouse dal bordo del button: per tutto il drag la
                 -- finestra mobile tiene il centro del mouse su quelle coordinate.
@@ -989,6 +996,8 @@ function render_fx_drag_preview()
     reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 0, 0)
+    -- Come su render_favorite_button: garante il bordo in ogni tema
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
 
     -- Stesso aspetto della favorite FX
     local col_convert = reaper.ImGui_ColorConvertDouble4ToU32
@@ -1010,7 +1019,7 @@ function render_fx_drag_preview()
     end
 
     reaper.ImGui_PopStyleColor(ctx, 4)
-    reaper.ImGui_PopStyleVar(ctx, 2)
+    reaper.ImGui_PopStyleVar(ctx, 3)
 end
 
 function main_loop()
