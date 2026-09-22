@@ -763,7 +763,19 @@ function render_favorite_button(i, btn_w, btn_h)
         if reaper.ImGui_BeginDragDropSource(ctx) then
             isDraggingFx = true
             draggedFx = fav
-            reaper.ImGui_Text(ctx, "Drag: " .. display_name)
+            -- La finestra che segue il cursore disegna il bottone che si sta
+            -- trascinando (stesso aspetto della favorite FX), non il testo "Drag: nome".
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.3, 0.5, 0.35, 1))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
+            reaper.ImGui_Button(
+                ctx,
+                string.format("%s##fav_btn_drag_%d", display_name, i),
+                reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X,
+                FAV_BTN_H
+            )
+            reaper.ImGui_PopStyleColor(ctx, 4)
             reaper.ImGui_EndDragDropSource(ctx)
         end
     end
