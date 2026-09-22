@@ -2,15 +2,11 @@
 
 updated: 2026-09-22
 - Done:
-  - Split `ITEM_SP_X` into `UPPER_BTN_SP_X` (spacing between +Action, +Fx, +Preset buttons) and `FAV_BTN_SP_X` (horizontal distance between favorite buttons of the same row).
-  - Added `FAV_SECTION_PAD_X` macro for the left margin of the favorites button section (applied via `SetCursorPosX` in `render_favorites_flow`).
-  - Added `UPPER_SECTION_PAD_X` macro for the left margin of the upper button section (applied via `SetCursorPosX` in `draw_action_fx_buttons`).
+  - Reverted the hover-scale flow layout experiment (tight row, hovered button grows, all others shrink): the user tried it in REAPER and did not like it. The shelf is back to the slot-reserved layout of the previous commit (each favorite reserves a slot sized for the hover growth; the non-hovered button is drawn centered in it).
 - Not done:
   - None.
 - Waiting on:
   - In-REAPER run: hover a favorite button and check the ring shows the palette colors rotating around the button (no visible seam where the lap closes, no flicker), then move the mouse away and check the 1px per-type border (blue-grey / dark-green) comes back.
-  - In-REAPER run: with favorites of very different name lengths, check the gaps between buttons are equal across rows and every row's first button starts at the same x.
   - In-REAPER run of the case that raised the assertion (undocked shelf with favorites; hover the last favorite then move away): no `ImGui_End` boundary error, and the undocked auto-height still covers the whole slot.
-  - In-REAPER run, docked shelf: hover a favorite button (font +10%, +4px, 2px palette ring, subtle fill, centered in its slot) and check the buttons to the right don't move, rows don't jump, and no `Missing Pop*` console errors.
   - Testing the FX-drag-and-open behavior.
   - Preset save from a shelf with favorites, load in a project with an empty shelf, delete one with `x`.
