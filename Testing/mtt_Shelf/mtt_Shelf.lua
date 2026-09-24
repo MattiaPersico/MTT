@@ -61,9 +61,7 @@ local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente,
 local current_pressed_idx = -1   -- indice del button attualmente premuto (frame corrente)
 local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
 local draggedFx = nil            -- favorite in corso di drag
-local drag_grab_x = 0            -- punto di presa: offset del mouse dal bordo del button (screen space)
-local drag_grab_y = 0
-local drag_grab_captured = false -- presa catturata al frame della press (vale per il gesto corrente)
+local DRAG_PREVIEW_OFFSET_Y = 20 -- preview sotto il cursore: tiene il puntatore fuori dalla finestra
 local fav_hover_extra = 0        -- extra di larghezza hover (font 1.1x): massimo tra le favorite, set in render_favorites_flow
 
 function LoadAllFX()
@@ -783,16 +781,6 @@ function render_favorite_button(i, btn_w, btn_h)
     -- Traccia il button premuto nel frame corrente: il feedback si applica dal
     -- frame prossimo, come per l'hover
     if reaper.ImGui_IsItemActive(ctx) then
-        if pressed_favorite_idx ~= i then
-            -- Primo frame della press: il mouse è fermo sul punto di presa.
-            -- Si cattura qui, non all'attivazione del drag (1-2 frame dopo,
-            -- quando in uno scatto è già spostato di 10-20px e quell'offset
-            -- resterebbe per tutto il drag).
-            local mx, my = reaper.ImGui_GetMousePos(ctx)
-            drag_grab_x = mx - rect_min_x
-            drag_grab_y = my - rect_min_y
-            drag_grab_captured = true
-        end
         current_pressed_idx = i
     end
 
@@ -825,20 +813,11 @@ function render_favorite_button(i, btn_w, btn_h)
     end
 
     -- Drag and Drop per gli FX: la preview è render_fx_drag_preview (finestra
-    -- invisibile sopra la shelf); qui si registra lo stato. Il punto di presa
-    -- è catturato al frame della press (vedi IsItemActive), col mouse ancora
-    -- fermo sul punto in cui l'utente ha afferrato.
+    -- invisibile sopra la shelf, sotto il cursore); qui si registra lo stato.
     if fav.type == "fx" then
         -- SourceNoPreviewTooltip: senza di esso BeginDragDropSource apre un
         -- tooltip integrato (etichetta + riquadro vuoto) sopra al vero bottone.
         if reaper.ImGui_BeginDragDropSource(ctx, reaper.ImGui_DragDropFlags_SourceNoPreviewTooltip()) then
-            if not isDraggingFx and not drag_grab_captured then
-                -- Fallback (non dovrebbe scattare): presa sul mouse corrente,
-                -- comportamento precedente.
-                local mx, my = reaper.ImGui_GetMousePos(ctx)
-                drag_grab_x = mx - rect_min_x
-                drag_grab_y = my - rect_min_y
-            end
             isDraggingFx = true
             draggedFx = fav
             reaper.ImGui_EndDragDropSource(ctx)
@@ -1013,19 +992,22 @@ function render_favorites_flow()
 end
 
 -- Preview del drag di un favorite FX: finestra invisibile (niente background,
--- bordo e padding) che contiene solo il bottone, posizionata a mouse - punto di
--- presa, così il centro del mouse resta sulle stesse coordinate relative del
--- bottone per tutto il drag. Il bottone usa le dimensioni ingrandite (stato
--- hover: nome a font 1.1x, larghezza e altezza slot), non quelle base del
--- button. Il quadratino visibile durante il drag è lui, non la finestra, che
--- resta trasparente.
+-- bordo e padding) che contiene solo il bottone, con le dimensioni ingrandite
+-- (stato hover: nome a font 1.1x, larghezza e altezza slot), non quelle base
+-- del button. Il quadratino visibile durante il drag è lui, non la finestra,
+-- che resta trasparente.
+-- Posizione: come in mtt_envelope_stealer, sotto al mouse corrente (offset
+-- fisso), così il puntatore resta fuori dalla finestra; REAPER continua a
+-- ricevere i movimenti e il rilascio, l'arrange mantiene aggiornata la sua
+-- posizione interna del mouse (quella che riferisce BR_*AtMouseCursor) e il
+-- drop si risolve.
 function render_fx_drag_preview()
     local name = favorite_display_name(draggedFx)
     local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X + fav_hover_extra
     local btn_h = FAV_BTN_H + FAV_HOVER_H
 
     local mx, my = reaper.ImGui_GetMousePos(ctx)
-    reaper.ImGui_SetNextWindowPos(ctx, mx - drag_grab_x, my - drag_grab_y, reaper.ImGui_Cond_Always())
+    reaper.ImGui_SetNextWindowPos(ctx, mx, my + DRAG_PREVIEW_OFFSET_Y, reaper.ImGui_Cond_Always())
     reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowBorderSize(), 0)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), 0, 0)
@@ -1138,12 +1120,6 @@ function main_loop()
             remove_favorite(hasToBeRemoved[j])
         end
 
-        -- Fine del gesto: la presa catturata al frame della press vale solo
-        -- per il gesto corrente
-        if reaper.ImGui_IsMouseReleased(ctx, 0) then
-            drag_grab_captured = false
-        end
-
         -- Gestione del drop FX sulla finestra
         if ImGui.IsMouseReleased(ctx, 0) and isDraggingFx == true then
 
@@ -1152,15 +1128,21 @@ function main_loop()
             local payload = draggedFx.ident
 
             if payload then
-                -- Ottieni la traccia sotto il cursore del mouse
-                reaper.BR_GetMouseCursorContext()
-                local track = reaper.BR_GetMouseCursorContext_Track()
-                local take = reaper.BR_GetMouseCursorContext_Take()
+                -- Si interroga per posizione, come in mtt_envelope_stealer:
+                -- la posizione restituita è quella interna dell'arrange, che
+                -- vale solo se l'arrange ha ricevuto gli eventi — il puntatore
+                -- resta fuori dalla preview (sotto il cursore), quindi gli
+                -- eventi arrivano all'arrange (vedi render_fx_drag_preview).
+                local take = reaper.BR_TakeAtMouseCursor()
+                if take then reaper.ValidatePtr(take, "MediaItem_Take*") end
+                local track, context = reaper.BR_TrackAtMouseCursor()
+                if track then reaper.ValidatePtr(track, "MediaTrack*") end
 
                 if take then
                     local idx = reaper.TakeFX_AddByName(take, payload, -1)
                     if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
-                elseif track then
+                -- 0 = TCP, 1 = MCP, 2 = Arrange: drop solo in arrange
+                elseif track and context == 2 then
                     local idx = reaper.TrackFX_AddByName(track, payload, false, -1)
                     if idx >= 0 then reaper.TrackFX_SetOpen(track, idx, true) end
                 else

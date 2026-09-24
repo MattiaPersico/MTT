@@ -1,9 +1,12 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-22
+updated: 2026-09-24
 - Done:
-  - The drag grab point is now captured on the mouse-down frame (`drag_grab_x/y` recorded from `GetMousePos` at first press inside `render_favorite_button`, cleared on mouse release in `main_loop`) instead of at `BeginDragDropSource` activation, so a fast flick no longer bakes a 10–20px slip into the grab reference; the old mouse-current capture is kept only as a fallback (it should not fire).
+  - Repositioned the drag preview (`render_fx_drag_preview`) below the mouse with a fixed offset (`DRAG_PREVIEW_OFFSET_Y = 20`), same scheme as mtt_envelope_stealer: the pointer stays outside the window, REAPER keeps receiving the moves and the release, the arrange's internal cursor position (what `BR_*AtMouseCursor` reports) stays fresh, so the drop resolves. The user confirmed the drop now works on a normal drag.
+  - Removed `ImGui_WindowFlags_NoMouseInputs` (user tested: with the window centered under the cursor it did not fix routing) and the now-unused grab-point capture (`drag_grab_x/y`, `drag_grab_captured`).
+  - The drop still resolves the target position-based via `BR_TakeAtMouseCursor`/`BR_TrackAtMouseCursor` (+ `ValidatePtr`, arrange-only gate `context == 2`), take before track, `*FX_AddByName` + `SetOpen`.
 - Not done:
   - None.
 - Waiting on:
+  - A short wiggle that never leaves the shelf should drop nothing (the arrange's internal position is "if applicable"): not yet confirmed by the user.
   - Preset save from a shelf with favorites, load in a project with an empty shelf, delete one with `x`.
