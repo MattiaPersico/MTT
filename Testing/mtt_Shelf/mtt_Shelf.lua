@@ -446,6 +446,31 @@ end
 -- Il prefisso di formato viene stratto solo se riconosciuto (le versioni "i" seguono
 -- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
 -- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
+-- Inserisce un FX nella selezione: se ci sono item selezionati li usa (ai take),
+-- altrimenti inserisce nelle tracce selezionate.
+function insert_fx(fx_ident)
+    local take_count = reaper.CountSelectedMediaItems(0)
+    if take_count > 0 then
+        for i = 0, take_count - 1 do
+            local item = reaper.GetSelectedMediaItem(0, i)
+            local take_count2 = reaper.GetMediaItemNumTakes(item)
+            for j = 0, take_count2 - 1 do
+                local take = reaper.GetMediaItemTake(item, j)
+                local idx = reaper.TakeFX_AddByName(take, fx_ident, -1)
+                if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
+            end
+        end
+    else
+        -- Nessuna selezione di item: inserisci nelle tracce selezionate
+        local track_count = reaper.CountSelectedTracks(0)
+        for i = 0, track_count - 1 do
+            local track = reaper.GetSelectedTrack(0, i)
+            local idx = reaper.TrackFX_AddByName(track, fx_ident, false, -1)
+            if idx >= 0 then reaper.TrackFX_SetOpen(track, idx, true) end
+        end
+    end
+end
+
 function strip_fx_prefix(name)
     local prefix = name:match("^(%w+): ")
     if prefix then
@@ -834,7 +859,7 @@ function render_favorite_button(i, btn_w, btn_h)
                     --reaper.ShowConsoleMsg("[MTT_Shelf] Action clicked: type='" .. fav.type .. "', id=" .. fav.id .. ", name='" .. fav.name .. "'\n")
                     reaper.defer(function() reaper.Main_OnCommand(fav.id, -1) end)
                 elseif fav.type == "fx" and fav.ident then
-                -- Nessuna azione al click: l'FX si aggiunge solo tramite drag-and-drop
+                    insert_fx(fav.ident)
                 end
             end
         end
@@ -1139,12 +1164,10 @@ function main_loop()
                 if track then reaper.ValidatePtr(track, "MediaTrack*") end
 
                 if take then
-                    local idx = reaper.TakeFX_AddByName(take, payload, -1)
-                    if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
+                    insert_fx(payload)
                 -- 0 = TCP, 1 = MCP, 2 = Arrange: drop solo in arrange
                 elseif track and context == 2 then
-                    local idx = reaper.TrackFX_AddByName(track, payload, false, -1)
-                    if idx >= 0 then reaper.TrackFX_SetOpen(track, idx, true) end
+                    insert_fx(payload)
                 else
                     --reaper.ShowConsoleMsg("No track found under cursor.\n")
                 end
