@@ -570,7 +570,7 @@ function apply_style()
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Separator(), col(0.35, 0.35, 0.35, 2))
 
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ScrollbarSize(), 10)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ScrollbarBg(), col(0.09, 0.09, 0.09, 1))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ScrollbarBg(), col(0.09, 0.09, 0.09, 0))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ScrollbarGrab(), col(0.3, 0.3, 0.3, 1))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ScrollbarGrabActive(), col(0.2, 0.2, 0.2, 1))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ScrollbarGrabHovered(), col(0.5, 0.5, 0.5, 1))
@@ -1098,6 +1098,11 @@ function main_loop()
 
     apply_style()
 
+    -- Sfondo trasparente: si vede il grigio di REAPER dietro (pannello se
+    -- docked, arrange se flottante) e lo scaffale si mimetizza in ogni tema;
+    -- il bordo resta come contorno
+    reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
+
     local window_flags = reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoResize()
 
     local visible, is_open = reaper.ImGui_Begin(ctx, "Shelf", true, window_flags)
@@ -1119,6 +1124,8 @@ function main_loop()
         if reaper.ImGui_IsWindowDocked(ctx) then
             -- La child riempie il resto della finestra; gli scrollbar
             -- appaiono solo quando le righe di favorite non ci stanno
+            -- Sfondo della child anch'esso trasparente, come quello della finestra
+            reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
                 if
                 reaper.ImGui_BeginChild(
                 ctx,
