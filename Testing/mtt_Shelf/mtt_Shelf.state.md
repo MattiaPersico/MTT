@@ -2,9 +2,10 @@
 
 updated: 2026-09-25
 - Done:
-  - The window background now follows the active REAPER theme at runtime: `col_main_bg` is read once at startup with `reaper.GetThemeColor("col_main_bg")` (top of the file), the signed AARRGGBB is unpacked into `theme_bg_r/g/b`, and `apply_style` pushes it as `WindowBg` (opaque). Fallback is the old `#282828` when the read returns -1. The hardcoded `#282828` matched the user's reference image, confirming the key; only the alpha byte is discarded (painted opaque).
+  - Custom left scrollbar in both docked and undocked modes (option 1): undocked — main window sets `WindowFlags_NoScrollbar` (native right bar hidden, wheel still scrolls) and all content is shifted right by `LEFT_SB_W + LEFT_SB_GAP`; docked — the `##shelf` child uses `NoScrollbar | HorizontalScrollbar` (native vertical bar hidden, wheel still scrolls; the horizontal one is a fallback for a single favorite wider than the dock), `sb_top_x/y`/`sb_avail_h` are taken each frame from the child's content region, favorites are shifted by `LEFT_SB_W + LEFT_SB_GAP` and `draw_left_scrollbar` draws track + grab on the child's scroll state at the end of the frame. The `+Action/+Fx/+Preset` row is shifted the same amount in docked mode so it aligns with the first favorites row. `render_favorites_flow` takes an optional `extra_limit` and wraps rows on the remaining `GetContentRegionAvail` width, so the right edge never leaves the content region.
 - Not done:
-  - None.
+  - Hand cursor over draggable FX (wanted 2): deferred by the user, to be done later.
 - Waiting on:
-  - User check in REAPER that the background still matches their reference (it should, since the value equals `#282828` for their theme), and ideally with a second theme to see it adapt.
+  - User check, docked shelf with enough favorites to overflow the dock height: the left track + grab appears, wheel scroll, grab drag, track click work; the +Action row aligns with the first favorites row; no horizontal bar in normal use.
+  - User check, undocked (content taller than the window): wheel scroll, grab drag, track click; the left strip never covers the first favorite button.
   - Preset save from a shelf with favorites, load in a project with an empty shelf, delete one with `x`.

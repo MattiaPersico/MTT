@@ -66,6 +66,20 @@ local FAV_HOVER_BORDER_EXTRA = 1  -- extra hover: 1 + 1 = 2px (spessore dell'ane
 local FAV_PRESSED_SHRINK_X = 6  -- riduzione di larghezza del bottone alla pressione
 local FAV_PRESSED_SHRINK_Y = 4  -- riduzione di altezza del bottone alla pressione
 local FAV_DRAG_SRC_GRAY = 0.3  -- "negativo" in drag: luminosità di bordo + scritta del button d'origine
+
+-- Scrollbar custom sul bordo sinistro (entrambi i modi): la nativa è
+-- nascosta (WindowFlags_NoScrollbar, la wheel continua a scrollare); larghezza
+-- del grab, distanza dal contenuto e colori (grigi, leggibili su tema chiaro e
+-- scuro). sb_*: origine e altezza della regione di contenuto, prese ogni frame
+-- in main_loop (undocked: finestra principale, docked: dentro la child) per il
+-- disegno di fine frame. La striscia sta all'origine del contenuto; le righe
+-- partono dopo (LEFT_SB_W + LEFT_SB_GAP, shift di render_favorites_flow).
+local LEFT_SB_W = 10
+local LEFT_SB_GAP = 6
+local LEFT_SB_TRACK_COL = 0x30808080
+local LEFT_SB_GRAB_COL = 0xFF808080
+local LEFT_SB_GRAB_HOVER_COL = 0xFFAAAAAA
+local sb_top_x, sb_top_y, sb_avail_h = 0, 0, 0
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
@@ -938,9 +952,9 @@ function draw_action_fx_buttons()
 end
 
 -- I favorite scorrono su righe che si riempono fino alla larghezza
--- disponibile e poi vanno a capo; quando le righe non entrano più, la child
--- (docked) fa apparire lo scrollbar verticale e quello orizzontale copre i
--- nomi troppo lunghi.
+-- disponibile e poi vanno a capo; quando le righe non entrano più in altezza,
+-- a scrollare è la barra custom di sinistra (la nativa verticale è nascosta in
+-- entrambi i modi).
 -- Ogni favorite occupa uno slot: il suo bottone + un extra costante, uguale
 -- per tutti (il massimo extra hover, che cresce col font 1.1x del nome più
 -- lungo). L'inserimento del bottone nello slot è quindi costante: lo spazio
@@ -948,9 +962,13 @@ end
 -- le righe, indipendentemente dai nomi. L'hover cresce comunque in posto e i
 -- bottoni alla destra non si spostano; le righe non si ricollocano mai perché
 -- il wrapping usa sempre la dimensione slot.
-function render_favorites_flow()
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X)
-    local limit = reaper.ImGui_GetWindowWidth(ctx) - FAV_BTN_SP_X
+function render_favorites_flow(extra_limit)
+    -- extra_limit: la striscia riserbata a sinistra (scrollbar custom): le
+    -- righe partono dopo di essa e il limite è la larghezza disponibile
+    -- residua, così il bordo destro non esce dalla regione di contenuto.
+    local shift = extra_limit or 0
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X + shift)
+    local limit = reaper.ImGui_GetContentRegionAvail(ctx)
     local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
 
     -- Extra orizzontale dell'hover (font 1.1x) per ogni nome: lo slot lo
@@ -1026,6 +1044,58 @@ function render_favorites_flow()
         -- crescere la finestra.
         reaper.ImGui_Dummy(ctx, 0, 0)
     end
+end
+
+-- Scrollbar custom sul bordo sinistro (entrambi i modi): la nativa è
+-- nascosta (WindowFlags_NoScrollbar, la wheel continua a scrollare); qui la
+-- track e il grab seguono lo stesso stato scroll della finestra corrente
+-- (undocked: finestra principale, docked: child). Si disegna
+-- solo quando il contenuto eccede l'altezza (max_y > 0).
+function draw_left_scrollbar()
+    local max_y = reaper.ImGui_GetScrollMaxY(ctx)
+    if max_y <= 0 then
+        return
+    end
+
+    local track_h = sb_avail_h
+    local grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
+    local grab_top_y = sb_top_y + (reaper.ImGui_GetScrollY(ctx) / max_y) * (track_h - grab_h)
+
+    -- Il mouse e la posizione della finestra sono in coordinate schermo: passa
+    -- il mouse a coordinate della finestra.
+    local _, win_y = reaper.ImGui_GetWindowPos(ctx)
+    local _, mouse_y = reaper.ImGui_GetMousePos(ctx)
+    local mouse_ly = mouse_y - win_y
+
+    -- Track: bottone invisibile su tutta la striscia; il grab viene dopo e
+    -- vince sull'overlap in hit-test.
+    reaper.ImGui_SetCursorPos(ctx, sb_top_x, sb_top_y)
+    local track_hit = reaper.ImGui_InvisibleButton(ctx, "##left_sb_track", LEFT_SB_W, track_h)
+    reaper.ImGui_SetCursorPos(ctx, sb_top_x, grab_top_y)
+    reaper.ImGui_InvisibleButton(ctx, "##left_sb_grab", LEFT_SB_W, grab_h)
+    local grab_active = reaper.ImGui_IsItemActive(ctx)
+    local grab_hover = reaper.ImGui_IsItemHovered(ctx)
+
+    -- Il punto sotto il mouse diventa il top del grab (in drag) o il suo centro
+    -- (click sulla track): la scroll salta di conseguenza, clampata.
+    local function scroll_at(rel_y)
+        local s = (rel_y - sb_top_y) / (track_h - grab_h) * max_y
+        return math.min(math.max(s, 0), max_y)
+    end
+    if grab_active then
+        reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly))
+    elseif track_hit and mouse_ly >= sb_top_y and mouse_ly <= sb_top_y + track_h then
+        reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly - grab_h / 2))
+    end
+
+    -- Visivi: la track sottile sempre, il grab più evidente (chiaro all'hover).
+    local grab_col = LEFT_SB_GRAB_COL
+    if grab_hover or grab_active then
+        grab_col = LEFT_SB_GRAB_HOVER_COL
+    end
+    local dl = reaper.ImGui_GetWindowDrawList(ctx)
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x, sb_top_y, sb_top_x + LEFT_SB_W, sb_top_y + track_h, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x, grab_top_y, sb_top_x + LEFT_SB_W, grab_top_y + grab_h, grab_col, LEFT_SB_W / 2)
 end
 
 -- Preview del drag di un favorite FX: finestra invisibile (niente background,
@@ -1110,7 +1180,11 @@ function main_loop()
 
     apply_style()
 
+    -- NoScrollbar: nasconde la barra nativa a destra (la wheel continua a
+    -- scrollare); in entrambi i modi il suo posto lo prende la scrollbar
+    -- custom di sinistra (docked: sulla child).
     local window_flags = reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoResize()
+        | reaper.ImGui_WindowFlags_NoScrollbar()
 
     local visible, is_open = reaper.ImGui_Begin(ctx, "Shelf", true, window_flags)
 
@@ -1123,14 +1197,32 @@ function main_loop()
             reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowRounding(), 0)
             reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 1)
             reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 4, 1)
+        else
+            -- Undocked: ricorda l'origine della regione di contenuto (la
+            -- striscia sta lì, al bordo) e solo poi sposta tutto il contenuto
+            -- a destra della striscia.
+            sb_top_x, sb_top_y = reaper.ImGui_GetCursorPos(ctx)
+            reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + LEFT_SB_W + LEFT_SB_GAP)
+            _, sb_avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
         end
         hasToBeRemoved = {}
+        if docked then
+            -- La riga in alto si allinea alla prima riga di favorite (che la
+            -- child sposta di LEFT_SB_W + LEFT_SB_GAP): stessa striscia di
+            -- sinistra, come in undocked, dove lo shift è fatto prima di tutto.
+            reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + LEFT_SB_W + LEFT_SB_GAP)
+        end
 
         draw_action_fx_buttons()
 
-        if reaper.ImGui_IsWindowDocked(ctx) then
-            -- La child riempie il resto della finestra; gli scrollbar
-            -- appaiono solo quando le righe di favorite non ci stanno
+        if docked then
+            -- La child riempie il resto della finestra. La sua barra nativa
+            -- verticale è nascosta (NoScrollbar, la wheel continua a
+            -- scrollare): il suo posto lo prende la barra custom di sinistra,
+            -- disegnata dentro la child sul suo stato scroll. Quella
+            -- orizzontale resta solo come fallback per un' singola favorite più
+            -- larga del dock (con il wrapping a larghezza non dovrebbe
+            -- comparire).
                 if
                 reaper.ImGui_BeginChild(
                 ctx,
@@ -1138,18 +1230,25 @@ function main_loop()
                 0,
                 0,
                 0,
-                reaper.ImGui_WindowFlags_HorizontalScrollbar()
+                reaper.ImGui_WindowFlags_NoScrollbar() | reaper.ImGui_WindowFlags_HorizontalScrollbar()
             )
             then
-                render_favorites_flow()
+                -- Origine della striscia = origine del contenuto della child;
+                -- le righe si spostano da sole (render_favorites_flow) perché
+                -- il cursore della child non ha subito reset di riga.
+                sb_top_x, sb_top_y = reaper.ImGui_GetCursorPos(ctx)
+                _, sb_avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+                render_favorites_flow(LEFT_SB_W + LEFT_SB_GAP)
                 reset_hovered_if_none()
                 reset_pressed_if_none()
+                draw_left_scrollbar()
                 reaper.ImGui_EndChild(ctx)
             end
         else
-            render_favorites_flow()
+            render_favorites_flow(LEFT_SB_W + LEFT_SB_GAP)
             reset_hovered_if_none()
             reset_pressed_if_none()
+            draw_left_scrollbar()
         end
 
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
