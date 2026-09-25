@@ -6,6 +6,17 @@ local ctx = reaper.ImGui_CreateContext("mtt_Shelf", reaper.ImGui_ConfigFlags_Doc
 local FAVORITES_FILENAME = ".mtt_shelf.txt"
 local favorites = {}
 
+-- Sfondo dello scaffale: il background (col_main_bg) del tema REAPER attivo,
+-- letto una sola volta all'avvio. -1 = lettura fallita: si usa #282828.
+local theme_bg = reaper.GetThemeColor("col_main_bg")
+local theme_bg_r, theme_bg_g, theme_bg_b = 0.157, 0.157, 0.157
+if theme_bg ~= -1 then
+    local c = theme_bg < 0 and theme_bg + 0x100000000 or theme_bg
+    theme_bg_r = ((c >> 16) & 0xFF) / 255
+    theme_bg_g = ((c >> 8) & 0xFF) / 255
+    theme_bg_b = (c & 0xFF) / 255
+end
+
 -- Variabili per la gestione della selezione azione (solo per aggiunta)
 local is_adding_action = false
 local proj_name = reaper.GetProjectName(0)
@@ -539,7 +550,8 @@ end
 function apply_style()
     local col = reaper.ImGui_ColorConvertDouble4ToU32
 
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), col(0.1, 0.1, 0.1, 1))
+    -- Sfondo dello scaffale: background del tema REAPER attivo, letto all'avvio (fallback #282828)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_WindowBg(), col(theme_bg_r, theme_bg_g, theme_bg_b, 1))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col(0.45, 0.45, 0.45, 2))
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_BorderShadow(), col(0, 0, 0, 2))
 
@@ -1098,11 +1110,6 @@ function main_loop()
 
     apply_style()
 
-    -- Sfondo trasparente: si vede il grigio di REAPER dietro (pannello se
-    -- docked, arrange se flottante) e lo scaffale si mimetizza in ogni tema;
-    -- il bordo resta come contorno
-    reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
-
     local window_flags = reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoResize()
 
     local visible, is_open = reaper.ImGui_Begin(ctx, "Shelf", true, window_flags)
@@ -1124,8 +1131,6 @@ function main_loop()
         if reaper.ImGui_IsWindowDocked(ctx) then
             -- La child riempie il resto della finestra; gli scrollbar
             -- appaiono solo quando le righe di favorite non ci stanno
-            -- Sfondo della child anch'esso trasparente, come quello della finestra
-            reaper.ImGui_SetNextWindowBgAlpha(ctx, 0)
                 if
                 reaper.ImGui_BeginChild(
                 ctx,
