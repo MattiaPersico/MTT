@@ -14,9 +14,9 @@ Every script has three notes in its folder:
     <dir>/<name>.wanted.md    the user's list
 
 English, impersonal third person ("the user"; never "I" or a name). A note that disagrees with the code is wrong: fix the note.
-- Before changing a script, read its `.state.md` and `.wanted.md` (its `.md` too if unfamiliar). A question about a script is not a change.
+- Before changing a script, read its `.state.md` and `.wanted.md` (its `.md` too if unfamiliar), once per thread: after a compaction the summary is newer than the notes. A question about a script is not a change.
 - A failed read is not proof a note is missing: list the folder first. Really missing → create all three from `_NOTE_TEMPLATE.md` (repo root) in the same pass: "What it is" from the code, the rest empty.
-- Work done → before replying, rewrite the whole `.state.md` with `write_file`, never `edit_file` (a partial edit ends up appending):
+- Work done, or a change ready for the user's test → before replying, rewrite the whole `.state.md` with `write_file`, never `edit_file` (a partial edit ends up appending):
 
       # <name> — where we left off
 
@@ -25,7 +25,7 @@ English, impersonal third person ("the user"; never "I" or a name). A note that 
       - Not done:
       - Waiting on:
 
-  Done = only what this session changed (older lines go). Not done = asked for, not delivered, and why. Waiting on = still open, incl. an older change whose check has not come back. `updated:` = the date only: no commit, branch or "to commit".
+  Done = only what this session changed (older lines go). Not done = asked for, not delivered, and why. Waiting on = still open, incl. an older change whose check has not come back — a check comes back only in the user's words: quote them. `updated:` = the date only: no commit, branch or "to commit".
 - `.wanted.md` is the user's menu, not a queue: do only the entry asked for. Implemented → remove it and renumber, rewriting the file whole. Never add, reword, reorder or prune an entry. Re-read it in the same turn before acting on "number 3".
 - `.md`: "What it is" = purpose in one short paragraph, not implementation. "Ruled out" = only a wrong diagnosis with no code line to comment on, one line each: `- YYYY-MM-DD — <symptom>: NOT <wrong cause>. <real cause>`. Any other decision is a comment on its code line.
 - Commit the notes in the same commit as the change they describe.
