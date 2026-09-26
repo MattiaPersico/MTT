@@ -74,12 +74,18 @@ local FAV_DRAG_SRC_GRAY = 0.3  -- "negativo" in drag: luminosità di bordo + scr
 -- in main_loop (undocked: finestra principale, docked: dentro la child) per il
 -- disegno di fine frame. La striscia sta all'origine del contenuto; le righe
 -- partono dopo (LEFT_SB_W + LEFT_SB_GAP, shift di render_favorites_flow).
+-- La track è solo il bordo; il grab è più stretto e centrato nella striscia.
+-- I colori sono 0xRRGGBBAA (ReaImGui, alpha nell'ultimo byte): i grigi vecchi
+-- (0xFF808080 ecc.) erano in realtà rossi semi-trasparenti.
 local LEFT_SB_W = 10
+local LEFT_SB_GRAB_W = 4
 local LEFT_SB_GAP = 6
-local LEFT_SB_TRACK_COL = 0x30808080
-local LEFT_SB_GRAB_COL = 0xFF808080
-local LEFT_SB_GRAB_HOVER_COL = 0xFFAAAAAA
+local LEFT_SB_TRACK_COL = 0x80808050
+local LEFT_SB_GRAB_COL = 0x404040FF
+local LEFT_SB_GRAB_HOVER_COL = 0x606060FF
 local sb_top_x, sb_top_y, sb_avail_h = 0, 0, 0
+local sb_press_on_grab = false  -- bottone sinistro trattenuto col punto dentro il grab (scartato al rilascio)
+local sb_press_off_y = 0        -- offset del punto di pressione dentro il grab: evita lo snap all'inizio
 local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente, per bordo grosso)
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
@@ -1054,6 +1060,7 @@ end
 function draw_left_scrollbar()
     local max_y = reaper.ImGui_GetScrollMaxY(ctx)
     if max_y <= 0 then
+        sb_press_on_grab = false
         return
     end
 
@@ -1063,49 +1070,66 @@ function draw_left_scrollbar()
     local grab_top_y = sb_top_y + (scroll_y / max_y) * (track_h - grab_h)
 
     -- Il mouse e la posizione della finestra sono in coordinate schermo: passa
-    -- il mouse a coordinate della finestra. win_x/win_y servono anche per i
-    -- rettagli DrawList (vedi sotto).
+    -- il mouse a coordinate della finestra corrente (docked: la child; è lo
+    -- stesso spazio di sb_*). win_x/win_y servono anche per i rettagli
+    -- DrawList (vedi sotto).
     local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
-    local _, mouse_y = reaper.ImGui_GetMousePos(ctx)
-    local mouse_ly = mouse_y - win_y
+    local mouse_lx, mouse_ly = reaper.ImGui_GetMousePos(ctx)
+    mouse_lx, mouse_ly = mouse_lx - win_x, mouse_ly - win_y
 
-    -- Track: bottone invisibile su tutta la striscia; il grab viene dopo e
-    -- vince sull'overlap in hit-test. La striscia resta agganciata alla regione
-    -- VISIBLE (come la barra nativa): lo spazio di coordinate della finestra
-    -- scorre col contenuto (GetCursorPos insegue il top del contenuto, che esce
-    -- dalla finestra appena si scrolla — il check con i marker lo ha confermato),
-    -- quindi i bottoni vanno compensati di +scroll per restare in vista.
-    reaper.ImGui_SetCursorPos(ctx, sb_top_x, sb_top_y + scroll_y)
-    local track_hit = reaper.ImGui_InvisibleButton(ctx, "##left_sb_track", LEFT_SB_W, track_h)
-    reaper.ImGui_SetCursorPos(ctx, sb_top_x, grab_top_y + scroll_y)
-    reaper.ImGui_InvisibleButton(ctx, "##left_sb_grab", LEFT_SB_W, grab_h)
-    local grab_active = reaper.ImGui_IsItemActive(ctx)
-    local grab_hover = reaper.ImGui_IsItemHovered(ctx)
+    -- Hit test manuale contro i rettagli (niente widget invisibili: i bottoni
+    -- riposizionati ogni frame con SetCursorPos rompevano IsItemActive, e la
+    -- scroll si aggiornava solo al rilascio). La striscia non deve rispondere
+    -- se un'altra finestra è davanti (popup aperti sopra lo scaffale) o se un
+    -- drag di favorite FX è in corso.
+    local win_free = reaper.ImGui_IsWindowHovered(ctx) and not isDraggingFx
+    local in_strip_x = mouse_lx >= sb_top_x and mouse_lx <= sb_top_x + LEFT_SB_W
+    local over_grab = win_free and in_strip_x
+        and mouse_ly >= grab_top_y and mouse_ly <= grab_top_y + grab_h
+    local over_track = win_free and in_strip_x
+        and mouse_ly >= sb_top_y and mouse_ly <= sb_top_y + track_h
 
-    -- Il punto sotto il mouse diventa il top del grab (in drag) o il suo centro
-    -- (click sulla track): la scroll salta di conseguenza, clampata.
+    -- Il punto p della track corrisponde a (p - sb_top_y) / (track_h - grab_h)
+    -- * max_y, clampato.
     local function scroll_at(rel_y)
         local s = (rel_y - sb_top_y) / (track_h - grab_h) * max_y
         return math.min(math.max(s, 0), max_y)
     end
-    if grab_active then
-        reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly))
-    elseif track_hit and mouse_ly >= sb_top_y and mouse_ly <= sb_top_y + track_h then
-        reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly - grab_h / 2))
+
+    local mouse_down = reaper.ImGui_IsMouseDown(ctx, 0)
+    if mouse_down then
+        if not sb_press_on_grab and over_grab then
+            -- Punto trattenuto dentro il grab: latcha l'offset di pressione
+            -- (il punto resta fermo rispetto al grab) e la scroll lo segue su
+            -- ogni frame: niente snap al primo frame.
+            sb_press_on_grab = true
+            sb_press_off_y = mouse_ly - grab_top_y
+        end
+        if sb_press_on_grab then
+            reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly - sb_press_off_y))
+        elseif over_track then
+            -- Trascinata sulla track (fuori dal grab): il centro del grab va
+            -- sotto il cursore; la scroll insegue finché non si prende il grab.
+            reaper.ImGui_SetScrollY(ctx, scroll_at(mouse_ly - grab_h / 2))
+        end
+    else
+        sb_press_on_grab = false
     end
 
-    -- Visivi: la track sottile sempre, il grab più evidente (chiaro all'hover).
+    -- Visivi: la track è solo il bordo, il grab grigio scuro più stretto
+    -- (centrato nella striscia, chiaro all'hover).
     -- La DrawList della finestra vive in coordinate SCHERMO (la docs di
     -- GetCursorScreenPos: "more useful to work with the DrawList API"): i
     -- rettagli vanno spostati all'origine della finestra, altrimenti finiscono
     -- fuori dalla clip rect della finestra e non si disegna mai nulla.
     local grab_col = LEFT_SB_GRAB_COL
-    if grab_hover or grab_active then
+    if over_grab or sb_press_on_grab then
         grab_col = LEFT_SB_GRAB_HOVER_COL
     end
+    local grab_x = sb_top_x + (LEFT_SB_W - LEFT_SB_GRAB_W) / 2
     local dl = reaper.ImGui_GetWindowDrawList(ctx)
-    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x + win_x, sb_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, sb_top_y + track_h + win_y, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
-    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x + win_x, grab_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, grab_top_y + grab_h + win_y, grab_col, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRect(dl, sb_top_x + win_x, sb_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, sb_top_y + track_h + win_y, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRectFilled(dl, grab_x + win_x, grab_top_y + win_y, grab_x + win_x + LEFT_SB_GRAB_W, grab_top_y + grab_h + win_y, grab_col, LEFT_SB_GRAB_W / 2)
 end
 
 -- Preview del drag di un favorite FX: finestra invisibile (niente background,
