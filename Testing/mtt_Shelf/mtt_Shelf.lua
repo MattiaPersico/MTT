@@ -1058,20 +1058,26 @@ function draw_left_scrollbar()
     end
 
     local track_h = sb_avail_h
+    local scroll_y = reaper.ImGui_GetScrollY(ctx)
     local grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
-    local grab_top_y = sb_top_y + (reaper.ImGui_GetScrollY(ctx) / max_y) * (track_h - grab_h)
+    local grab_top_y = sb_top_y + (scroll_y / max_y) * (track_h - grab_h)
 
     -- Il mouse e la posizione della finestra sono in coordinate schermo: passa
-    -- il mouse a coordinate della finestra.
-    local _, win_y = reaper.ImGui_GetWindowPos(ctx)
+    -- il mouse a coordinate della finestra. win_x/win_y servono anche per i
+    -- rettagli DrawList (vedi sotto).
+    local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
     local _, mouse_y = reaper.ImGui_GetMousePos(ctx)
     local mouse_ly = mouse_y - win_y
 
     -- Track: bottone invisibile su tutta la striscia; il grab viene dopo e
-    -- vince sull'overlap in hit-test.
-    reaper.ImGui_SetCursorPos(ctx, sb_top_x, sb_top_y)
+    -- vince sull'overlap in hit-test. La striscia resta agganciata alla regione
+    -- VISIBLE (come la barra nativa): lo spazio di coordinate della finestra
+    -- scorre col contenuto (GetCursorPos insegue il top del contenuto, che esce
+    -- dalla finestra appena si scrolla — il check con i marker lo ha confermato),
+    -- quindi i bottoni vanno compensati di +scroll per restare in vista.
+    reaper.ImGui_SetCursorPos(ctx, sb_top_x, sb_top_y + scroll_y)
     local track_hit = reaper.ImGui_InvisibleButton(ctx, "##left_sb_track", LEFT_SB_W, track_h)
-    reaper.ImGui_SetCursorPos(ctx, sb_top_x, grab_top_y)
+    reaper.ImGui_SetCursorPos(ctx, sb_top_x, grab_top_y + scroll_y)
     reaper.ImGui_InvisibleButton(ctx, "##left_sb_grab", LEFT_SB_W, grab_h)
     local grab_active = reaper.ImGui_IsItemActive(ctx)
     local grab_hover = reaper.ImGui_IsItemHovered(ctx)
@@ -1089,13 +1095,17 @@ function draw_left_scrollbar()
     end
 
     -- Visivi: la track sottile sempre, il grab più evidente (chiaro all'hover).
+    -- La DrawList della finestra vive in coordinate SCHERMO (la docs di
+    -- GetCursorScreenPos: "more useful to work with the DrawList API"): i
+    -- rettagli vanno spostati all'origine della finestra, altrimenti finiscono
+    -- fuori dalla clip rect della finestra e non si disegna mai nulla.
     local grab_col = LEFT_SB_GRAB_COL
     if grab_hover or grab_active then
         grab_col = LEFT_SB_GRAB_HOVER_COL
     end
     local dl = reaper.ImGui_GetWindowDrawList(ctx)
-    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x, sb_top_y, sb_top_x + LEFT_SB_W, sb_top_y + track_h, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
-    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x, grab_top_y, sb_top_x + LEFT_SB_W, grab_top_y + grab_h, grab_col, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x + win_x, sb_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, sb_top_y + track_h + win_y, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_top_x + win_x, grab_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, grab_top_y + grab_h + win_y, grab_col, LEFT_SB_W / 2)
 end
 
 -- Preview del drag di un favorite FX: finestra invisibile (niente background,

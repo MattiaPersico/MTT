@@ -1,11 +1,11 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-25
+updated: 2026-09-26
 - Done:
-  - Custom left scrollbar in both docked and undocked modes (option 1): undocked — main window sets `WindowFlags_NoScrollbar` (native right bar hidden, wheel still scrolls) and all content is shifted right by `LEFT_SB_W + LEFT_SB_GAP`; docked — the `##shelf` child uses `NoScrollbar | HorizontalScrollbar` (native vertical bar hidden, wheel still scrolls; the horizontal one is a fallback for a single favorite wider than the dock), `sb_top_x/y`/`sb_avail_h` are taken each frame from the child's content region, favorites are shifted by `LEFT_SB_W + LEFT_SB_GAP` and `draw_left_scrollbar` draws track + grab on the child's scroll state at the end of the frame. The `+Action/+Fx/+Preset` row is shifted the same amount in docked mode so it aligns with the first favorites row. `render_favorites_flow` takes an optional `extra_limit` and wraps rows on the remaining `GetContentRegionAvail` width, so the right edge never leaves the content region.
+  - Custom left scrollbar visual (`draw_left_scrollbar`): track + grab rects now offset by `GetWindowPos` (DrawList works in screen coordinates) — user tested: still never visible, so the origin/coordinate convention is suspect. Added a temporary debug block at the top of the function with three 20×20 markers (green = `GetCursorScreenPos` at the strip origin, blue = `GetWindowPos` origin, red = green + 100px, i.e. guaranteed inside the content) to pin down where the window DrawList actually draws.
 - Not done:
+  - Custom left scrollbar visual: markers in place, awaiting the user's REAPER run (docked vs undocked) to identify the real coordinate behavior before choosing the fix.
   - Hand cursor over draggable FX (wanted 2): deferred by the user, to be done later.
 - Waiting on:
-  - User check, docked shelf with enough favorites to overflow the dock height: the left track + grab appears, wheel scroll, grab drag, track click work; the +Action row aligns with the first favorites row; no horizontal bar in normal use.
-  - User check, undocked (content taller than the window): wheel scroll, grab drag, track click; the left strip never covers the first favorite button.
+  - User check: shelf with overflowing content (wheel scrolls) — which of the three colored squares (green/blue/red) are visible and where, docked and undocked.
   - Preset save from a shelf with favorites, load in a project with an empty shelf, delete one with `x`.
