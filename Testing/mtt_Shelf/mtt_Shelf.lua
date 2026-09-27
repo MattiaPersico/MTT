@@ -477,27 +477,16 @@ end
 -- Il prefisso di formato viene stratto solo se riconosciuto (le versioni "i" seguono
 -- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
 -- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
--- Inserisce un FX: con drop_track (drop su traccia, senza item sotto il
--- puntatore) va su quella traccia, ignorando gli item selezionati; altrimenti
--- item selezionati (ai take), in loro assenza le tracce selezionate; con
--- drop_take (rilascio del drag), un item non selezionato bersagliato conta da
--- solo.
-function insert_fx(fx_ident, drop_take, drop_track)
+-- Inserisce un FX: item selezionati (ai take), in loro assenza le tracce
+-- selezionate; con drop_take (rilascio del drag), un item non selezionato
+-- bersagliato conta da solo.
+function insert_fx(fx_ident, drop_take)
     -- Item sotto il puntatore al rilascio del drag (take -> item)
     local drop_item = drop_take and reaper.GetMediaItemTake_Item(drop_take)
 
-    -- Dove finisce l'FX:
-    -- drop sulla traccia (TCP o strip arrange, senza item sotto il puntatore)
-    -- -> quella traccia, ignorando gli item selezionati;
-    -- drop su item non selezionato -> solo quello (non sui selezionati);
-    -- drop su item selezionato o senza bersaglio (click) -> tutti gli item
-    -- selezionati; nessuna selezione di item -> tracce selezionate.
-    if drop_track then
-        local idx = reaper.TrackFX_AddByName(drop_track, fx_ident, false, -1)
-        if idx >= 0 then reaper.TrackFX_SetOpen(drop_track, idx, true) end
-        return
-    end
-
+    -- Dove finisce l'FX: drop su item non selezionato -> solo quello (non sui
+    -- selezionati); drop su item selezionato o senza bersaglio (click) -> tutti
+    -- gli item selezionati; nessuna selezione di item -> tracce selezionate.
     local items = {}
     local sel_count = reaper.CountSelectedMediaItems(0)
     if drop_item and reaper.GetMediaItemInfo_Value(drop_item, "B_UISEL") ~= 1 then
@@ -1359,10 +1348,9 @@ function main_loop()
                     -- Con la take del drop, insert_fx sceglie tra item
                     -- selezionati e l'item effettivamente bersagliato
                     insert_fx(payload, take)
-                -- 0 = TCP, 1 = MCP, 2 = Arrange: drop su track in arrange e TCP
-                -- (l'FX va su quella traccia, ignorando gli item selezionati)
-                elseif track and (context == 0 or context == 2) then
-                    insert_fx(payload, nil, track)
+                -- 0 = TCP, 1 = MCP, 2 = Arrange: drop solo in arrange
+                elseif track and context == 2 then
+                    insert_fx(payload)
                 else
                     --reaper.ShowConsoleMsg("No track found under cursor.\n")
                 end
