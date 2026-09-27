@@ -477,15 +477,30 @@ end
 -- Il prefisso di formato viene stratto solo se riconosciuto (le versioni "i" seguono
 -- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
 -- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
--- Inserisce un FX nella selezione: se ci sono item selezionati li usa (ai take),
--- altrimenti inserisce nelle tracce selezionate.
-function insert_fx(fx_ident)
-    local take_count = reaper.CountSelectedMediaItems(0)
-    if take_count > 0 then
-        for i = 0, take_count - 1 do
-            local item = reaper.GetSelectedMediaItem(0, i)
-            local take_count2 = reaper.GetMediaItemNumTakes(item)
-            for j = 0, take_count2 - 1 do
+-- Inserisce un FX: item selezionati (ai take), in loro assenza le tracce
+-- selezionate; con drop_take (rilascio del drag), un item non selezionato
+-- bersagliato conta da solo.
+function insert_fx(fx_ident, drop_take)
+    -- Item sotto il puntatore al rilascio del drag (take -> item)
+    local drop_item = drop_take and reaper.GetMediaItemTake_Item(drop_take)
+
+    -- Dove finisce l'FX: drop su item non selezionato -> solo quello (non sui
+    -- selezionati); drop su item selezionato o senza bersaglio (click) -> tutti
+    -- gli item selezionati; nessuna selezione di item -> tracce selezionate.
+    local items = {}
+    local sel_count = reaper.CountSelectedMediaItems(0)
+    if drop_item and reaper.GetMediaItemInfo_Value(drop_item, "B_UISEL") ~= 1 then
+        items[1] = drop_item
+    elseif sel_count > 0 then
+        for i = 0, sel_count - 1 do
+            items[i + 1] = reaper.GetSelectedMediaItem(0, i)
+        end
+    end
+
+    if #items > 0 then
+        for _, item in ipairs(items) do
+            local n_takes = reaper.GetMediaItemNumTakes(item)
+            for j = 0, n_takes - 1 do
                 local take = reaper.GetMediaItemTake(item, j)
                 local idx = reaper.TakeFX_AddByName(take, fx_ident, -1)
                 if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
@@ -1330,7 +1345,9 @@ function main_loop()
                 if track then reaper.ValidatePtr(track, "MediaTrack*") end
 
                 if take then
-                    insert_fx(payload)
+                    -- Con la take del drop, insert_fx sceglie tra item
+                    -- selezionati e l'item effettivamente bersagliato
+                    insert_fx(payload, take)
                 -- 0 = TCP, 1 = MCP, 2 = Arrange: drop solo in arrange
                 elseif track and context == 2 then
                     insert_fx(payload)
