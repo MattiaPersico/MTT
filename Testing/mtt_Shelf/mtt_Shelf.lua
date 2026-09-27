@@ -1200,6 +1200,11 @@ function render_fx_drag_preview()
 end
 
 function main_loop()
+    -- I bottoni (e quindi IsItemHovered) vengono renderizzati solo se la
+    -- finestra è visible: senza reset, un indice stale di un frame visible
+    -- passato farebbe credere che il mouse sia sopra a un button.
+    current_hovered_idx = -1
+
     if reaper.GetProjectName(0) ~= proj_name then
         proj_name = reaper.GetProjectName(0)
         favorites = {}
@@ -1297,7 +1302,23 @@ function main_loop()
 
             local payload = draggedFx.ident
 
-            if payload then
+            -- Drop sulla shelf stessa: no-op. IsWindowHovered non può dirlo:
+            -- la preview drag (una finestra) sta sopra la shelf, e la famiglia
+            -- AllowWhenOverlapped* è un flag di IsItemHovered — passarla a
+            -- IsWindowHovered fa esplodere "Invalid flags for IsWindowHovered()!"
+            -- (e il guard, falsato, lasciava passare l'inserimento). Hit test
+            -- col rettangolo, come in draw_left_scrollbar (mouse e posizione
+            -- della finestra sono in coordinate schermo): il puntatore sopra la
+            -- shelf "resta" nell'arrange (BR_Take/TrackAtMouseCursor sono per
+            -- posizione), quindi senza questo controllo un drop sulla shelf
+            -- inseriva l'FX nelle tracce selezionate.
+            local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
+            local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
+            local mx, my = reaper.ImGui_GetMousePos(ctx)
+            local over_shelf =
+                mx >= win_x and mx <= win_x + win_w and my >= win_y and my <= win_y + win_h
+
+            if not over_shelf and payload then
                 -- Si interroga per posizione, come in mtt_envelope_stealer:
                 -- la posizione restituita è quella interna dell'arrange, che
                 -- vale solo se l'arrange ha ricevuto gli eventi — il puntatore
@@ -1463,6 +1484,21 @@ function main_loop()
     end
 
     pop_style()
+
+    -- Cursore sui favorite FX trascinabili: Dear ImGui non espone manina
+    -- aperta/chiusa (l'unico "hand" è quello che punta il dito, come per gli
+    -- hyperlink): si usa quindi quello sia sull'hover del button sia durante
+    -- il drag, e la freccia in tutti gli altri casi (SetMouseCursor è
+    -- per-frame: va resettata ad Arrow ogni frame).
+    -- Si legge hovered_favorite_idx, non current_hovered_idx: quest'ultimo è
+    -- già stato consumato (reset a -1) da reset_hovered_if_none più su in
+    -- main_loop, e l'hover che conta è quello sincronizzato.
+    local cursor = reaper.ImGui_MouseCursor_Arrow()
+    local hovered_fav = favorites[hovered_favorite_idx]
+    if isDraggingFx or (hovered_fav and hovered_fav.type == "fx") then
+        cursor = reaper.ImGui_MouseCursor_Hand()
+    end
+    reaper.ImGui_SetMouseCursor(ctx, cursor)
 
     if is_open then
         reaper.defer(main_loop)

@@ -1,9 +1,8 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-09-26
+updated: 2026-09-27
 - Done:
-  - Left scrollbar live drag (`draw_left_scrollbar`): manual hit-test on the grab/track rects, no `InvisibleButton` (the buttons repositioned every frame via `SetCursorPos` broke `IsItemActive`, so the scroll only updated on release). The press offset is latched, so the grab follows the mouse every frame with no snap; the strip ignores input while a popup or an FX drag is in front. User confirmed: "funziona perfettamente".
-  - Scrollbar look: track drawn as a border only, grab 4px (centered in the 10px strip) dark gray. Colors rewritten as 0xRRGGBBAA (ReaImGui packs alpha last; the old constants were actually semi-transparent reds). User confirmed: "perfetto".
+  - Hand cursor on the draggable FX favorites: Dear ImGui exposes no open/closed hand (only the pointing one, like its hyperlinks), so `ImGui_MouseCursor_Hand` on hover of an FX favorite and during the FX drag, `Arrow` otherwise — `SetMouseCursor` is per-frame, and the hover is read from `hovered_favorite_idx` (not `current_hovered_idx`, which is reset to -1 at the top of the frame). User confirmed: "perfetto".
+  - Drop on the shelf is a no-op: the guard is a rect hit test (mouse screen coords vs `GetWindowPos`/`GetWindowSize`), same pattern as `draw_left_scrollbar` — `IsWindowHovered` rejects the `AllowWhenOverlapped*` family (an IsItemHovered flag) with "Invalid flags for IsWindowHovered()!", and a falsy guard let the insert through to the selected tracks.
 - Not done:
-  - Hand cursor over draggable FX (wanted 2): deferred by the user, to be done later.
 - Waiting on:
