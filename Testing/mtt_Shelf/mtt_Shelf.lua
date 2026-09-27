@@ -478,9 +478,18 @@ end
 -- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
 -- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
 -- Inserisce un FX: item selezionati (ai take), in loro assenza le tracce
--- selezionate; con drop_take (rilascio del drag), un item non selezionato
--- bersagliato conta da solo.
-function insert_fx(fx_ident, drop_take)
+-- selezionate; con drop_take (rilascio su un item), un item non selezionato
+-- bersagliato conta da solo; con drop_track (rilascio su una traccia: track
+-- panel o arrange, senza item sotto il cursore) l'FX va nella catena di
+-- quella traccia, ignorando item e tracce selezionati.
+function insert_fx(fx_ident, drop_take, drop_track)
+    -- Drop su una traccia: solo la sua catena, le selezioni sono ignorate
+    if drop_track then
+        local idx = reaper.TrackFX_AddByName(drop_track, fx_ident, false, -1)
+        if idx >= 0 then reaper.TrackFX_SetOpen(drop_track, idx, true) end
+        return
+    end
+
     -- Item sotto il puntatore al rilascio del drag (take -> item)
     local drop_item = drop_take and reaper.GetMediaItemTake_Item(drop_take)
 
@@ -1348,9 +1357,11 @@ function main_loop()
                     -- Con la take del drop, insert_fx sceglie tra item
                     -- selezionati e l'item effettivamente bersagliato
                     insert_fx(payload, take)
-                -- 0 = TCP, 1 = MCP, 2 = Arrange: drop solo in arrange
-                elseif track and context == 2 then
-                    insert_fx(payload)
+                -- 0 = TCP (track panel), 1 = MCP, 2 = Arrange: drop su una
+                -- traccia (track panel o arrange, senza item sotto il cursore)
+                -- -> catena di quella traccia, ignorando le selezioni
+                elseif track and (context == 0 or context == 2) then
+                    insert_fx(payload, nil, track)
                 else
                     --reaper.ShowConsoleMsg("No track found under cursor.\n")
                 end
