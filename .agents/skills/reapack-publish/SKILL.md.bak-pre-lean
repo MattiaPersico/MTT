@@ -1,0 +1,108 @@
+---
+name: reapack-publish
+description: "The MTT repository's release workflow: committing work on DEV, publishing it to main so ReaPack users receive it ('pubblica', 'rilascia', 'manda in main', 'porta DEV in main'), and recovering when work was done on main by mistake ('ho lavorato su main', 'ero su main per sbaglio', 'come sposto questo su DEV'). Use for any task touching this repo's branches, its index.xml versions, or its git hooks."
+license: MIT
+---
+
+# MTT: commit, publish, recover
+
+> **In Zed.** The `terminal` tool takes two separate fields: `cd` (the repo root) and
+> `command`. Put the path in `cd` — never `cd <path> &&` inside `command`, and never
+> `git -C <path>`: a path with spaces breaks the call whatever you quote it with.
+> Writes to `.git` need `unsandboxed: true` (staging, committing, switching, pushing).
+
+The repo's own `AGENTS.md` states the facts: DEV is where work happens, `main` is what
+ReaPack downloads from, versions live in `local major_version` / `local minor_version`
+and are copied into `index.xml` by a hook. This skill is the procedures.
+
+## 1. Commit on DEV
+
+1. `git status --short` and `git diff` — read what actually changed before writing a
+   message. Never commit files the user did not ask you to commit.
+2. Confirm the branch: `git rev-parse --abbrev-ref HEAD`. Not DEV? Go to §3.
+3. Message in the style already in the log (`git log --oneline -5`): `Subject: what`.
+   **The scope of a commit message is the diff, not the history.** `git diff` for what
+   changed, `git log --oneline -5` for the house style, and write it. Ancestry, when a file
+   first appeared, which commit last touched it — none of that reaches the message, and
+   chasing it has cost minutes of generation for nothing. If the diff covers two unrelated
+   pieces of work, the answer is two commits, not one message stretched over both.
+4. `git add <paths>` then `git commit -m "..."`, then `git push`.
+
+If the commit is **refused** because a package changed without a version bump, that is
+the hook doing its job. Do not retry, and never reach for `--no-verify`. Report which
+package, and either bump `minor_version` in that script when the user asked for a change
+they consider released, or hand it back. The number is theirs: patch-level habits vary
+and only they know whether a change is worth shipping.
+
+## 2. Publish
+
+```
+./publish.sh
+```
+
+That is the whole thing. It pushes DEV, fast-forwards main onto it and pushes main,
+refusing on a dirty tree, a diverged branch, or an `index.xml` that disagrees with a
+script. `--dry-run` shows the steps without running them; `--no-ff` leaves one merge
+commit per release.
+
+- **Never assemble the sequence by hand** — switch, merge, push. The script exists so
+  that the order and the checks are not re-derived each time.
+- **Paste its output.** The "versions going live" block is what the user reads to know
+  what ReaPack will offer.
+- If it refuses, report the reason verbatim and stop. Every refusal names its own fix.
+
+## 3. Work ended up on main
+
+Two commands decide which case it is:
+
+```
+git status --short
+git log --oneline origin/main..main
+```
+
+**Nothing committed** — the work is only in the working tree, so move it across and
+`main` is never touched:
+
+```
+git stash
+git switch DEV
+git stash pop
+```
+
+If `stash pop` conflicts, stop and hand it back.
+
+**Committed, not pushed** — bring the commits onto DEV, *verify they arrived*, and only
+then put `main` back where the remote has it:
+
+```
+git switch DEV
+git merge main
+git log --oneline DEV..main      # must be empty before the next command
+git branch -f main origin/main
+```
+
+`git branch -f` moves a label and touches no working tree; the commits live on DEV.
+The order is the whole point — move `main` first and they are stranded. Never
+`reset --hard`.
+
+**Already pushed to main** — it is live. History stays as it is: do not rewrite it, do
+not force-push. Align DEV so the two do not diverge:
+
+```
+git switch DEV
+git merge main
+```
+
+Then say plainly that it is published, and let the user decide whether it needs a
+follow-up release.
+
+## Rules
+
+- **Never `--no-verify`.** The hooks are the reason `index.xml` can be trusted. A commit
+  that needs to bypass them is a commit that needs a different fix.
+- **Never run a command that destroys work**: no `reset --hard`, no `checkout -- <file>`,
+  no `clean -f`, no `push --force`. If a situation seems to need one, stop and say why.
+- **Report the actual output**, not what you expected it to say. "Already up to date." is
+  a fact the user needs to see.
+- **A fast-forward is not a merge commit.** Do not describe one as if it were, and do not
+  claim branches diverge without having read `git branch -vv`.

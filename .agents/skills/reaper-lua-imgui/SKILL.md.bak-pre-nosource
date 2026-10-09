@@ -1,0 +1,71 @@
+---
+name: reaper-lua-imgui
+description: "ReaImGui from a Lua ReaScript - load only when you are about to write or fix ImGui_* calls (a window, buttons, sliders, tables, a defer UI loop): the two call forms and package.path bootstrap, CreateContext, when End is due, collapsed vs closed, flags, colliding IDs, C++ habits that do not hold. Scripts without a UI do not need it."
+license: MIT
+---
+
+# ReaImGui from Lua
+
+> **In Zed.** Tools: `reaper_lua_docs_search|get|verify` (ImGui is in the same corpus).
+> Pass `verify` an **absolute** `path`.
+
+**Load `reaper-scripting` and `reaper-lua` first**, whichever is not loaded. This skill is
+only what is true of ReaImGui.
+
+The structure of a widget is in the note on the `Begin*` that opens it: `get
+ImGui_BeginTable`, `ImGui_BeginCombo`, `ImGui_BeginMenu`… returns the whole sequence. A
+signature you did not `get` is a signature you guessed. What follows are the frame rules
+that never get looked up.
+
+**Two call forms**, same API:
+
+```lua
+reaper.ImGui_Foo(ctx, ...)                          -- needs nothing
+```
+```lua
+package.path = reaper.ImGui_GetBuiltinPath() .. '/?.lua;' .. package.path
+local ImGui = require 'imgui' '0.10'                -- version string is required
+ImGui.Foo(ctx, ...)
+```
+
+Without the `package.path` line: `module 'imgui' not found`. Match the form the user's
+file already uses.
+
+- **`CreateContext(label)`** — label required, called **once**, outside the loop. There is
+  no `DestroyContext` and no `CurrentContext` (C++ names).
+- **`End` follows the return type of `Begin`.** Returns `boolean` → `End*` only inside
+  the `if`. Returns nothing (`BeginGroup`, `BeginDisabled`) → `End*` always.
+  `BeginDisabled(ctx, cond)` takes the condition as an argument. Popups close with
+  `EndPopup`, `BeginItemTooltip` with `EndTooltip` (`EndPopupModal` does not exist). This
+  is the opposite of Dear ImGui in C++.
+- **Collapsed is not closed.** Only `open` ends the loop:
+
+  ```lua
+  local function loop()
+    local visible, open = ImGui.Begin(ctx, 'Title', true)
+    if visible then
+      -- ...
+      ImGui.End(ctx)
+    end
+    if open then reaper.defer(loop) end
+  end
+  ```
+- **Flags depend on the call form.** `reaper.ImGui_Cond_Always()` is a function;
+  `ImGui.Cond_Always` is a number (calling it: `attempt to call a number value`). No
+  enum-shaped names (`ImGuiWindowFlags.X`).
+- **Identical labels collide.** In loops wrap each row in `PushID(ctx, i)` / `PopID`;
+  for one-offs use `'Mute##' .. i`. No static check sees this.
+- **An input widget hands the new value back; it cannot write into your variable.**
+  `local changed, buf = ImGui.InputText(ctx, label, buf)` — Lua strings and numbers are
+  immutable, so the C++ "pass a buffer to be filled" habit has no equivalent and there is
+  no size argument. Assign the **second** return back to the state the widget shows.
+- **`Text(ctx, s)` takes one string** — format first. Examples in module form omit `ctx`:
+  never count arguments off an example.
+
+## Checklist before replying
+
+- `package.path` line present if and only if the module form is used;
+- `CreateContext` has a label and runs once, outside the loop;
+- every `End*` matches its `Begin*`'s return type — conditional or not;
+- `open`, not `visible`, drives the `defer`;
+- repeated labels are ID-scoped; no `DestroyContext`, no enum-shaped flags, no printf `Text`.

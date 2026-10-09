@@ -1,0 +1,176 @@
+---
+name: reaper-lua
+description: "Reading, writing or fixing a REAPER ReaScript in Lua (.lua, reaper.* calls, defer loops, atexit, actions; 'uno script per REAPER', 'un ReaScript'): the reaper_lua_docs corpus, Lua 5.4 traps, filesystem work, deferred scripts. Load after reaper-scripting; for ImGui_* calls also load reaper-lua-imgui."
+license: MIT
+---
+
+# REAPER ReaScript: Lua
+
+> **In Zed.** Tools: `reaper_lua_docs_search|get|verify`, `reaper_actions_search|get|verify`.
+> Pass `verify` an **absolute** `path`.
+
+**Load `reaper-scripting` first if it is not loaded** — it holds the REAPER object model,
+the search → get → verify loop and how to work in the user's file. This skill is only what
+is true of Lua. Remember the object model there: position and length belong to the
+**item**; playrate, pitch, volume and start offset belong to the **take**
+(`D_PLAYRATE` is a take field).
+
+## The corpus
+
+`reaper_lua_docs` holds the **Lua** signature of every ReaScript function, ImGui included
+(about half the cards are `ImGui_*`). It is Lua-only on purpose: a C signature
+`Main_SaveProject(ReaProject*, bool)` once became `reaper.Main_SaveProject(proj, 0)`, and
+in Lua `0` is TRUE — it opened "Save As" instead of saving.
+
+`verify` resolves `local r = reaper` and the ImGui module form, and runs argcheck: argument
+counts, literal types, return counts, field-name strings, pre-5.4 stdlib. It also lists
+what it did **not** check.
+
+Nothing in the API does it? Search `reaper_actions` for a command ID to pass to
+`Main_OnCommand` — only when no direct function exists.
+
+## Lua traps
+
+- **`0` and `1` are TRUE.** A `boolean` parameter gets `true` or `false`.
+- **Lua 5.4.** `math.pow`, `math.log10`, `math.atan2`, `table.getn`, `unpack`,
+  `loadstring`, `setfenv` do not exist. Use `x ^ y`, `math.log(x, 10)`,
+  `table.unpack`. Most Lua online is 5.1.
+- **`math.random(m, n)` takes integers only.** Since 5.3 a float argument with a
+  fractional part raises "number has no integer representation" — so slider values go
+  through the scalar form, `min + math.random() * (max - min)`.
+- **Every variable gets `local`**, in every branch — otherwise it is a global shared with
+  every running script.
+- **Multiple returns are all there for a reason.** Discarding one is legal and no check
+  sees it. `string.format(p:gsub(...))` passes the count too; `(p:gsub(...))` keeps one.
+- **Field-name strings** (`Get/SetMediaItemInfo_Value`, `…TakeInfo_Value`,
+  `…TrackInfo_Value`): copy them from the card; each family accepts its own set.
+- There is no `GetActiveProject` / `GetProject`; `proj = 0` is the active project.
+- **A `[[` followed by a newline eats that newline.** So a template split to interpolate a
+  value — `[[\n<VOLENV\nEGUID ]] .. guid .. [[\nACT 1 -1\n…]]` — concatenates to
+  `EGUID <guid>ACT 1 -1` on one line: the second literal starts at `ACT`, not at the break
+  before it. The language server passes it — it is valid Lua producing a valid string — so
+  the only instrument that sees it is `verify` on the Lua corpus, which reports it as
+  `PATTERN` on the line of the reopened `[[`. Put the `"\n"` in by hand at every join, or
+  build the text as a table of lines and `table.concat(lines, "\n")`.
+- **`*Info_Value` hands back an object for a `P_` field.** The function's return reads as a
+  number, but the field prefix decides: `D_`, `I_` and `B_` are numbers, `P_` is a pointer.
+  The card says so literally — `P_TRACK : MediaTrack *`. So
+  `GetMediaItemInfo_Value(item, "P_TRACK")` is the track itself, not its index, and sorting
+  or comparing two of them raises `attempt to compare two userdata values`. Use the
+  accessor for the object (`GetMediaItem_Track`), and for a *number* use
+  `GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")` (1-based, 0 = not found, -1 = master).
+- **A handle dies with the object it came from.** A take, a source or a track pointer taken
+  from an item is invalid the moment that item is deleted; passing it on afterwards fails
+  with a type error (`bad argument #2 to 'SetMediaItemTake_Source' (PCM_source expected)`)
+  or takes REAPER down. Read everything the replacement needs — source, length, offsets —
+  and build it **before** the `Delete*` call. When a fix has to reorder statements, say
+  which order you chose and why.
+- **`#t` does not count index 0.** A table filled from `t[0]` to `t[n-1]` has `#t == n-1`,
+  so `for i = 0, #t` visits every element when `t` is non-empty — and runs once on
+  `t[0] == nil` when it is empty. Loop with the count you filled it with
+  (`for i = 0, n - 1`), or fill from 1 and use `ipairs`.
+
+## Dependencies: check on the first lines
+
+```lua
+if not reaper.APIExists('ImGui_GetBuiltinPath') then
+  reaper.MB('ReaImGui is required (ReaPack: ReaTeam Extensions).', 'Missing dependency', 0)
+  return
+end
+```
+
+## Filesystem: REAPER's own API
+
+`EnumerateFiles`, `EnumerateSubdirectories`, `file_exists`, `RecursiveCreateDirectory`
+behave the same on macOS and Windows and open no console — prefer them to
+`io.popen` / `os.execute`. `EnumerateFiles` returns **names**, not paths: collect them into
+a table, then act. Derive the separator once and build paths in one place:
+
+```lua
+local SEP = reaper.GetOS():find('Win') and '\\' or '/'
+```
+
+## Deferred scripts
+
+- **Never block.** A `while` that waits freezes REAPER; return and check again next frame.
+- **Nothing that can repeat every frame may print or pop up.** A `ShowConsoleMsg` or `MB`
+  inside a `defer`/ImGui callback on a condition like "no items selected" fires on every
+  frame or slider move. Return silently, or show the state in the UI (e.g. disable the
+  control).
+- **Register `reaper.atexit` before the loop.** It runs on the window's X, on stopping the
+  action, on quitting — a UI Stop button does not. Everything installed or changed gets
+  undone there.
+- **Every non-terminal state** (`'rendering'`, `'waiting'`) gets a frame counter, a limit
+  and a visible error state past it. **Disable** the controls that start it while it runs
+  (`BeginDisabled`). **Detect completion by a condition you set** (e.g. your own
+  `RENDER_PATTERN` → wait for that exact path), not by guessing the newest file.
+
+## GUI: a separate skill
+
+**About to write any `ImGui_*` call? Load `reaper-lua-imgui` then** — not before. Scripts
+without a UI never need it. The trigger is the call you are about to write, not a guess
+about whether the user "wants a GUI"; a UI that turns up halfway through loads it halfway
+through. A signature you did not `get` is a signature you guessed — ImGui included.
+
+
+## Logic with no `reaper.*` in it
+
+A helper that takes tables and returns tables — merging intervals, sorting, splitting a
+range, computing offsets — contains no API name, so `verify` has nothing to look at and the
+language server sees valid Lua. **"verify: not run, no API names touched" is not a check.
+It is the statement that nothing checked this.** And that kind of function is where the
+off-by-one lives.
+
+It is also the one kind of REAPER code that runs **outside** REAPER. If `lua` is on the
+machine (`which lua lua5.4`), run it — a few seconds, and the result is evidence instead of
+an opinion.
+
+**The scratch file goes inside the project, in `.scratch/`.** The file tools only see the
+worktree, so `/tmp` is refused with "parent directory doesn't exist". And every `terminal`
+call needs its `cd` field — without it the call never runs and the error names nothing
+(`tool input was not fully received`), which on 17/09 cost four attempts and the test was
+never run at all. Keep each tool to what it is good at: `write_file` for content,
+`terminal` for one short command, always with `cd`.
+
+```sh
+mkdir -p .scratch                                          # terminal, once
+sed -n '23,44p' Testing/mtt_Shelf.lua > .scratch/t.lua      # terminal: lift the function out
+```
+
+`sed` is what copies the function, so it is never retyped from tool output — the same
+reason `verify` takes `path=`. Then add the driver with `write_file` to
+`.scratch/driver.lua`:
+
+```lua
+dofile(".scratch/t.lua")   -- only if the extracted function is global
+```
+
+or, when the function is `local` in the source (it usually is), drop the `local` while
+extracting and append the calls with one short `printf`:
+
+```sh
+printf '%s\n' 'print(merge_refs({0,1,2},{1,1,1}))' >> .scratch/t.lua
+lua .scratch/t.lua
+```
+
+Stub whatever the function closes over. If that takes more than a line or two, it is too
+entangled to test in isolation — say so instead of forcing it.
+
+Cover the cases that decide the behaviour, not the happy path:
+
+- the empty table and the single element — the first iteration of a loop that seeds itself
+  from `t[1]` fails on an empty table with `attempt to perform arithmetic on a nil value`;
+- **exactly equal boundaries.** Items produced by a split share their boundary as the same
+  double, so `end == start` happens constantly and `<=` vs `<` is not a detail: with `<=`,
+  three items split from one merge back into one;
+- input in the wrong order, and one range wholly inside another.
+
+If it cannot be run, say which cases were reasoned through and that it is untested. Never
+present an unchecked helper as verified.
+
+## Checklist before replying
+
+- no pre-5.4 stdlib; every `boolean` gets `true`/`false`; every variable `local`;
+- a deferred script registers `atexit`, never blocks, has timeouts on waiting states;
+- extensions checked with `APIExists`; paths built with one `SEP`;
+- verify clean on the final file, verdict in the reply (see `reaper-scripting` §4).

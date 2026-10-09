@@ -4,6 +4,15 @@ reaper.Main_OnCommand(40434, 0) -- move edit cursor to play cursor
 reaper.Main_OnCommand(40044,0)
 reaper.Main_OnCommand(40634, 0) -- Move edit cursor to start of time selection
 
+
+local TEMP_FILE = reaper.GetResourcePath() .. "/.mtt_sample_rate_switch.txt"
+
+local proj = 0
+
+-- Stoppa il playback (e la registrazione), salvando i media registrati.
+
+reaper.Main_OnCommand(reaper.NamedCommandLookup("_RSdaa04eeb257e1c26c1e4e1a9d995995204ea824e"), 0)
+
 reaper.GetSetRepeat(0)
 local time_selection_start_time, time_selection_end_time = reaper.GetSet_LoopTimeRange(false, 0, 0, 0, false)
 

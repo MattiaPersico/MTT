@@ -1,0 +1,221 @@
+---
+name: reaper-scripting
+description: "Load first for ANY REAPER work or question - a ReaScript in Lua, a JSFX/EEL2 effect, a C++ extension, reaper.* calls, ReaImGui, the REAPER API, or how REAPER's tracks/items/takes/envelopes/FX fit together; in Italian 'script per REAPER'. Holds the REAPER object model, a short act-first work loop (search -> edit -> verify) against the local REAPER docs MCP servers, how to assist inside the user's own code, and which language skill to load next."
+license: MIT
+---
+
+# REAPER: model, workflow, routing
+
+> **In Zed.** Each docs corpus is an MCP server; its tools are prefixed with the server
+> name: `reaper_lua_docs_search|get|verify`, `reaper_jsfx_docs_search|get|verify`,
+> `reaper_cpp_docs_search|get|verify`, `reaper_actions_search|get|verify`.
+> Pass `verify` an **absolute** `path`. Load other skills with the `skill` tool.
+
+## 1. Route
+
+This skill is always loaded for REAPER. **Before you read or edit any code, call the
+`skill` tool with the language skill** — it holds the traps of that language, and this
+skill does not.
+
+**Editing before it is loaded is a mistake, not a shortcut.** Loading it afterwards to
+check your work does not undo an edit written without those traps in mind, and they are
+exactly what a plausible-looking edit gets wrong.
+
+| the code is | load |
+|---|---|
+| a ReaScript in Lua (`reaper.*`, ReaImGui) | `reaper-lua` |
+| a JSFX effect (EEL2) | `reaper-jsfx` |
+| a native extension in C++ | `reaper-cpp` |
+
+Only when you are about to write `ImGui_*` calls (a UI) add `reaper-lua-imgui` or, in C++,
+`reaper-cpp-imgui` (also for SWS `BR_*`/`SNM_*` from C++). Scripts without a UI skip them.
+A Lua script driving a JSFX is two languages: load both. Python and EEL2 ReaScript are not
+served by any corpus: say so rather than translating from another language's signature.
+
+## 2. How to work here
+
+The user writes the code in the editor; you assist. Requests are usually one of: explain an
+API or how REAPER does something; write a function or snippet; change part of their file;
+find why their script misbehaves; review.
+
+- **A clear request is done in this turn.** Call the tools now — search, read, edit,
+  verify — and reply when the work is done. Never describe a tool call and end the turn,
+  and never write a tool call as text or in a code block: that executes nothing and the
+  user has to type "procedi".
+- **Questions get answers, not scripts.** `search` (+ `get` if needed), then answer in a
+  few lines with the real signature and, if it helps, a short snippet.
+- **Answer the answer.** If you asked a question and the user replies "yes" while adding
+  something else, do both: the thing you proposed and the new request.
+- **Find every call that touches the same state.** "Keep X unchanged across Y" means every
+  call in the code that alters X, not only the one named — e.g. an earlier
+  `Main_OnCommand(40652)` (reset rate) changes item length just like the rate loop does.
+  Handle them all, or name the ones you left.
+- **Their file is theirs.** Read it before changing it. Change only what was asked; keep
+  their names, style and structure; no whole-file rewrites and no new files unless asked.
+  Something wrong elsewhere? Mention it in one line — do not fix it silently.
+- **Match the existing code's patterns** (their `SEP`, their state table, their undo
+  wrapper) instead of introducing parallel ones — but check a pattern before you copy it.
+  If it is buggy (e.g. `for i = 0, #t` over a table that starts at 0 — it fails when `t`
+  is empty), do not replicate it silently: say so in one line.
+- **Ask about design, not about execution.** Stop and ask only when you hold more than two
+  candidate designs, when you are about to reverse a design you already settled, or when
+  the task needs a capability you have not confirmed exists. Then give the options, one
+  line each, the trade-off, your recommendation — and stop. Anything else: just do it.
+  The corpus settles names and signatures, never architecture: more searching will not
+  close a design question.
+
+## 3. The work loop — think briefly, act, check
+
+Every step is **a short thought (a few sentences: what you need next and why) followed by
+tool calls**. Long deliberation is the expensive failure here: on a local model it costs
+minutes per step, and a tool call answers most doubts faster than reasoning does.
+
+1. **Load** `reaper-scripting` (this) and the language skill, if not loaded.
+2. **Read** the code involved, once: the selection, or the function it sits in.
+   **Read the card of every `Main_OnCommand(id)` in it — before you edit, never after** —
+   with `reaper_actions_get` and
+   `Main_<id>` (`"Main_40652"`; a bare number also returns the MIDI-editor actions with the
+   same ID) — once per ID per thread, even if a comment names it: its notes
+   can carry side effects the name does not mention. If the line has no comment naming
+   the action, add one.
+3. **Look up only what you will newly write.** Names that stay unchanged in the user's
+   code need no lookup. One `search` per operation, described in plain English ("insert a
+   new track"), not a half-remembered name — obvious-looking names are routinely fake
+   (`GetProject`, `GetItemPosition`, `GetMediaItem_Length`, `CreateTrack`).
+   - If the search result shows the full signature, that counts. Call `get` only for the
+     card's notes: a field-name list, the meaning of a flag, a pattern (`Begin`/`End`,
+     undo, defer).
+   - `reaper_actions_get` takes a symbol, never a description: `Main_40519`, or
+     `Main__FNG_INCREASERATE` for an extension action. A plain-English name returns
+     "Too many matches"; to go from a description to an ID, `reaper_actions_search` first.
+   - **Empty search?** The operation may exist only as an action: search
+     `reaper_actions`, use `Main_OnCommand`. A direct function beats an action whenever
+     one exists.
+4. **Edit** the file.
+5. **Check what you changed.**
+   - You wrote or changed an API call (a `reaper.*` name, a field string, an argument)?
+     **verify** the file as saved on disk. Zed's file tools
+     return paths relative to the project root; the MCP server cannot resolve those —
+     join the root (the folder the project was opened on) and the relative path. Spaces
+     are fine.
+     DO NOT EXIST → fix that name, verify again. An ERROR is not a pass, and neither is
+     NOT CHECKED. If you had to fall back to verifying a list of `names`, **say so** in
+     the reply: that run did not check the file.
+   - You touched no API name (added `local`, renamed a local, moved a block, changed a
+     comment)? `verify` has nothing to say about it: skip it, say so in one line, and run
+     the check that fits — `diagnostics` on the file when the task was to clear editor
+     warnings.
+   - The task was to clear warnings: **`diagnostics` again after the edit**, and report
+     what is left.
+6. **Reply** (§4).
+
+**Budget.** A typical change is 4–8 tool calls. Past ~8 lookups without an edit, stop
+researching: edit with what you have, or ask the one question that unblocks you.
+**Do not re-derive what a tool result states** — when a card's notes say how to do
+something, do it that way — and do not weigh alternatives the user did not ask about.
+**Decide once**: no "let me reconsider" on a settled decision unless a tool result
+contradicts it. Unsure between two readings of an API? One more lookup, not a longer
+thought. Still ambiguous after that? It is a design question — ask (§2).
+
+**Editor diagnostics are not `verify`.** The Lua language server is fed stubs generated
+from this same corpus (`~/.hermes/ai-docs/defs/reaper.lua`: signatures plus each card's
+description and notes). They catch wrong arity and wrong types as you type and say nothing
+about what a function means, so no diagnostics is not a passed `verify`, and actions and
+anything the file does not cover still come from the corpus tools.
+
+`verify` checks the whole file, so it may flag names in code you did not touch: report
+those separately ("in your code, line N: `Foo` does not exist"). It is also the first
+debugging step when the user's script fails — an invented name is the most common cause.
+
+## 4. What goes in the reply
+
+Short. For an edit the reply has three parts, in this order and nothing else — write the
+content, never these labels:
+
+1. one to three lines saying what changed and why;
+2. a line starting with `verify:` — `clean`, or the flagged names and what you did, or
+   `not run: no API name changed` plus the check you ran instead;
+3. one line per thing worth knowing: a pre-existing warning, a pattern you did not fix,
+   state the code touches.
+
+No headings, no bold section titles, no restating the reasoning, no code already written
+into the file.
+
+- **Always**, after code you wrote or changed: one line with the verify verdict —
+  `verify: clean` or the flagged names and what you did about them — plus any NOT CHECKED
+  item that concerns your code.
+- **If your code touches state it did not create** (render settings, time selection, FX
+  chain, files, `gmem`): one line on what is read and saved before, and restored in
+  `atexit`.
+- **Only for a whole new script, or when asked**: the full verify output, a symbol table
+  (names whose signature decided the code, with the `search`/`get` they came from) and a state
+  ledger (`state touched | read and saved | restored`, every restore run from `atexit`).
+
+## 5. Rules in every language
+
+- **Confirm the pattern, not just the names.** Undo wrappers, deferred loops, callback
+  registration, begin/end pairs differ between APIs; a pattern can be invented while every
+  name in it is real. Find it in the docs (`get` notes), not in memory of another tool.
+- **Real name, wrong use, is still a bug.** `verify` proves a name exists, never that it is
+  used right. A call that does no work the task needs gets deleted.
+- **Every write to pre-existing state has a read before it**, and its restore runs from
+  `atexit` (a Stop button only fires if pressed).
+- **Delete exactly the files you wrote**, by exact path from a list you kept — never a
+  pattern or a folder (`<resources>/Effects/` holds every JSFX the user owns).
+- **Generated code is code you read.** If one language is emitted as a string of another,
+  run the generator on fake data, save the output, read it as source, verify it.
+- **One version of each function**, comments that explain the code; your deliberation
+  goes in the reply.
+
+## 6. The REAPER object model
+
+The corpora document functions, not what they operate on. A script can use only real names
+and still be nonsense: "several items on one track" once became one item with N takes,
+verified clean, playing a single sound.
+
+```
+ReaProject
+ └── MediaTrack            (master track: same type, via GetMasterTrack)
+      └── MediaItem
+           └── MediaItem_Take
+                └── PCM_source
+```
+
+Crossing each boundary: `GetTrack(proj, i)`, `GetMasterTrack(proj)`,
+`GetMediaItem(proj, i)`, `GetMediaItem_Track(item)`, `GetMediaItemTake(item, i)`,
+`GetActiveTake(item)`, `CountTakes(item)`, `GetMediaItemTake_Source(take)`.
+
+- **Project** — `proj = 0` means the active project; it is not an index.
+  `EnumProjects(-1)` is the current one, `EnumProjects(i)` enumerates.
+- **Track** — the master is a `MediaTrack` too, but outside the `GetTrack` index range.
+- **Item** — a block on the timeline: `D_POSITION`, `D_LENGTH`. **A window onto a source,
+  not a copy**: which slice shows is the take's `D_STARTOFFS`. Concatenating audio means
+  moving windows, not copying samples.
+- **Take** — one reading of an item. **Takes are alternatives, not a sequence**: an item
+  plays only its active take. N sounds in a row = N items with one take each. A take has
+  no position or length; its fields are `D_STARTOFFS`, `D_VOL`, `D_PITCH`, `D_PLAYRATE`.
+  A field passed to the wrong family (item vs take vs track) fails silently.
+- **Source** — the media, usually a file; `PCM_Source_CreateFromFile(path)`. Several takes
+  can share one source.
+- **Envelope** — track and take envelopes are the same type (`TrackEnvelope`), only the
+  accessor differs (`GetTrackEnvelope` / `GetTakeEnvelope`); the `Envelope*` functions
+  serve both. There is no `TakeEnvelope_*` family.
+- **FX** — not an object: a (container, index) pair. `TrackFX_*` / `TakeFX_*`.
+- **Sends** — not an object: (track, category, index); `GetTrackNumSends(tr, category)`
+  counts them, `*TrackSendInfo_Value` reads and writes them by index.
+- **Markers and regions** — one enumeration, `EnumProjectMarkers`; `isrgn` tells them
+  apart. No separate region API.
+- **AudioAccessor** — a temporary reader of samples (`CreateTakeAudioAccessor`); destroy
+  it when done.
+- **Action sections** (`KbdSectionInfo`, `SectionFromUniqueID`) — an action ID only means
+  something together with its section (Main, MIDI Editor, …).
+
+**Handles are stable, indices are not.** `GetTrack`, `GetMediaItem`, `GetMediaItemTake`,
+`TrackFX_*` address by position, and every insert, delete or reorder renumbers. So:
+collect handles first, then modify (two passes). And an index never outlives the frame
+that produced it — in a `defer` script keep a GUID (`TrackFX_GetFXGUID`) or a name, and
+resolve the index again where you use it.
+
+**Types from extensions** fail on machines without them: `BR_*`, `CF_Preview`, `FxChain`
+(SWS); `PackageEntry` (ReaPack); `JS_*` (js_ReaScriptAPI — a separate extension from
+SWS); `ImGui_*` (ReaImGui).

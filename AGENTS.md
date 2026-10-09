@@ -1,5 +1,14 @@
 # MTT — REAPER scripts published through ReaPack
 
+## REAPER
+- REAPER code (`.lua` ReaScript, `reaper.*`, `.jsfx`, C++ extension, ReaImGui, action IDs) — reading, writing or explaining, small fixes too? First tool call: `skill` `reaper-scripting` + the language skill (`.lua` → `reaper-lua`, `.jsfx` → `reaper-jsfx`, C++ → `reaper-cpp`), in the same step as reading the file.
+- Git-only tasks (status, commit, push, merge, publish) need no REAPER skill.
+- No `edit_file` on REAPER code before its skills are loaded. A loaded skill stays loaded until a compaction: never load it twice before one.
+- Never reason about how REAPER behave before reading the docs: memory invents names and side effects. A lookup is silent? Stop looking: say "the docs don't state this" in one line and do the task.
+- A test in REAPER ends your turn: ask for it in the reply, never with `ask_user` (a compaction keeps the user's messages and drops `ask_user` answers).
+- The user says how REAPER behaves? That is information: check once if cheap; if the docs are silent, take their word.
+- Changed an API call? `verify` the saved file (absolute path) before replying — also when a skill was skipped. `DO NOT EXIST` / `RESULT: FAILED` = fix the name, verify again. No API name touched? Skip `verify` and say so. Never write "tested" or "verified" for anything you did not run, nor "the user tested" without their words.
+
 ## Branches, versions, hooks
 - Work and commit on `DEV`, always. `main` is what ReaPack users download (through `index.xml`); it moves only through `./publish.sh`, never by hand.
 - Published script = it declares `local major_version` / `local minor_version` near the top. A change to it bumps `minor_version` in the same commit: ReaPack offers an update only when the number changes. The `pre-commit` hook copies the versions into `index.xml`: never edit that number by hand.

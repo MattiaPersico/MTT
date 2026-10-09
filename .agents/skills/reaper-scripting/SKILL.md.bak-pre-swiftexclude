@@ -1,0 +1,89 @@
+---
+name: reaper-scripting
+description: "Load first for any REAPER code or question: ReaScript Lua, JSFX, C++ extensions, reaper.* API, ReaImGui, actions, how tracks/items/takes/envelopes/FX fit together ('script per REAPER')."
+license: MIT
+---
+
+# REAPER: work loop, reply, object model
+
+Docs tools: `<corpus>_search|get|verify` for `reaper_lua_docs`, `reaper_cpp_docs`, `reaper_jsfx_docs`, `reaper_rpp_docs`, `reaper_actions`.
+
+## 1. Extra skills
+- `reaper-lua-imgui` (Lua) or `reaper-cpp-imgui` (C++, also SWS `BR_*`/`SNM_*`): only when about to write `ImGui_*` calls (even mid-task); scripts without UI never need them.
+- `reaper-rpp`: state chunks (`Get/Set*StateChunk`) or RPP project structure.
+- A Lua script driving a JSFX: both language skills.
+- Python or EEL2 ReaScript: no corpus. Say so; never translate another language's signature.
+
+## 2. The user writes the code; you assist
+- Question → `search` (+ `get`), then a few lines with the real signature; a snippet only if it helps. No scripts.
+- The user answers "yes" and adds a request → do both.
+- "Keep X unchanged" covers every call that alters X, not only the named one (an earlier `Main_OnCommand(40652)` changes item length too). Handle all, or name the ones left.
+- Reuse their patterns (their `SEP`, state table, undo wrapper), but not a buggy one: flag it in one line.
+- The corpus settles names, not architecture.
+
+## 3. Work loop
+1. Skills loaded; the code involved read once (the selection, or its function).
+2. Every `Main_OnCommand(id)` in it: `reaper_actions_get "Main_<id>"` before editing, once per ID per thread, even if a comment names it — card notes carry side effects. (`"Main_40652"`: a bare number also returns MIDI-editor actions.) No comment naming the action? Add one.
+3. Look up only what you newly write: one `search` per operation, in plain English ("insert a new track"). Obvious-looking names are often fake (`GetProject`, `GetActiveProject`, `GetItemPosition`, `GetMediaItem_Length`, `CreateTrack`).
+   - A search result with the full signature is enough. `get` only for card notes: field names, flag meanings, patterns (undo, defer, callbacks, Begin/End) — patterns never come from memory of another API.
+   - `reaper_actions_get` takes a symbol (`Main_40519`, `Main__FNG_INCREASERATE`), never a description; from a description, `reaper_actions_search` first.
+   - Empty search → it may exist only as an action: `reaper_actions_search` + `Main_OnCommand`. A direct function always beats an action.
+4. Edit.
+5. Check:
+   - API call written or changed → `verify` the saved file with an **absolute** path (project root + Zed's relative path; spaces are fine). DO NOT EXIST → fix, verify again. ERROR or NOT CHECKED is not a pass. Fell back to a `names` list? Say the file was not checked.
+   - No API name touched → skip `verify`, say so, run the check that fits.
+   - Task was clearing warnings → `diagnostics` again after the edit; report what is left.
+   - `verify` flags a name in code you did not touch → report it separately ("line N: `Foo` does not exist").
+6. Reply (§4).
+
+- Budget: 4–8 tool calls. ~8 lookups without an edit → edit with what you have, or ask the one unblocking question.
+- A card's notes say how → do it that way; never re-derive it.
+- Unsure between two readings of an API → one more lookup, not more thinking.
+- Editor diagnostics are not `verify`: the LuaLS stubs catch arity and types, never meaning.
+- A script fails at runtime (`attempt to call a nil value`) → `verify` first: an invented name is the most common cause.
+
+## 4. Reply
+For an edit, in this order (the content, not the labels):
+1. What changed and why: 1–3 lines.
+2. `verify: clean` — or the flagged names and what you did — or `verify: not run, no API name changed` + the check run instead. Add NOT CHECKED items that concern your code.
+3. Test in REAPER (skip for comments, renames, formatting): one line, setup + expected result, on the case most likely to break, not the happy path ("3 items split from one, adjacent on one track: must stay 3").
+4. One line per thing worth knowing: a pre-existing warning, an unfixed pattern, state saved and restored in `atexit`.
+
+No headings, no restated reasoning, no code already written to the file.
+Only for a whole new script, or when asked: full verify output, symbol table (name | `search`/`get` it came from), state ledger (state | saved | restored in `atexit`).
+
+## 5. Rules in every language
+- `verify` proves a name exists, not that it is used right. A call that does no work the task needs gets deleted.
+- Code that changes state it did not create (render settings, time selection, FX chain, files, `gmem`): read it first, restore it in `atexit` (a Stop button fires only if pressed).
+- Code deletes only files it wrote, by exact path from a list it kept — never a pattern or a folder (`<resources>/Effects/` holds every JSFX the user owns).
+- Code generated as a string of another language: run the generator on fake data, save the output, read it, verify it.
+- One version of each function; comments explain the code; your deliberation goes in the reply.
+
+## 6. REAPER object model
+The corpora document functions, not what they act on: real names can still build nonsense.
+
+```
+ReaProject
+ └── MediaTrack            (master: same type, via GetMasterTrack)
+      └── MediaItem
+           └── MediaItem_Take
+                └── PCM_source
+```
+
+Crossing: `GetTrack(proj, i)`, `GetMasterTrack(proj)`, `GetMediaItem(proj, i)`, `GetMediaItem_Track(item)`, `GetMediaItemTake(item, i)`, `GetActiveTake(item)`, `CountTakes(item)`, `GetMediaItemTake_Source(take)`.
+
+- Project: `proj = 0` is the active project, not an index. `EnumProjects(-1)` = current, `EnumProjects(i)` enumerates.
+- Track: the master is a `MediaTrack` outside the `GetTrack` index range.
+- Item: a block on the timeline (`D_POSITION`, `D_LENGTH`), a window onto a source, not a copy; the take's `D_STARTOFFS` picks the slice. Concatenating audio = moving windows, not copying samples.
+- Take: one reading of an item. Takes are alternatives, not a sequence: only the active take plays. N sounds in a row = N items with one take each. A take has no position or length; its fields: `D_STARTOFFS`, `D_VOL`, `D_PITCH`, `D_PLAYRATE`. A field passed to the wrong family (item/take/track) fails silently.
+- Source: the media, usually a file (`PCM_Source_CreateFromFile(path)`); takes can share one.
+- Envelope: track and take envelopes are one type (`TrackEnvelope`), only the accessor differs (`GetTrackEnvelope` / `GetTakeEnvelope`); `Envelope*` serves both. No `TakeEnvelope_*`.
+- FX: not an object — (container, index): `TrackFX_*` / `TakeFX_*`.
+- Sends: not an object — (track, category, index): `GetTrackNumSends(tr, category)`, `*TrackSendInfo_Value` by index.
+- Markers and regions: one enumeration, `EnumProjectMarkers`; `isrgn` tells them apart.
+- AudioAccessor: a temporary sample reader (`CreateTakeAudioAccessor`); destroy it when done.
+- Action IDs mean something only with their section (`KbdSectionInfo`, `SectionFromUniqueID`: Main, MIDI Editor…).
+
+Handles are stable, indices are not: `GetTrack`, `GetMediaItem`, `GetMediaItemTake`, `TrackFX_*` address by position, and every insert, delete or reorder renumbers. Collect handles first, then modify (two passes). In a `defer` script keep a GUID (`TrackFX_GetFXGUID`) or a name and resolve the index where you use it.
+
+Extension types fail on machines without them: `BR_*`, `CF_Preview`, `FxChain` (SWS); `PackageEntry` (ReaPack); `JS_*` (js_ReaScriptAPI, separate from SWS); `ImGui_*` (ReaImGui).
