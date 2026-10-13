@@ -54,8 +54,10 @@ local open_preset_popup = false
 -- delle righe restano costanti.
 local FAV_BTN_H = 28        -- altezza fissa del bottone (px)
 local FAV_BTN_PAD_X = 15    -- padding orizzontale attorno al nome
-local UPPER_BTN_SP_X = 0    -- distanza tra pulsanti superiori (+Action, +Fx, +Preset)
+local UPPER_BTN_SP_X = 4    -- distanza tra Action e Fx
+local UPPER_BTN_FP_X = 2    -- padding orizzontale dei bottoni superiori (ridotto: li avvicina)
 local UPPER_SECTION_PAD_X = 10  -- margine sinistro della sezione pulsanti superiori
+local ADD_LABEL_SP_X = 4    -- distanza tra la label "Add:" e il primo bottone
 local FAV_BTN_SP_X = -4      -- distanza orizzontale tra due favorite button della stessa riga
 local FAV_SECTION_PAD_X = 0    -- margine sinistro della child window che contiene i favorite button
 local FAV_HOVER_FONT = 1.1  -- font 1.1x all'hover (effetto "rilievo")
@@ -955,11 +957,24 @@ function onExit()
     SetButtonState(0)
 end
 
--- Barra di controllo fissa in cima alla finestra: due bottoni compatti per
--- aggiungere favorite, tenuti separati dai bottoni trascinabili del scaffale.
+-- Barra di controllo fissa in cima alla finestra, tra due linee grigie: la
+-- label "Add:" + i bottoni Action/Fx a sinistra (per aggiungere favorite) e
+-- Preset allineato al bordo destro, tenuti separati dai bottoni del scaffale.
 function draw_action_fx_buttons()
+    -- Linea grigia sopra la riga (colore da ImGui_Col_Separator)
+    reaper.ImGui_Separator(ctx)
+
+    -- Padding orizzontale ridotto solo per i bottoni della riga: la distanza
+    -- visibile tra due bottoni è 2 * FramePadding.x, quindi li avvicina.
+    local _, fp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding())
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), UPPER_BTN_FP_X, fp_y)
+
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + UPPER_SECTION_PAD_X)
-    if reaper.ImGui_Button(ctx, "+Action") then
+
+    reaper.ImGui_Text(ctx, "Add:")
+    reaper.ImGui_SameLine(ctx, 0, ADD_LABEL_SP_X)
+
+    if reaper.ImGui_Button(ctx, "Action") then
         add_favorite_action()
     end
 
@@ -967,18 +982,30 @@ function draw_action_fx_buttons()
 
     -- Setta il flag; l'apertura avviene più avanti in main_loop, a livello
     -- window (ID stack coerente con BeginPopup).
-    if reaper.ImGui_Button(ctx, "+Fx") then
+    if reaper.ImGui_Button(ctx, "Fx") then
         open_fx_popup = true
         fx_filter = ""
     end
 
-    reaper.ImGui_SameLine(ctx, 0, UPPER_BTN_SP_X)
+    -- Preset allineato al bordo destro della regione di contenuto:
+    -- posizione X assoluta = (largo finestra - padding finestra) - larghezza bottone - margine.
+    local win_w = reaper.ImGui_GetWindowSize(ctx)
+    local win_pad_x = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding())
+    local fp_x = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding())
+    local preset_w = reaper.ImGui_CalcTextSize(ctx, "Preset") + fp_x * 2
+    local preset_x = (win_w - win_pad_x) - preset_w - 2
+    reaper.ImGui_SameLine(ctx, preset_x, 0)
 
     -- Apre il menu preset (flag consumato in main_loop, a livello window)
-    if reaper.ImGui_Button(ctx, "+Preset") then
+    if reaper.ImGui_Button(ctx, "Preset") then
         open_preset_popup = true
         preset_name_input = ""
     end
+
+    reaper.ImGui_PopStyleVar(ctx)
+
+    -- Linea grigia sotto la riga (colore da ImGui_Col_Separator)
+    reaper.ImGui_Separator(ctx)
 end
 
 -- I favorite scorrono su righe che si riempono fino alla larghezza
