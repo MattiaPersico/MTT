@@ -997,7 +997,9 @@ function render_favorites_flow(extra_limit)
     -- righe partono dopo di essa e il limite è la larghezza disponibile
     -- residua, così il bordo destro non esce dalla regione di contenuto.
     local shift = extra_limit or 0
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X + shift)
+    if #favorites > 0 then
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X + shift)
+    end
     local limit = reaper.ImGui_GetContentRegionAvail(ctx)
     local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
 
@@ -1066,13 +1068,10 @@ function render_favorites_flow(extra_limit)
         -- l'altezza automatica (undocked) si dimensionano a tutti gli slot, non
         -- all'ultima riga (probabilmente più corta, 2px più bassa se non hover).
         reaper.ImGui_SetCursorPos(ctx, content_max_x, row_origin_y + FAV_BTN_H + FAV_HOVER_H)
-        -- Un item a dimensione zero registra il cursore esteso come contenuto, altrimenti
-        -- End/EndChild segnala che SetCursorPos ha allargato i confini senza nulla disegnato.
-        reaper.ImGui_Dummy(ctx, 0, 0)
-        -- Registra il cursore esteso come contenuto: senza un item dopo la
-        -- SetCursorPos, End() lamenta che i confini sono stati estesi senza
-        -- crescere la finestra.
-        reaper.ImGui_Dummy(ctx, 0, 0)
+        -- Un item a dimensione non nulla registra il cursore esteso come contenuto,
+        -- altrimenti End/EndChild segnala che SetCursorPos ha allargato i confini
+        -- senza nulla disegnato.
+        reaper.ImGui_Dummy(ctx, 1, 1)
     end
 end
 
@@ -1266,6 +1265,7 @@ function main_loop()
             -- a destra della striscia.
             sb_top_x, sb_top_y = reaper.ImGui_GetCursorPos(ctx)
             reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + LEFT_SB_W + LEFT_SB_GAP)
+            reaper.ImGui_Dummy(ctx, 1, 1)
             _, sb_avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
         end
         hasToBeRemoved = {}
@@ -1274,6 +1274,7 @@ function main_loop()
             -- child sposta di LEFT_SB_W + LEFT_SB_GAP): stessa striscia di
             -- sinistra, come in undocked, dove lo shift è fatto prima di tutto.
             reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + LEFT_SB_W + LEFT_SB_GAP)
+            reaper.ImGui_Dummy(ctx, 1, 1)
         end
 
         draw_action_fx_buttons()
