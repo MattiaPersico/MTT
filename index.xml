@@ -88,8 +88,8 @@
       </version>
     </reapack>
   </category>
-  <category name="Effects">
-    <reapack name="mtt_kellylochbaum_coupled.jsfx" type="jsfx" desc="MTT Loon">
+  <category name="Loon">
+    <reapack name="mtt_kellylochbaum_coupled.jsfx" type="effect" desc="MTT Loon">
       <version name="0.30" author="Mattia Persico" time="2026-10-20T15:14:44Z">
           <source file="loon_fx.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_kellylochbaum_coupled/loon_fx.jsfx-inc</source>
           <source main="main" file="mtt_kellylochbaum_coupled.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_kellylochbaum_coupled/mtt_kellylochbaum_coupled.jsfx</source>
