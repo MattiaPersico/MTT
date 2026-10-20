@@ -1,0 +1,113 @@
+// Private Loon insert rack. Config: type, mix, A, B, C, enabled (42 x 6).
+// All functions use local temporaries; @gfx only writes the configuration bank.
+@init
+function fx_validate() local(k,p,j) (
+  k=0; loop(42,
+    p=fx_cfg+k*6;
+    p[0]=p[0]==p[0] ? max(0,min(8,floor(p[0]))) : 0;
+    j=1; loop(5, p[j]=p[j]==p[j] ? max(0,min(1,p[j])) : 0; j+=1;);
+    // Saved 0.28 dispersion: preserve physical frequency, stage count and Q.
+    p[0]==7 ? (
+      p[0]=8; p[2]=log((40*300^p[2])/20)/log(800);
+      p[3]*=24/128; p[4]*=log(16)/log(64);
+    );
+    k+=1;
+  );
+);
+// Targets are copied once per block. Runtime state is owned by the audio thread.
+function fx_prepare() local(k,q,p,t,r,n,a,b,c,om,alpha) (
+  memset(fx_on,0,14);
+  k=0; loop(45,
+    n=k<42 ? k : k-3; p=fx_cfg+n*6; q=fx_st+k*32;
+    t=max(0,min(8,floor(p[0]))); r=n<39 ? ir : srate;
+    a=max(0,min(1,p[2])); b=max(0,min(1,p[3])); c=max(0,min(1,p[4]));
+    // Compatibility for old in-memory settings; audio never writes the bank.
+    t==7 ? (t=8; a=log((40*300^a)/20)/log(800); b*=24/128; c*=log(16)/log(64););
+    q[16]=t; q[17]=p[5]>=.5 ? max(0,min(1,p[1])) : 0;
+    q[18]= t==1 ? min(r*.2,1*2000^a) : t==2 ? .02*200^a : t==3 ? .05*60^a :
+      t==4 ? min(131068/r,.001*500^a) : t==5 ? .4+1.2*a : t==8 ? min(r*.4,20*800^a) : 10^(36*a/20);
+    q[19]= t==2 ? b*.004 : t==3 ? .001+b*.009 : t==4 ? b*.85 : t==5 ? .1+b*.8 : t==8 ? 128*b : b;
+    q[20]= t==2 ? c*.85 : t==3 ? c*.5 : t==4 || t==5 ? 1-exp(-2*$pi*min(r*.4,300*(16000/300)^c)/r) : c;
+    q[21]=1-exp(-1/(.015*r)); q[22]=r;
+    t==8 ? (
+      // RBJ all-pass: numerator reverses the normalized denominator.
+      // https://www.w3.org/TR/audio-eq-cookbook/#APF
+      om=2*$pi*q[18]/r; alpha=sin(om)/(2*(.5*64^c));
+      q[23]=-2*cos(om)/(1+alpha); q[24]=(1-alpha)/(1+alpha);
+    );
+    (t>0 && q[17]>0) || q[1]>.000001 ? fx_on[floor(n/3)]=1;
+    k+=1;
+  );
+);
+function fx_tap(base,pos,age,d,mask) local(ix,f) (
+  d=max(1,min(mask-2,d)); ix=floor(d); f=d-ix;
+  age>=ix+1 ? base[(pos-ix)&mask]*(1-f)+base[(pos-ix-1)&mask]*f : 0;
+);
+function fx_lane(k,x,pressure_mode) local(q,t,w,a,b,c,ph,pos,age,base,d,y,z,j,lim,fb,wet,r,sc,ap1,ap2,stages,frac,ay,limit) (
+  q=fx_st+k*32; t=q[0]; sc=q[21]; r=q[22];
+  // Fade through dry before a type change. Buffers reset by age, not memset.
+  w=q[16]!=t ? 0 : q[17];
+  q[1]+=sc*(w-q[1]); abs(q[1]-w)<.000001 ? q[1]=w;
+  q[16]!=t && q[1]==0 ? (
+    q[0]=t=q[16]; q[5]=q[6]=q[7]=0;
+    q[8]=q[9]=q[10]=q[11]=0;
+    q[2]=q[18]; q[3]=q[19]; q[4]=q[20];
+    q[25]=q[23]; q[26]=q[24];
+  );
+  // Keep the old algorithm's parameters while fading out for replacement.
+  t==q[16] ? (q[2]+=sc*(q[18]-q[2]); q[3]+=sc*(q[19]-q[3]); q[4]+=sc*(q[20]-q[4]););
+  t>0 && q[1]>0 ? (
+    a=q[2]; b=q[3]; c=q[4]; ph=q[5]; pos=q[6]; age=q[7]; base=fx_buf+k*131072;
+    t==1 ? (
+      y=x*(pressure_mode ? .5+.5*sin(ph) : sin(ph)); ph+=2*$pi*a/r;
+    ) : t==6 ? (
+      // Biased soft saturation with zero output at zero input; C is output trim.
+      d=(b-.5); z=a*x+d; y=(z/sqrt(1+z*z)-d/sqrt(1+d*d))*10^((-18+18*c)/20);
+    ) : t==8 ? (
+      // Two transposed-direct-form-II states per stage, in the existing arena.
+      // Clear only the bounded cascade history; inactive stages start at zero.
+      limit=128;
+      age==0 ? memset(base,0,2*limit);
+      t==q[16] ? (q[25]+=sc*(q[23]-q[25]); q[26]+=sc*(q[24]-q[26]););
+      ap1=q[25]; ap2=q[26]; stages=floor(b); frac=b-stages;
+      y=x; z=x; wet=x; j=0;
+      loop(limit,
+        j<ceil(b) ? (
+          ay=ap2*y+base[j*2];
+          base[j*2]=ap1*(y-ay)+base[j*2+1];
+          base[j*2+1]=y-ap2*ay;
+          y=ay; j<stages ? z=y : wet=y;
+        ) : (base[j*2]=base[j*2+1]=0;);
+        j+=1;
+      );
+      y=z+frac*(wet-z);
+    ) : t==5 ? (
+      // Four damped feedback combs, mixed in parallel (a small Schroeder-style room).
+      y=0; j=0; loop(4,
+        d=min(32765,(j==0?.0297:j==1?.0371:j==2?.0411:.0437)*a*r);
+        z=fx_tap(base+j*32768,pos&32767,age,d,32767);
+        q[8+j]+=c*(z-q[8+j]);
+        wet=x*.35+b*q[8+j]; base[j*32768+(pos&32767)]=max(-32,min(32,wet));
+        y+=z*.5; j+=1;
+      );
+    ) : (
+      d=t==2 ? (.0005+b*(.5+.5*sin(ph)))*r : t==3 ? (.015+b*sin(ph))*r : a*r;
+      y=fx_tap(base,pos,age,d,131071);
+      t==3 ? y=.5*(y+fx_tap(base,pos,age,(.021+b*sin(ph+1.7))*r,131071));
+      t==4 ? (q[8]+=c*(y-q[8]); y=q[8]; fb=b;) : fb=c;
+      z=x+fb*y; base[pos]=max(-32,min(32,z));
+      t==2 || t==3 ? ph+=2*$pi*a/r;
+    );
+    ph>=2*$pi ? ph-=2*$pi;
+    q[5]=ph; q[6]=(pos+1)&131071; q[7]=min(131072,age+1);
+    x+=q[1]*(y-x);
+  ) : (q[7]=0; q[8]=q[9]=q[10]=q[11]=0;);
+  x;
+);
+function fx_chain(point,x,right) local(j,k) (
+  j=0; loop(3,
+    k=point*3+j+(right ? 3 : 0); x=fx_lane(k,x,point==0); j+=1;
+  );
+  // Internal waves have finite headroom; the original path is untouched when off.
+  point<7 ? max(-16,min(16,x)) : x;
+);

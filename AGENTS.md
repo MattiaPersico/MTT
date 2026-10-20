@@ -11,7 +11,7 @@
 
 ## Branches, versions, hooks
 - Work and commit on `DEV`, always. `main` is what ReaPack users download (through `index.xml`); it moves only through `./publish.sh`, never by hand.
-- Published script = it declares `local major_version` / `local minor_version` near the top. A change to it bumps `minor_version` in the same commit: ReaPack offers an update only when the number changes. The `pre-commit` hook copies the versions into `index.xml`: never edit that number by hand.
+- Published script = it declares `local major_version` / `local minor_version` near the top. Published JSFX effect (under `Effects/`) = it declares a `// Version: X.Y` comment near the top; only `.jsfx` / `.jsfx-inc` files are shipped (images are binarized in the code). A change to it bumps `minor_version` in the same commit: ReaPack offers an update only when the number changes. The `pre-commit` hook copies the versions into `index.xml`: never edit that number by hand.
 - `.githooks/` (per clone: `git config core.hooksPath .githooks`) refuse a commit on `main`, a changed published script without a bump, and a push to `main` whose versions disagree with `index.xml` or whose entry lists a deleted script; the `pre-commit` hook drops the `index.xml` entry of a deleted script. Never `--no-verify`.
 
 ## Script notes
