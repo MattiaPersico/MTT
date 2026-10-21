@@ -1105,19 +1105,21 @@ end
 -- Scrollbar custom sul bordo sinistro (entrambi i modi): la nativa è
 -- nascosta (WindowFlags_NoScrollbar, la wheel continua a scrollare); qui la
 -- track e il grab seguono lo stesso stato scroll della finestra corrente
--- (undocked: finestra principale, docked: child). Si disegna
--- solo quando il contenuto eccede l'altezza (max_y > 0).
+-- (undocked: finestra principale, docked: child). Si disegna sempre: con il
+-- contenuto dentro (max_y <= 0) il grab riempie tutta la track e non risponde
+-- al drag.
 function draw_left_scrollbar()
     local max_y = reaper.ImGui_GetScrollMaxY(ctx)
-    if max_y <= 0 then
-        sb_press_on_grab = false
-        return
-    end
-
     local track_h = sb_avail_h
-    local scroll_y = reaper.ImGui_GetScrollY(ctx)
-    local grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
-    local grab_top_y = sb_top_y + (scroll_y / max_y) * (track_h - grab_h)
+    local grab_h, grab_top_y
+    if max_y > 0 then
+        local scroll_y = reaper.ImGui_GetScrollY(ctx)
+        grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
+        grab_top_y = sb_top_y + (scroll_y / max_y) * (track_h - grab_h)
+    else
+        grab_h = track_h
+        grab_top_y = sb_top_y
+    end
 
     -- Il mouse e la posizione della finestra sono in coordinate schermo: passa
     -- il mouse a coordinate della finestra corrente (docked: la child; è lo
@@ -1147,7 +1149,7 @@ function draw_left_scrollbar()
     end
 
     local mouse_down = reaper.ImGui_IsMouseDown(ctx, 0)
-    if mouse_down then
+    if mouse_down and max_y > 0 then
         if not sb_press_on_grab and over_grab then
             -- Punto trattenuto dentro il grab: latcha l'offset di pressione
             -- (il punto resta fermo rispetto al grab) e la scroll lo segue su

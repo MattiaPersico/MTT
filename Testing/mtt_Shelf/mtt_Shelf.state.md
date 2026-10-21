@@ -2,6 +2,6 @@
 
 updated: 2026-10-13
 - Done:
-  - Upper control bar layout: gray separators above/below, "Add:" label before buttons, buttons renamed (no +), tighter spacing (FramePadding.x=2, 4px gap between Action/Fx), Preset right-aligned via absolute X from window width.
+  - Left scrollbar always visible: `draw_left_scrollbar` no longer returns early when the content fits (`max_y <= 0`); the grab then fills the whole track and the drag is disabled in that state.
 - Not done:
 - Waiting on:
