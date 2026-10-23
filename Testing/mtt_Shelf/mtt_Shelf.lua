@@ -58,7 +58,8 @@ local UPPER_BTN_SP_X = 4    -- distanza tra Action e Fx
 local UPPER_BTN_FP_X = 2    -- padding orizzontale dei bottoni superiori (ridotto: li avvicina)
 local UPPER_SECTION_PAD_X = 10  -- margine sinistro della sezione pulsanti superiori
 local ADD_LABEL_SP_X = 4    -- distanza tra la label "Add:" e il primo bottone
-local FAV_BTN_SP_X = -4      -- distanza orizzontale tra due favorite button della stessa riga
+local FAV_BTN_SP_X = 16     -- gap costante tra due favorite button: contiene la crescita
+                             -- dell'hover (font 1.1x → ~5% per lato) senza overlap
 local FAV_SECTION_PAD_X = 0    -- margine sinistro della child window che contiene i favorite button
 local FAV_HOVER_FONT = 1.1  -- font 1.1x all'hover (effetto "rilievo")
 local FAV_HOVER_H = 4       -- extra di altezza dello slot per l'hover
@@ -81,10 +82,12 @@ local FAV_DRAG_SRC_GRAY = 0.3  -- "negativo" in drag: luminosità di bordo + scr
 -- (0xFF808080 ecc.) erano in realtà rossi semi-trasparenti.
 local LEFT_SB_W = 10
 local LEFT_SB_GRAB_W = 4
-local LEFT_SB_GAP = 6
+local LEFT_SB_GAP = 2
 local LEFT_SB_TRACK_COL = 0x80808050
 local LEFT_SB_GRAB_COL = 0x404040FF
 local LEFT_SB_GRAB_HOVER_COL = 0x606060FF
+local LEFT_SB_TRACK_INSET_Y = 4  -- inset verticale della track (più corta dell'area)
+local LEFT_SB_GRAB_MARGIN_Y = 2  -- il grab resta un filo più corto della track
 local sb_top_x, sb_top_y, sb_avail_h = 0, 0, 0
 local sb_press_on_grab = false  -- bottone sinistro trattenuto col punto dentro il grab (scartato al rilascio)
 local sb_press_off_y = 0        -- offset del punto di pressione dentro il grab: evita lo snap all'inizio
@@ -92,10 +95,11 @@ local hovered_favorite_idx = -1  -- indice del button hoverato (frame precedente
 local current_hovered_idx = -1   -- indice del button attualmente hoverato (frame corrente)
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
 local current_pressed_idx = -1   -- indice del button attualmente premuto (frame corrente)
+local hovered_upper_btn = 0      -- Action/Fx/Preset hoverato (frame precedente, testo più chiaro)
+local current_upper_btn = 0      -- Action/Fx/Preset hoverato (frame corrente); 0=nessuno, 1=Action 2=Fx 3=Preset
 local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
 local draggedFx = nil            -- favorite in corso di drag
 local DRAG_PREVIEW_OFFSET_Y = 20 -- preview sotto il cursore: tiene il puntatore fuori dalla finestra
-local fav_hover_extra = 0        -- extra di larghezza hover (font 1.1x): massimo tra le favorite, set in render_favorites_flow
 
 function LoadAllFX()
     local raw_fx = {}
@@ -637,7 +641,7 @@ function apply_style()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ScrollbarRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
-    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 5)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 3)
 end
 
 function pop_style()
@@ -943,6 +947,12 @@ function reset_pressed_if_none()
     current_pressed_idx = -1
 end
 
+-- Stesso sync a due frame per i bottoni "solo testo" della riga superiore
+function reset_upper_hover()
+    hovered_upper_btn = current_upper_btn
+    current_upper_btn = 0
+end
+
 -- ==========================================
 -- Main Loop
 -- ==========================================
@@ -955,6 +965,27 @@ end
 
 function onExit()
     SetButtonState(0)
+end
+
+-- Bottone "solo testo" della riga superiore (Action/Fx/Preset): il label si
+-- illumina all'hover, con lo stesso schema a due frame dei favorite
+-- (hovered_upper_btn = frame precedente, current_upper_btn = frame corrente).
+-- idx: 1=Action 2=Fx 3=Preset. Sfondo e bordo già trasparenti dal chiamante.
+local function draw_upper_text_button(label, idx)
+    -- Il testo del tema è già bianco pieno: per far "crescere" la luminosità
+    -- all'hover si abbassa quella a riposo (grigio) e si torna a bianco sotto il cursore.
+    local col = reaper.ImGui_ColorConvertDouble4ToU32
+    if hovered_upper_btn == idx then
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col(1, 1, 1, 1))
+    else
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col(0.7, 0.7, 0.7, 1))
+    end
+    local clicked = reaper.ImGui_Button(ctx, label)
+    if reaper.ImGui_IsItemHovered(ctx) then
+        current_upper_btn = idx
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+    return clicked
 end
 
 -- Barra di controllo fissa in cima alla finestra, tra due linee grigie: la
@@ -971,10 +1002,21 @@ function draw_action_fx_buttons()
 
     reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + UPPER_SECTION_PAD_X)
 
+    local col = reaper.ImGui_ColorConvertDouble4ToU32
+
+    -- Label "Add:" grigia come i bottoni "solo testo"
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col(0.7, 0.7, 0.7, 1))
     reaper.ImGui_Text(ctx, "Add:")
+    reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_SameLine(ctx, 0, ADD_LABEL_SP_X)
 
-    if reaper.ImGui_Button(ctx, "Action") then
+    -- Bottoni "solo testo": sfondo e bordo trasparenti, solo il label resta.
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col(0, 0, 0, 0))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col(0, 0, 0, 0))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col(0, 0, 0, 0))
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameBorderSize(), 0)
+
+    if draw_upper_text_button("Action", 1) then
         add_favorite_action()
     end
 
@@ -982,7 +1024,7 @@ function draw_action_fx_buttons()
 
     -- Setta il flag; l'apertura avviene più avanti in main_loop, a livello
     -- window (ID stack coerente con BeginPopup).
-    if reaper.ImGui_Button(ctx, "Fx") then
+    if draw_upper_text_button("Fx", 2) then
         open_fx_popup = true
         fx_filter = ""
     end
@@ -997,10 +1039,15 @@ function draw_action_fx_buttons()
     reaper.ImGui_SameLine(ctx, preset_x, 0)
 
     -- Apre il menu preset (flag consumato in main_loop, a livello window)
-    if reaper.ImGui_Button(ctx, "Preset") then
+    if draw_upper_text_button("Preset", 3) then
         open_preset_popup = true
         preset_name_input = ""
     end
+
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
 
     reaper.ImGui_PopStyleVar(ctx)
 
@@ -1012,13 +1059,12 @@ end
 -- disponibile e poi vanno a capo; quando le righe non entrano più in altezza,
 -- a scrollare è la barra custom di sinistra (la nativa verticale è nascosta in
 -- entrambi i modi).
--- Ogni favorite occupa uno slot: il suo bottone + un extra costante, uguale
--- per tutti (il massimo extra hover, che cresce col font 1.1x del nome più
--- lungo). L'inserimento del bottone nello slot è quindi costante: lo spazio
--- tra due bottoni e il bordo sinistro di ogni riga sono gli stessi per tutte
--- le righe, indipendentemente dai nomi. L'hover cresce comunque in posto e i
--- bottoni alla destra non si spostano; le righe non si ricollocano mai perché
--- il wrapping usa sempre la dimensione slot.
+-- Layout a flusso sequenziale: ogni bottone occupa la sua larghezza base più
+-- un gap costante (FAV_BTN_SP_X): il gap non dipende dai nomi. L'hover
+-- (font 1.1x) e la press cambiano solo la dimensione di disegno, centrata sul
+-- rettangolo base: il bottone cresce in posto nei gap liberi, senza spostare
+-- i vicini né ri-fluire; l'altezza di riga fissa (bottone + extra hover) lo
+-- contiene.
 function render_favorites_flow(extra_limit)
     -- extra_limit: la striscia riserbata a sinistra (scrollbar custom): le
     -- righe partono dopo di essa e il limite è la larghezza disponibile
@@ -1027,28 +1073,28 @@ function render_favorites_flow(extra_limit)
     if #favorites > 0 then
         reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + FAV_SECTION_PAD_X + shift)
     end
-    local limit = reaper.ImGui_GetContentRegionAvail(ctx)
     local _, row_sp_y = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing())
-
-    -- Extra orizzontale dell'hover (font 1.1x) per ogni nome: lo slot lo
-    -- riserva a tutti, così l'inserimento del bottone centrato è costante.
     local fs = reaper.ImGui_GetFontSize(ctx)
-    local max_extra = 0
+
+    -- Padding sinistro: metà della crescita orizzontale più grande (font 1.1x
+    -- del nome più lungo). Il primo bottone di ogni riga sta a metà della sua
+    -- base; all'hover cresce di extra/2 a sinistra: così non arriva al bordo.
+    local max_left_grow = 0
     for i = 1, #favorites do
         local display_name = favorite_display_name(favorites[i])
         reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
         local hover_w = reaper.ImGui_CalcTextSize(ctx, display_name)
         reaper.ImGui_PopFont(ctx)
-        local extra = hover_w - reaper.ImGui_CalcTextSize(ctx, display_name)
-        if extra > max_extra then
-            max_extra = extra
+        local grow = (hover_w - reaper.ImGui_CalcTextSize(ctx, display_name)) / 2
+        if grow > max_left_grow then
+            max_left_grow = grow
         end
     end
-    -- Condiviso con render_fx_drag_preview: il bottone della preview usa le
-    -- dimensioni ingrandite (hover), non quelle base.
-    fav_hover_extra = max_extra
+
+    local limit = reaper.ImGui_GetContentRegionAvail(ctx) - max_left_grow
 
     local row_origin_x, row_origin_y = reaper.ImGui_GetCursorPos(ctx)
+    row_origin_x = row_origin_x + max_left_grow
     local row_used = 0   -- offset orizzontale del prossimo slot da row_origin_x
     local content_max_x = 0
 
@@ -1058,36 +1104,46 @@ function render_favorites_flow(extra_limit)
         local is_hover = (i == hovered_favorite_idx) and not is_drag_src
         local is_pressed = (i == pressed_favorite_idx) and not is_drag_src
 
-        local btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
-        local btn_h = FAV_BTN_H
-        -- Slot: bottone + extra costante. Per il nome più lungo coincide con le
-        -- dimensioni hover; gli altri ci stanno dentro con un po' di respiro.
-        local slot_w = btn_w + max_extra
-        local slot_h = FAV_BTN_H + FAV_HOVER_H
-        if is_hover then
-            btn_w, btn_h = slot_w, slot_h
-        end
-        -- Pressione: riduci il bottone dentro lo slot (che resta di dimensioni
-        -- costanti): nessun ricollocamento, i bottoni vicini non si spostano
-        if is_pressed then
-            btn_w = math.max(btn_w - FAV_PRESSED_SHRINK_X, 8)
-            btn_h = math.max(btn_h - FAV_PRESSED_SHRINK_Y, 8)
-        end
-        if row_used > 0 and row_used + slot_w > limit then
-            row_origin_y = row_origin_y + slot_h + row_sp_y
+        -- Le posizioni (wrapping, slot_x, avanzata) si calcolano SEMPRE sulla
+        -- larghezza base: gap uniforme, primo bottone di ogni riga alla stessa
+        -- X, e nessun ri-flusso all'hover (il bottone cresce in posto, nei gap
+        -- liberi ai lati, senza spostare i vicini né andare a capo).
+        local base_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
+
+        if row_used > 0 and row_used + base_w > limit then
+            row_origin_y = row_origin_y + FAV_BTN_H + FAV_HOVER_H + row_sp_y
             row_used = 0
         end
 
         local slot_x = row_origin_x + row_used
 
-        -- Centera il bottone nello slot (compensa la crescita dell'hover su
-        -- entrambi gli assi: padding verticale e orizzontale attorno al bottone).
-        reaper.ImGui_SetCursorPos(ctx, slot_x + (slot_w - btn_w) / 2, row_origin_y + (slot_h - btn_h) / 2)
+        -- Dimensione di disegno: base, poi hover (font 1.1x, più alto) e/o
+        -- press. Il rettangolo cresce centrato su quello base: lo spostamento
+        -- è extra/2 per lato, assorbito dal gap, i vicini restano fermi.
+        local btn_w, btn_h = base_w, FAV_BTN_H
+        if is_hover then
+            reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
+            btn_w = reaper.ImGui_CalcTextSize(ctx, display_name) + FAV_BTN_PAD_X
+            reaper.ImGui_PopFont(ctx)
+            btn_h = FAV_BTN_H + FAV_HOVER_H
+        end
+        if is_pressed then
+            btn_w = math.max(btn_w - FAV_PRESSED_SHRINK_X, 8)
+            btn_h = math.max(btn_h - FAV_PRESSED_SHRINK_Y, 8)
+        end
+
+        -- Centrato sul rettangolo base; l'altezza di riga fissa (bottone +
+        -- extra hover) fa sì che l'hover verticale stia dentro la riga.
+        reaper.ImGui_SetCursorPos(
+            ctx,
+            slot_x + (base_w - btn_w) / 2,
+            row_origin_y + (FAV_BTN_H + FAV_HOVER_H - btn_h) / 2
+        )
 
         render_favorite_button(i, btn_w, btn_h)
 
-        row_used = row_used + slot_w + FAV_BTN_SP_X
-        content_max_x = math.max(content_max_x, slot_x + slot_w)
+        row_used = row_used + base_w + FAV_BTN_SP_X
+        content_max_x = math.max(content_max_x, slot_x + base_w)
     end
 
     if #favorites > 0 then
@@ -1110,15 +1166,20 @@ end
 -- al drag.
 function draw_left_scrollbar()
     local max_y = reaper.ImGui_GetScrollMaxY(ctx)
-    local track_h = sb_avail_h
+    -- Track leggermente più corta dell'area: inset in alto e in basso. Il grab
+    -- viaggia dentro e resta un filo più corto della track (margine per lato).
+    local track_top = sb_top_y + LEFT_SB_TRACK_INSET_Y
+    local track_bottom = sb_top_y + sb_avail_h - LEFT_SB_TRACK_INSET_Y
+    local track_h = track_bottom - track_top
     local grab_h, grab_top_y
     if max_y > 0 then
         local scroll_y = reaper.ImGui_GetScrollY(ctx)
         grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
-        grab_top_y = sb_top_y + (scroll_y / max_y) * (track_h - grab_h)
+        grab_h = math.min(grab_h, track_h - 2 * LEFT_SB_GRAB_MARGIN_Y)
+        grab_top_y = track_top + (scroll_y / max_y) * (track_h - grab_h)
     else
-        grab_h = track_h
-        grab_top_y = sb_top_y
+        grab_h = track_h - 2 * LEFT_SB_GRAB_MARGIN_Y
+        grab_top_y = track_top + LEFT_SB_GRAB_MARGIN_Y
     end
 
     -- Il mouse e la posizione della finestra sono in coordinate schermo: passa
@@ -1139,12 +1200,12 @@ function draw_left_scrollbar()
     local over_grab = win_free and in_strip_x
         and mouse_ly >= grab_top_y and mouse_ly <= grab_top_y + grab_h
     local over_track = win_free and in_strip_x
-        and mouse_ly >= sb_top_y and mouse_ly <= sb_top_y + track_h
+        and mouse_ly >= track_top and mouse_ly <= track_bottom
 
     -- Il punto p della track corrisponde a (p - sb_top_y) / (track_h - grab_h)
     -- * max_y, clampato.
     local function scroll_at(rel_y)
-        local s = (rel_y - sb_top_y) / (track_h - grab_h) * max_y
+        local s = (rel_y - track_top) / (track_h - grab_h) * max_y
         return math.min(math.max(s, 0), max_y)
     end
 
@@ -1180,7 +1241,7 @@ function draw_left_scrollbar()
     end
     local grab_x = sb_top_x + (LEFT_SB_W - LEFT_SB_GRAB_W) / 2
     local dl = reaper.ImGui_GetWindowDrawList(ctx)
-    reaper.ImGui_DrawList_AddRect(dl, sb_top_x + win_x, sb_top_y + win_y, sb_top_x + win_x + LEFT_SB_W, sb_top_y + track_h + win_y, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
+    reaper.ImGui_DrawList_AddRect(dl, sb_top_x + win_x, track_top + win_y, sb_top_x + win_x + LEFT_SB_W, track_bottom + win_y, LEFT_SB_TRACK_COL, LEFT_SB_W / 2)
     reaper.ImGui_DrawList_AddRectFilled(dl, grab_x + win_x, grab_top_y + win_y, grab_x + win_x + LEFT_SB_GRAB_W, grab_top_y + grab_h + win_y, grab_col, LEFT_SB_GRAB_W / 2)
 end
 
@@ -1196,7 +1257,10 @@ end
 -- drop si risolve.
 function render_fx_drag_preview()
     local name = favorite_display_name(draggedFx)
-    local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X + fav_hover_extra
+    local fs = reaper.ImGui_GetFontSize(ctx)
+    reaper.ImGui_PushFont(ctx, nil, fs * FAV_HOVER_FONT)
+    local btn_w = reaper.ImGui_CalcTextSize(ctx, name) + FAV_BTN_PAD_X
+    reaper.ImGui_PopFont(ctx)
     local btn_h = FAV_BTN_H + FAV_HOVER_H
 
     local mx, my = reaper.ImGui_GetMousePos(ctx)
@@ -1277,6 +1341,11 @@ function main_loop()
     local window_flags = reaper.ImGui_WindowFlags_NoCollapse() | reaper.ImGui_WindowFlags_NoResize()
         | reaper.ImGui_WindowFlags_NoScrollbar()
 
+    -- A filo in alto: zero il margine verticale della finestra (il padding
+    -- orizzontale resta). Prima di Begin: la content rect si calcola lì.
+    local win_pad_x = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding())
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding(), win_pad_x, 0)
+
     local visible, is_open = reaper.ImGui_Begin(ctx, "Shelf", true, window_flags)
 
     if visible then
@@ -1307,6 +1376,7 @@ function main_loop()
         end
 
         draw_action_fx_buttons()
+        reset_upper_hover()
 
         if docked then
             -- La child riempie il resto della finestra. La sua barra nativa
@@ -1540,6 +1610,9 @@ function main_loop()
             render_fx_drag_preview()
         end
     end
+
+    -- Ripristina il WindowPadding spinto prima di Begin (a filo in alto)
+    reaper.ImGui_PopStyleVar(ctx)
 
     pop_style()
 
