@@ -90,10 +90,34 @@
   </category>
   <category name="Loon">
     <reapack name="mtt_loon.jsfx" type="effect" desc="MTT Loon">
-      <version name="0.30" author="Mattia Persico" time="2026-10-20T15:14:44Z">
+      <version name="0.33" author="Mattia Persico" time="2026-10-23T10:53:08Z">
+          <source file="loon_conv.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_conv.jsfx-inc</source>
           <source file="loon_fx.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_fx.jsfx-inc</source>
+          <source file="loon_supp.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_supp.jsfx-inc</source>
           <source main="main" file="mtt_loon.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_loon.jsfx</source>
       </version>
+    </reapack>
+  </category>
+  <category name="Input Bridge">
+    <reapack name="mtt_input_bridge.ext" type="extension" desc="MTT Input Bridge">
+      <version name="0.3.1" author="Mattia Persico" time="2026-10-23T10:50:40Z">
+        <source platform="darwin-arm64" file="reaper_tablet_bridge-arm64.dylib" hash="1220d15469f4dede884c6232cfba1dbefea3cbe66601ba1a85b574171c88bad8a84d">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/reaper_tablet_bridge-arm64.dylib</source>
+        <source platform="darwin-arm64" file="mtt-licenses/tablet_bridge/THIRD_PARTY_NOTICES.md" hash="1220ef37c81c4029b6a61e1d96224e28c114a6ede093ca9e947c30152d5c4db9433d">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/THIRD_PARTY_NOTICES.md</source>
+        <source platform="darwin-arm64" file="mtt-licenses/tablet_bridge/LICENSE.LGPL-3.0" hash="1220e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/LICENSE.LGPL-3.0</source>
+        <source platform="darwin-arm64" file="mtt-licenses/tablet_bridge/LICENSE.GPL-3.0" hash="12203972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/LICENSE.GPL-3.0</source>
+        <source platform="darwin-arm64" file="mtt-licenses/tablet_bridge/README.md" hash="1220c5b59e6d7dc553c90df5fdee5f2356440b809ca44b0271e14eae329ebd0cbd88">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/README.md</source>
+        <source platform="darwin-arm64" file="mtt-licenses/tablet_bridge/mtt_input_bridge-source.zip" hash="1220e1cb4fbb58df4acfbae7db9bb3722aa2bc725ed50d1b6cf306c1d05d4add5eee">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/mtt_input_bridge-source.zip</source>
+        <source platform="darwin64" file="reaper_tablet_bridge-x86_64.dylib" hash="1220295530da4db51e791d210ac91ff1c70ef88598a1c91f4f92840e5adaf9a71018">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/reaper_tablet_bridge-x86_64.dylib</source>
+        <source platform="darwin64" file="mtt-licenses/tablet_bridge/THIRD_PARTY_NOTICES.md" hash="1220ef37c81c4029b6a61e1d96224e28c114a6ede093ca9e947c30152d5c4db9433d">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/THIRD_PARTY_NOTICES.md</source>
+        <source platform="darwin64" file="mtt-licenses/tablet_bridge/LICENSE.LGPL-3.0" hash="1220e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/LICENSE.LGPL-3.0</source>
+        <source platform="darwin64" file="mtt-licenses/tablet_bridge/LICENSE.GPL-3.0" hash="12203972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/LICENSE.GPL-3.0</source>
+        <source platform="darwin64" file="mtt-licenses/tablet_bridge/README.md" hash="1220c5b59e6d7dc553c90df5fdee5f2356440b809ca44b0271e14eae329ebd0cbd88">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/README.md</source>
+        <source platform="darwin64" file="mtt-licenses/tablet_bridge/mtt_input_bridge-source.zip" hash="1220e1cb4fbb58df4acfbae7db9bb3722aa2bc725ed50d1b6cf306c1d05d4add5eee">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/mtt_input_bridge-source.zip</source>
+      </version>
+      <metadata>
+        <link rel="website">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Extensions/tablet_bridge/0.3.1/mtt_input_bridge-source.zip</link>
+        <description>{\rtf1\ansi MTT Input Bridge: USB pen tablet and Force Touch trackpad input for Loon. macOS 11+ (Apple Silicon/Intel). Install alongside MTT Loon and restart REAPER. Optional; Loon also works without it. Hardware/REAPER input validation remains pending.}</description>
+      </metadata>
     </reapack>
   </category>
 </index>

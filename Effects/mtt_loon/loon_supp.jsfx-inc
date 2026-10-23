@@ -1,0 +1,203 @@
+// Private Loon Resonance Suppressor (FX type 11): automatic resonance suppression, zero latency.
+//
+// An FFT side-chain finds resonances (narrow peaks of the spectral envelope) and drives a fixed
+// bank of TPT state-variable bell filters spaced 0.5 ERB apart (Simper's linear trapezoidal SVF).
+// The audio only passes through those minimum-phase filters, so the effect adds no latency; the
+// gain reduction follows the sound with about half an analysis window of delay (~21 ms).
+// There are no frequencies or Q to set: Amount, Low limit and High limit are the only controls.
+//
+// Detection runs on the input decimated by D = round(rate / 48 kHz) (a D-sample average: nothing
+// above 18 kHz is analysed), at the analysis rate ra = rate / D, once per hop (N/8 analysis
+// samples; N ~ ra/23.4, so bins are ~23 Hz at every rate). The bells run at the full rate.
+//  1. Hann-windowed power spectrum (the window is applied in the frequency domain), scaled so a
+//     full-scale sine reads 0 dB, averaged per bin over about 30 ms (a single frame of noise varies
+//     by several dB from bin to bin and would hide real resonances among random peaks).
+//  2. L: the peak level in bands 0.25 ERB wide (interpolated where a band is narrower than a bin).
+//  3. A pitch-independent spectral envelope: L, with the gaps between resolved harmonics bridged.
+//     Local maxima of L are the candidates (maxima more than 8 dB under a cone that falls 8 dB per
+//     FFT bin from every other band are window leakage and are skipped). Between two neighbouring
+//     maxima whose valley is at least 8 dB deep (harmonics with nothing in between) the envelope
+//     follows the straight line joining them; shallower valleys are real spectral shape (noise,
+//     dense harmonics) and stay. Beyond the outermost maxima the envelope is held flat, so the
+//     region under the fundamental is not read as a dip. Sparse harmonics (high pitch) are
+//     therefore not read as peaks, and a narrow resonance in noise keeps its height.
+//  4. Reference: the envelope smoothed over +-3 ERB (triangular, leaving out the band and its two
+//     neighbours, so a peak does not raise its own reference). Amount is the fraction of the excess
+//     removed: cut = Amount x (excess - 2 dB), at most 24 dB, so 100% brings a peak down to 2 dB
+//     over its surroundings and never below them. Bands 60 dB under the loudest are ignored, and
+//     below -90 dB everything releases. A nearly pure tone is itself a narrow peak and is reduced
+//     too; the Low/High limits keep the effect away from the range that should stay untouched.
+//  5. Each bell takes the largest cut of the three detection bands it covers, scaled by the
+//     Low/High limit mask (soft edges, half an octave wide). At the stereo output the two lanes
+//     share the larger cut per band (the same gains on both sides), so the image does not move.
+// Gains: 10 ms attack and 80 ms release per band, ramped over 8 coefficient updates per hop.
+// Cuts under 0.5 dB are dropped and a bell releasing under 0.05 dB is switched off; bells with no
+// cut are skipped and their state cleared, so an idle or nearly idle suppressor costs little.
+// Constants were tuned on a numpy model (voice-like noise and sawtooth spectra with formants and a
+// narrow resonance, 110-800 Hz, 44.1-384 kHz) and checked through the real code with ysfx.
+//
+// Memory: only the lane's own 131072-word FX arena (base). Offsets from base:
+//   0-2559      detection arrays, 256 each: bin centre, first bin, last bin, cone drop to the
+//               next band, L, cone envelope U, envelope, cut, (spare)
+//   2560-4351   bell arrays, 128 each: tan(pi f/r), 1/Q, gain dB, step dB, own cut, smoothed
+//               cut, a1, a2, a3, m1, ic1, ic2, centre Hz, active flag
+//   4352-6399   averaged power spectrum (bins up to ~18 kHz)
+//   6400-7423   active bells packed for the per-sample loop, 8 words each: a1, a2, a3, m1, ic1,
+//               ic2, bell index (rebuilt at every coefficient update; states copied back first)
+//   F           FFT buffer (2N words) at the first 65536-word boundary after base+8192 (an EEL2
+//               FFT buffer must not cross one), then the input ring (N words): below base+122880.
+// Lane scalars: q[8] detection bands, q[9] bells, q[10] N, q[11] active bells (packed count),
+// q[12] decimation sum, q[14] samples in it, q[15] analysis write position, q[31] D (slots the
+// rack leaves free for this type). Age 0 (first active sample after a type change, a bypass or a
+// reset) rebuilds every table and clears every state for the lane's rate.
+@init
+function sup_fft(base) (ceil((base+8192)/65536)*65536;);
+function sup_init(q,base,r) local(n,e0,e1,nd,na,b,e,f,j,erb,d,ra)
+(
+  d=max(1,floor(r/48000+.5)); ra=r/d;
+  n=2^floor(log(ra/23.4375)/log(2)+.5); n=max(256,min(16384,n));
+  e0=21.4*log10(1+.00437*50); e1=21.4*log10(1+.00437*min(18000,.45*ra));
+  nd=min(255,floor((e1-e0)/.25)+1); na=min(128,floor((nd-1)/2)+1);
+  b=0; loop(nd,
+    e=e0+.25*b;
+    base[b]=(10^(e/21.4)-1)/.00437*n/ra;
+    base[256+b]=ceil((10^((e-.125)/21.4)-1)/.00437*n/ra);
+    base[512+b]=floor((10^((e+.125)/21.4)-1)/.00437*n/ra);
+    b+=1;
+  );
+  b=0; loop(nd-1, base[768+b]=8*(base[b+1]-base[b]); b+=1;);
+  memset(base+2560,0,1792);
+  j=0; loop(na,
+    f=(10^((e0+.5*j)/21.4)-1)/.00437; erb=24.7*(4.37*f/1000+1);
+    base[2560+j]=tan($pi*f/r); base[2688+j]=.5*erb/f; base[4096+j]=f;
+    j+=1;
+  );
+  memset(base+4352,0,2048); memset(sup_fft(base)+2*n,0,n);
+  q[8]=nd; q[9]=na; q[10]=n; q[11]=0; q[12]=q[14]=q[15]=0; q[31]=d;
+);
+// One analysis hop: writes each bell's own cut (dB, >= 0) at base+3072.
+function sup_analyse(q,base,wp,ra,amt,lo,hi) local(n,nd,na,fb,ring,m,i,st,re,im,pw,kmax,av,vmin,s,b,i0,i1,p,k,fr,l,mx,last,j,d,t,ws,w,h0,h1,cut,f,u)
+(
+  n=q[10]; nd=q[8]; na=q[9]; m=n-1; fb=sup_fft(base); ring=fb+2*n;
+  // Oldest sample first: wp is the index just written.
+  i=0; st=wp+1; loop(n, fb[2*i]=ring[(st+i)&m]; fb[2*i+1]=0; i+=1;);
+  fft(fb,n); fft_permute(fb,n);
+  kmax=min(n/2-2,base[512+nd-1]+2); s=16/(n*n);
+  // Average over ~30 ms: 1-exp(-hop/(0.03 ra)), hop = N/8 analysis samples.
+  av=1-exp(-n/(8*.03*ra));
+  pw=base+4352; pw[0]=0; i=1; loop(kmax,
+    re=.5*fb[2*i]-.25*(fb[2*i-2]+fb[2*i+2]); im=.5*fb[2*i+1]-.25*(fb[2*i-1]+fb[2*i+3]);
+    pw[i]+=av*((re*re+im*im)*s-pw[i]); i+=1;
+  );
+  mx=-1000; b=0; loop(nd,
+    i0=base[256+b]; i1=min(kmax,base[512+b]);
+    i1>=i0 ? (p=pw[i0]; i=i0+1; loop(i1-i0, p=max(p,pw[i]); i+=1;);) :
+             (k=base[b]; i=floor(k); fr=k-i; p=pw[i]*(1-fr)+pw[i+1]*fr;);
+    l=10*log10(p+.00000000000000000001); base[1024+b]=l; mx=max(mx,l);
+    b+=1;
+  );
+  mx<-90 ? memset(base+3072,0,na) : (
+    // Leakage cone U (two passes).
+    memcpy(base+1280,base+1024,nd);
+    b=1; loop(nd-1, base[1280+b]=max(base[1280+b],base[1279+b]-base[767+b]); b+=1;);
+    b=nd-2; loop(nd-1, base[1280+b]=max(base[1280+b],base[1281+b]-base[768+b]); b-=1;);
+    // Envelope: L, bridged across deep valleys between accepted maxima.
+    last=-1; vmin=1000; b=0; loop(nd,
+      l=base[1024+b];
+      (b==0 || l>=base[1023+b]) && (b==nd-1 || l>=base[1025+b]) && l>=base[1280+b]-8 ? (
+        last<0 ? (j=0; loop(b, base[1536+j]=l; j+=1;);) : (
+          d=b-last; j=last+1; t=base[1024+last];
+          min(t,l)-vmin>=8 ? (
+            loop(d-1, base[1536+j]=max(base[1024+j],t+(l-t)*(j-last)/d); j+=1;);
+          ) : (
+            loop(d-1, base[1536+j]=base[1024+j]; j+=1;);
+          );
+        );
+        base[1536+b]=l; last=b; vmin=1000;
+      ) : vmin=min(vmin,l);
+      b+=1;
+    );
+    last<0 ? memcpy(base+1536,base+1024,nd) : (j=last+1; t=base[1024+last]; loop(nd-1-last, base[1536+j]=t; j+=1;););
+    // Excess over the +-3 ERB reference (the band and its neighbours left out).
+    b=0; loop(nd,
+      h0=max(0,b-12); h1=min(nd-1,b+12); s=0; ws=0; j=h0;
+      loop(h1-h0+1, abs(j-b)>1 ? (w=13-abs(j-b); s+=w*base[1536+j]; ws+=w;); j+=1;);
+      t=base[1536+b];
+      base[1792+b]=t<mx-60 || ws==0 ? 0 : max(0,min(24,amt*(t-s/ws-2)));
+      b+=1;
+    );
+    // Bells: largest cut of the bands they cover, times the limit mask (2.885 = 2/ln 2).
+    j=0; loop(na,
+      b=2*j; cut=base[1792+b];
+      b>0 ? cut=max(cut,base[1791+b]); b<nd-1 ? cut=max(cut,base[1793+b]);
+      f=base[4096+j];
+      u=lo>20.5 ? max(0,min(1,.5+2.885390082*log(f/lo))) : 1;
+      hi<19900 ? u*=max(0,min(1,.5-2.885390082*log(f/hi)));
+      cut*=u; base[3072+j]=cut<.5 ? 0 : cut; j+=1;
+    );
+  );
+);
+// Per sample. k: rack lane; q: lane state; base: lane arena; age: 0 on the first active sample;
+// r: lane rate; amt: Amount (0-1); lo, hi: limits in Hz.
+function sup_run(k,q,base,x,age,r,amt,lo,hi) local(n,na,u,h,j,st,cur,A,g,kk,a1,pb,o,link,aa,ar,t,c,y,i1,i2,v1,v2,v3,F,pk,na2,d,wp,w)
+(
+  age==0 ? sup_init(q,base,r);
+  n=q[10]; na=q[9]; u=n/64; h=n/8; d=q[31];
+  // Decimated analysis input: one ring value per d samples (their mean).
+  q[12]+=x; q[14]+=1; w=q[14]>=d;
+  w ? (wp=q[15]; F=sup_fft(base); F[2*n+(wp&(n-1))]=q[12]/d; q[12]=q[14]=0; q[15]=(wp+1)&131071;);
+  // Coefficients: 8 updates per hop; the 8th lands on the target just before the next analysis.
+  w && (wp&(u-1))==u-1 ? (
+    // Return the packed filter states to their bells, update, then repack the active ones.
+    pk=base+6400; loop(q[11], base[3840+pk[6]]=pk[4]; base[3968+pk[6]]=pk[5]; pk+=8;);
+    j=0; loop(na,
+      st=base[2944+j]; cur=base[2816+j];
+      st!=0 || cur!=0 ? (
+        cur+=st; cur>-.01 && st>=0 ? (cur=0; base[2944+j]=0;);
+        base[2816+j]=cur;
+        cur==0 ? (base[4224+j]=0; base[3840+j]=base[3968+j]=0;) : (
+          // Bell: k = 1/(Q A), m1 = k (A^2 - 1), A = 10^(dB/40).
+          A=exp(cur*.05756462732); g=base[2560+j]; kk=base[2688+j]/A;
+          a1=1/(1+g*(g+kk)); base[3328+j]=a1; base[3456+j]=g*a1; base[3584+j]=g*g*a1;
+          base[3712+j]=kk*(A*A-1); base[4224+j]=1;
+        );
+      );
+      j+=1;
+    );
+    pk=base+6400; na2=0; j=0; loop(na,
+      base[4224+j] ? (
+        pk[0]=base[3328+j]; pk[1]=base[3456+j]; pk[2]=base[3584+j]; pk[3]=base[3712+j];
+        pk[4]=base[3840+j]; pk[5]=base[3968+j]; pk[6]=j; pk+=8; na2+=1;
+      );
+      j+=1;
+    );
+    q[11]=na2;
+  );
+  w && (wp&(h-1))==h-1 ? (
+    sup_analyse(q,base,wp,r/d,amt,lo,hi);
+    // Stereo output: lanes 39-41 (left) and 42-44 (right) of the same slot share the larger cut.
+    // The right lane runs after the left one in the same sample and sets the gains of both, so
+    // identical channels stay identical; an unlinked lane sets its own.
+    link=0; k>=39 ? (
+      o=fx_st+(k<42 ? k+3 : k-3)*32; pb=fx_buf+(k<42 ? k+3 : k-3)*131072;
+      link=o[0]==11 && o[7]>0 && o[9]==na && o[1]>0;
+    );
+    !(link && k<42) ? (
+      aa=1-exp(-h*d/(.01*r)); ar=1-exp(-h*d/(.08*r));
+      j=0; loop(na,
+        t=base[3072+j]; link ? t=max(t,pb[3072+j]);
+        c=base[3200+j]; c+=(t>c ? aa : ar)*(t-c); c<.05 && t==0 ? c=0; base[3200+j]=c;
+        base[2944+j]=(-c-base[2816+j])/8;
+        link ? (pb[3200+j]=c; pb[2944+j]=(-c-pb[2816+j])/8;);
+        j+=1;
+      );
+    );
+  );
+  // Bell cascade over the active bells only: v3 = y - ic2, v1 = a1 ic1 + a2 v3,
+  // v2 = ic2 + a2 ic1 + a3 v3, ic1 = 2 v1 - ic1, ic2 = 2 v2 - ic2, y += m1 v1.
+  y=x; pk=base+6400; loop(q[11],
+    i1=pk[4]; i2=pk[5]; v3=y-i2; v1=pk[0]*i1+pk[1]*v3; v2=i2+pk[1]*i1+pk[2]*v3;
+    pk[4]=2*v1-i1; pk[5]=2*v2-i2; y+=pk[3]*v1; pk+=8;
+  );
+  y;
+);

@@ -1,0 +1,233 @@
+// Private Loon convolver engine: zero latency, non-uniform partitioned FFT convolution.
+// Taps 0-63 run as a direct FIR. Stage s (block L = 64 * 2^s, s = 0..6) convolves taps
+// [L, 2L) with one FFT partition; the last stage (L = 4096) holds 7 partitions, so the
+// longest impulse response is 32768 taps. Stage s starts at tap L, so its FFT of the
+// last block is always finished before the samples it feeds are needed. Each stage runs
+// L/2 samples out of phase with the next, so their FFTs never land in the same sample.
+// All temporaries are local or conv_*; @gfx never touches the engine.
+// Per-slot impulse responses (0.32): a Convolver slot owns one of CONV_NI "entries" (its master IR,
+// stored in conv_irm + entry * CONV_EM: channel 0, then channel 1 at +131072). Each convolution
+// engine builds its own spectra bank (one channel, at the lane's rate) from its slot's entry.
+// conv_tab layout: 0-55 stage tables, 64 + 8 * engine partition counts, 160 + 8 * entry metadata
+// (frames, rate, channels, generation, status 0 none / 1 loading / 2 loaded / 3 failed),
+// 300 + 8 * engine build record, 400 + entry scratch flags. Entry names are strings 800 + entry,
+// failure messages strings 820 + entry.
+// FFT buffers are aligned to their own size so they never cross a 65536-item RAM block
+// (the EEL2 fft() silently does nothing if they do).
+@init
+function conv_init() local(s,L,ho,xo,fo,wo) (
+  CONV_NI=8; CONV_EM=262144; CONV_BS=131072; CONV_CS=262144; CONV_HS=131072; CONV_HEAD=130816; CONV_HDR=56500; CONV_XH=56320; CONV_MAXT=32768;
+  conv_tab=9170000;
+  ho=0; xo=40000; fo=57000;
+  s=0; loop(7,
+    L=64*2^s;
+    conv_tab[s]=L;                         // block length
+    conv_tab[8+s]=s==6 ? 7 : 1;            // partitions
+    conv_tab[16+s]=ho;                     // spectra offset inside a channel's bank
+    conv_tab[32+s]=xo;                     // input frame (2L reals), per instance
+    conv_tab[40+s]=s==6 ? 131072 : fo;     // spectrum history, per instance
+    ho+=conv_tab[8+s]*4*L; xo+=2*L; s<6 ? fo+=4*L;
+    s+=1;
+  );
+  // Work buffers (4L items each), largest first, so each start is a multiple of its size.
+  wo=0; s=6; loop(7, conv_tab[24+s]=wo; wo+=4*conv_tab[s]; s-=1;);
+);
+function conv_reset(inst) local(sb,s) (
+  sb=conv_st+inst*CONV_CS; memset(sb,0,CONV_CS);
+  s=0; loop(7, sb[CONV_HDR+2+s]=conv_tab[s]/2; s+=1;);   // half a block out of phase
+);
+// One finished input block of stage s: FFT of [previous block, this block], accumulate
+// the partitions against their spectra, inverse FFT. The second half of the result is
+// the stage output for the next L samples (overlap-save). Spectra carry the 1/(2L) scale.
+function conv_block(sb,hb,s,nu) local(L,N,N4,wk,xb,np,fp,fdl,xs,hs,i,j,xr,xi,hr,hi) (
+  L=conv_tab[s]; N=2*L; N4=4*L; np=conv_tab[8+s];
+  wk=sb+conv_tab[24+s]; xb=sb+conv_tab[32+s];
+  i=0; loop(N, wk[2*i]=xb[i]; wk[2*i+1]=0; i+=1;);
+  fft(wk,N);
+  fp=sb[CONV_HDR+10+s]; fdl=sb+conv_tab[40+s];
+  memcpy(fdl+fp*N4,wk,N4);
+  memset(wk,0,N4);
+  j=0; loop(nu,
+    xs=fdl+((fp-j+np)%np)*N4;
+    hs=hb+conv_tab[16+s]+j*N4;
+    i=0; loop(N,
+      xr=xs[2*i]; xi=xs[2*i+1]; hr=hs[2*i]; hi=hs[2*i+1];
+      wk[2*i]+=xr*hr-xi*hi; wk[2*i+1]+=xr*hi+xi*hr;
+      i+=1;
+    );
+    j+=1;
+  );
+  ifft(wk,N);
+  memcpy(xb,xb+L,L);
+  sb[CONV_HDR+10+s]=(fp+1)%np;
+);
+// hb: the engine's spectra bank; nuo: offset of its partition counts in conv_tab (64 + 8 * engine).
+function conv_run(inst,hb,x,nuo) local(sb,s,L,nu,idx,y,i,hp,xh,hs) (
+  sb=conv_st+inst*CONV_CS;
+  hp=(sb[CONV_HDR+1]+63)&63; sb[CONV_HDR+1]=hp;
+  xh=sb+CONV_XH; xh[hp]=x; xh[hp+64]=x;
+  hs=hb+CONV_HEAD; y=0; i=0;
+  loop(64, y+=hs[i]*xh[hp+i]; i+=1;);
+  s=0; loop(7,
+    nu=conv_tab[nuo+s];
+    nu>0 ? (
+      L=conv_tab[s]; idx=sb[CONV_HDR+2+s];
+      y+=sb[conv_tab[24+s]+2*(L+idx)];
+      sb[conv_tab[32+s]+L+idx]=x;
+      idx+=1;
+      idx>=L ? (conv_block(sb,hb,s,nu); idx=0;);
+      sb[CONV_HDR+2+s]=idx;
+    );
+    s+=1;
+  );
+  y;
+);
+// Interpolated (cubic) master sample at tap i of an IR resampled by rr = source rate / lane rate.
+function conv_tap(src,n,rr,i) local(pos,ip,f,p0,p1,p2,p3) (
+  pos=i*rr; ip=floor(pos); f=pos-ip;
+  p0=ip>0 ? src[ip-1] : 0; p1=ip<n ? src[ip] : 0;
+  p2=ip+1<n ? src[ip+1] : 0; p3=ip+2<n ? src[ip+2] : 0;
+  p1+.5*f*(p2-p0+f*(2*p0-5*p1+4*p2-p3+f*(3*(p1-p2)+p3-p0)));
+);
+// Builds engine inst's spectra bank from channel ch of entry e at `rate`: taps resampled with a
+// fade over the last 1024 taps when cut at 32768, unit-energy normalization (the louder channel
+// of a stereo IR decides, so its balance is kept), per-partition spectra. Returns 1, or 0 when
+// the IR is silent. Partition counts go to conv_tab[64 + 8 * inst + s].
+function conv_bank(inst,e,ch,rate) local(i,j,s,L,N,nn,rr,n,sr,nc,meta,src,en,e2,g,tr,o,hh,nuo,w,v) (
+  meta=conv_tab+160+e*8; n=meta[0]; sr=meta[1]; nc=meta[2]; nuo=64+inst*8;
+  rr=sr/rate; nn=floor(n/rr+.5); tr=nn>CONV_MAXT; nn=max(1,min(CONV_MAXT,nn));
+  src=conv_irm+e*CONV_EM+(ch>0 && nc>1 ? 131072 : 0);
+  en=0; i=0; loop(nn,
+    v=conv_tap(src,n,rr,i); w=1; tr && i>=nn-1024 ? w=.5+.5*cos($pi*(i-(nn-1024))/1024);
+    v*=w; conv_pre[i]=v; en+=v*v; i+=1;
+  );
+  nc>1 ? (
+    src=conv_irm+e*CONV_EM+(ch>0 ? 0 : 131072); e2=0; i=0; loop(nn,
+      v=conv_tap(src,n,rr,i); w=1; tr && i>=nn-1024 ? w=.5+.5*cos($pi*(i-(nn-1024))/1024);
+      v*=w; e2+=v*v; i+=1;
+    );
+    en=max(en,e2);
+  );
+  conv_ok=0;
+  en>.000000000001 ? (
+    g=1/sqrt(en);
+    i=0; loop(nn, conv_pre[i]*=g; i+=1;);
+    s=0; loop(7,
+      L=conv_tab[s]; conv_tab[nuo+s]=min(conv_tab[8+s],max(0,ceil(nn/L)-1)); s+=1;
+    );
+    hh=conv_hb+inst*CONV_BS;
+    memset(hh,0,CONV_BS);
+    i=0; loop(64, i<nn ? hh[CONV_HEAD+i]=conv_pre[i]; i+=1;);
+    s=0; loop(7,
+      L=conv_tab[s]; N=2*L;
+      j=0; loop(conv_tab[nuo+s],
+        o=L*(j+1);
+        memset(conv_scr,0,2*N);
+        i=0; loop(L, o+i<nn ? conv_scr[2*i]=conv_pre[o+i]; i+=1;);
+        fft(conv_scr,N);
+        i=0; loop(2*N, hh[conv_tab[16+s]+j*2*N+i]=conv_scr[i]/N; i+=1;);
+        j+=1;
+      );
+      s+=1;
+    );
+    conv_ok=1;
+  );
+  conv_ok;
+);
+// Keeps engine inst in step with its lane k and entry e at `rate`: rebuilds the bank when the IR,
+// lane, channel or rate changed, and clears the engine state when it is rebuilt or after the slot was
+// off. Returns 1 when the engine can run, 0 to pass the signal (no IR). Called from @block.
+function conv_sync(inst,k,e,rate,live) local(m,ch,meta) (
+  m=conv_tab+300+inst*8; meta=conv_tab+160+e*8;
+  e>=0 && e<CONV_NI && meta[0]>0 ? (
+    ch=k>=42 && meta[2]>1 ? 1 : 0;
+    m[0]!=meta[3] || m[1]!=e || m[2]!=rate || m[3]!=ch || m[4]!=k ? (
+      m[5]=conv_bank(inst,e,ch,rate); m[0]=meta[3]; m[1]=e; m[2]=rate; m[3]=ch; m[4]=k; m[6]=1;
+    );
+    !live ? m[6]=1 : m[6] ? (conv_reset(inst); m[6]=0;);
+    m[5];
+  ) : (m[0]=-1; 0;);
+);
+// Entry owned by a Convolver slot (stored in the first value of the slot's curve record as
+// (entry + 1) / 16, which the move / swap / undo / save paths already carry), or -1.
+function conv_entry(slot) local(e) (e=floor(fx_curve[slot*65]*16+.5)-1; e>=0 && e<CONV_NI ? e : -1;);
+function conv_clear(e) local(meta) (
+  meta=conv_tab+160+e*8; meta[0]=0; meta[1]=0; meta[2]=0; meta[3]=conv_gen_g+=1; meta[4]=0;
+  strcpy(800+e,""); strcpy(820+e,"");
+);
+// Gives a Convolver slot a free entry (none if all are taken). Returns the entry or -1.
+function conv_assign(slot) local(k,e,f) (
+  memset(conv_tab+400,0,CONV_NI);
+  k=0; loop(42, k!=slot && fx_cfg[k*6]==10 ? (e=conv_entry(k); e>=0 ? conv_tab[400+e]=1;); k+=1;);
+  f=-1; e=0; loop(CONV_NI, f<0 && conv_tab[400+e]==0 ? f=e; e+=1;);
+  f>=0 ? (fx_curve[slot*65]=(f+1)/16; conv_clear(f);) : fx_curve[slot*65]=0;
+  f;
+);
+// Every Convolver slot must own a distinct valid entry: the first claimant keeps it, the others
+// (invalid, duplicate, or an old save) get a free one, or become empty slots when none is left.
+function conv_validate() local(k,e) (
+  memset(conv_tab+400,0,CONV_NI);
+  k=0; loop(42,
+    fx_cfg[k*6]==10 ? (
+      e=conv_entry(k);
+      e>=0 && conv_tab[400+e]==0 ? conv_tab[400+e]=1 : fx_curve[k*65]=0;
+    );
+    k+=1;
+  );
+  k=0; loop(42, fx_cfg[k*6]==10 && conv_entry(k)<0 ? (conv_assign(k)<0 ? fx_cfg[k*6]=0;); k+=1;);
+);
+// Copies n staged frames (conv_stg, channel 1 at +131072) into entry e as a freshly loaded IR.
+function conv_commit(e,n,sr,nch) local(meta) (
+  meta=conv_tab+160+e*8;
+  memcpy(conv_irm+e*CONV_EM,conv_stg,n);
+  nch>1 ? memcpy(conv_irm+e*CONV_EM+131072,conv_stg+131072,n);
+  meta[0]=n; meta[1]=sr; meta[2]=nch>1 ? 2 : 1; meta[3]=conv_gen_g+=1; meta[4]=2;
+);
+// Reads the file named in #conv_path (first two channels, up to 131072 frames) into entry e.
+// Called from @block only. Frames are staged first, so a failed load leaves the entry unchanged.
+function conv_load(e) local(fh,nch,sr,left,n,fr,got,i,pk,meta) (
+  meta=conv_tab+160+e*8;
+  strcpy(820+e,"cannot open the file");
+  fh=file_open(#conv_path);
+  fh>0 ? (
+    strcpy(820+e,"not a readable audio file");
+    nch=0; sr=0; file_riff(fh,nch,sr);
+    nch>0 && sr>0 ? (
+      left=min(floor(file_avail(fh)/nch),131072); n=0; pk=0;
+      while(n<left) (
+        fr=min(4096,left-n);
+        got=file_mem(fh,conv_scr,fr*nch);
+        fr=floor(got/nch);
+        fr>0 ? (
+          i=0; loop(fr,
+            conv_stg[n+i]=conv_scr[i*nch]; conv_stg[131072+n+i]=nch>1 ? conv_scr[i*nch+1] : 0;
+            pk=max(pk,max(abs(conv_stg[n+i]),abs(conv_stg[131072+n+i]))); i+=1;
+          );
+          n+=fr;
+        ) : left=n;
+      );
+      n>0 && pk>0 ? (
+        conv_commit(e,n,sr,nch);
+        i=strlen(#conv_path)-1;
+        while(i>=0 && str_getchar(#conv_path,i)!=47 && str_getchar(#conv_path,i)!=92) (i-=1;);
+        strcpy_from(800+e,#conv_path,i+1);
+      ) : n>0 ? strcpy(820+e,"the file is silent");
+    );
+    file_close(fh);
+  );
+  meta[4]!=2 ? meta[4]=3;
+);
+// @serialize of one entry: frames, rate, channels, then the channels. Loading marks the entry new
+// (engines rebuild); saving changes nothing.
+function conv_ser_entry(e) local(meta,v,n,nc,rd,sr) (
+  meta=conv_tab+160+e*8; rd=file_avail(0)>=0;
+  v=meta[0]; file_var(0,v); n=max(0,min(131072,floor(v)));
+  v=meta[1]; file_var(0,v); sr=v;
+  v=meta[2]; file_var(0,v); nc=v>1 ? 2 : 1;
+  n>0 ? (file_mem(0,conv_irm+e*CONV_EM,n); nc>1 ? file_mem(0,conv_irm+e*CONV_EM+131072,n););
+  rd ? (
+    meta[0]=n; meta[1]=n>0 ? sr : 0; meta[2]=n>0 ? nc : 0; meta[3]=conv_gen_g+=1; meta[4]=n>0 ? 2 : 0;
+    strcpy(800+e,""); strcpy(820+e,"");
+  );
+);
+function conv_clear_all() local(e) (e=0; loop(CONV_NI, conv_clear(e); e+=1;););

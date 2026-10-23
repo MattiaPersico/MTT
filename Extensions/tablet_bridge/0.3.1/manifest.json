@@ -1,0 +1,13 @@
+{
+  "version": "0.3.1",
+  "source_sha256": "e1cb4fbb58df4acfbae7db9bb3722aa2bc725ed50d1b6cf306c1d05d4add5eee",
+  "files": {
+    "LICENSE.GPL-3.0": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "LICENSE.LGPL-3.0": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+    "README.md": "c5b59e6d7dc553c90df5fdee5f2356440b809ca44b0271e14eae329ebd0cbd88",
+    "THIRD_PARTY_NOTICES.md": "ef37c81c4029b6a61e1d96224e28c114a6ede093ca9e947c30152d5c4db9433d",
+    "mtt_input_bridge-source.zip": "e1cb4fbb58df4acfbae7db9bb3722aa2bc725ed50d1b6cf306c1d05d4add5eee",
+    "reaper_tablet_bridge-arm64.dylib": "d15469f4dede884c6232cfba1dbefea3cbe66601ba1a85b574171c88bad8a84d",
+    "reaper_tablet_bridge-x86_64.dylib": "295530da4db51e791d210ac91ff1c70ef88598a1c91f4f92840e5adaf9a71018"
+  }
+}
