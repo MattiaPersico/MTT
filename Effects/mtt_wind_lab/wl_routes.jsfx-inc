@@ -1,0 +1,21 @@
+// Parameter mapping shared by audio and graphics. Existing five routable slots retain
+// their original slider contract; six new fixed chains contribute three slots each.
+@init
+function wfx_slider(slot, field) ( slot<5 ? 86+slot*7+field : 121+(slot-5)*6+field; );
+function wfx_route(slot) local(p) (
+  slot<5 ? floor(max(0,min(6,slider(92+slot*7)))+.5) : (p=floor((slot-5)/3);p==5?6:p;);
+);
+function wfx_owner(slot) local(p) (p=wfx_route(slot);p==6?5:p==5?4:p;);
+// Compatibility inserts come first. Empty fixed slots fill the remaining visible rows.
+function wfx_chain_slot(owner, row) local(k,n,result) (
+  k=0;n=0;result=-1;
+  loop(5,
+    floor(slider(wfx_slider(k,0)))>0 && wfx_owner(k)==owner ? (
+      n==row ? result=k;n+=1;
+    );k+=1;
+  );
+  result<0 && row>=n ? result=5+owner*3+row-n;
+  result;
+);
+function wfx_slot_id(id) (id<=120?floor((id-86)/7):5+floor((id-121)/6););
+function wfx_field_id(id) (id<=120?(id-86)%7:(id-121)%6;);

@@ -1,0 +1,168 @@
+// MTT Wind Lab: shared helpers (noise, filters, air properties, Strouhal and bandwidth tables).
+// Functions only; imported by mtt_wind_lab.jsfx. See docs/effects/mtt_wind_lab.md.
+
+@init
+
+function wl_clamp(x, lo, hi) ( min(hi, max(lo, x)); );
+function wl_smooth(x) local(t) ( t = wl_clamp(x, 0, 1); t*t*(3 - 2*t); );
+
+// Park-Miller minimal standard generator; the exact product stays below 2^53.
+// Uniform noise in (-1, 1), variance 1/3. One shared stream keeps renders repeatable.
+function wl_noise() (
+  rng *= 16807;
+  rng -= floor(rng/2147483647)*2147483647;
+  rng/1073741823.5 - 1;
+);
+
+// Second stream for the wind itself (gusts, gust events, turbulence): turning a sound layer
+// on or off (each draws audio noise from the first stream) never changes the gusts. Same
+// generator, its own state.
+function wl_wnoise() (
+  rng_w *= 16807;
+  rng_w -= floor(rng_w/2147483647)*2147483647;
+  rng_w/1073741823.5 - 1;
+);
+// Third stream for the slow wanderings that only run while their layer does (ensemble
+// group speeds, the wind's direction at the microphone). Until 0.3.1 they drew from the
+// gusts' stream, so switching the ensemble, the mic noise or gust proximity on or off
+// re-rolled the gusts.
+function wl_xnoise() (
+  rng_x *= 16807;
+  rng_x -= floor(rng_x/2147483647)*2147483647;
+  rng_x/1073741823.5 - 1;
+);
+function wl_seed(seed) (
+  rng = wl_clamp(floor(seed), 1, 65535);
+  rng_w = 1 + (rng*7919 + 104729) % 2147483646;
+  rng_x = 1 + (rng*30011 + 7) % 2147483646;
+);
+
+// Fade a band in over 10-30 Hz and out towards 0.45 x srate instead of folding it back.
+function wl_audible(f) (
+  wl_clamp((f - 10)/20, 0, 1)*wl_clamp((0.45*srate - f)/(0.07*srate), 0, 1);
+);
+
+// One-pole low-pass coefficient for a cutoff in Hz (y += a (x - y)).
+function wl_lp_coeff(f) ( 1 - exp(-2*$pi*wl_clamp(f, 0.01, 0.45*srate)/srate); );
+
+// Wrap an angle to -180..180 deg.
+function scene_wrap(a) ( a - 360*floor((a + 180)/360); );
+
+// Centre-normalised pan gains (1, 1 at the centre; sqrt 2, 0 at the edges; constant power).
+function wl_pan_l(pos) ( sqrt(1 - wl_clamp(pos, -1, 1)); );
+function wl_pan_r(pos) ( sqrt(1 + wl_clamp(pos, -1, 1)); );
+
+// ---------------------------------------------------------------------------------------
+// Control-rate values reach the audio as per-sample linear ramps over the 32-sample control
+// period (CTL_N): a set computes the step towards the new target, each of the next 32 runs
+// adds it. A gain that jumped every 32 samples would buzz at srate/32 and its harmonics
+// (1.5, 3, 4.5 kHz at 48 kHz) wherever the speed changes fast, as under the pen.
+CTL_N = 32;
+function wl_ramp(cur, target) ( (target - cur)/CTL_N; );
+
+// Noise-excited 4-pole band: two identical TPT state-variable band-passes in cascade, each
+// with Q x 0.6436 so the cascade keeps the requested -3 dB bandwidth (the paper uses a
+// 4th-order band-pass, Selfridge et al. 2018 Eq. 17). Record at ptr: [a, g a, g^2 a, k,
+// gain, s1 ic1, s1 ic2, s2 ic1, s2 ic2, gain step] (12 slots reserved). The gain makes the
+// output RMS equal to `rms` for the uniform noise above, at any centre, Q and sample rate:
+// the cascade's equivalent noise bandwidth is 1.2203 f/Q, so output power =
+// gain^2 (1/3)(2/fs) 1.2203 f/Q. The gain ramps to its target over the control period.
+function wl_band_set(ptr, f, q, rms) local(fc, qq, g, k, a) (
+  fc = wl_clamp(f, 10, 0.45*srate);
+  qq = wl_clamp(q, 0.5, 400);
+  g = tan($pi*fc/srate);
+  k = 1/(qq*0.6436);
+  a = 1/(1 + g*(g + k));
+  ptr[0] = a; ptr[1] = g*a; ptr[2] = g*g*a; ptr[3] = k;
+  ptr[9] = wl_ramp(ptr[4], rms*wl_audible(f)*sqrt(1.2292*srate*qq/fc));
+);
+function wl_band_run(ptr, x) local(v1, v2, v3, y) (
+  v3 = x - ptr[6];
+  v1 = ptr[0]*ptr[5] + ptr[1]*v3;
+  v2 = ptr[6] + ptr[1]*ptr[5] + ptr[2]*v3;
+  ptr[5] = 2*v1 - ptr[5];
+  ptr[6] = 2*v2 - ptr[6];
+  y = ptr[3]*v1;
+  v3 = y - ptr[8];
+  v1 = ptr[0]*ptr[7] + ptr[1]*v3;
+  v2 = ptr[8] + ptr[1]*ptr[7] + ptr[2]*v3;
+  ptr[7] = 2*v1 - ptr[7];
+  ptr[8] = 2*v2 - ptr[8];
+  y = ptr[3]*v1*ptr[4];
+  ptr[4] += ptr[9];
+  y;
+);
+
+// Single TPT state-variable filter. Record: [a, g a, g^2 a, k, ic1, ic2].
+function wl_svf_set(ptr, f, q) local(g, a, k) (
+  g = tan($pi*wl_clamp(f, 1, 0.45*srate)/srate);
+  k = 1/wl_clamp(q, 0.1, 400);
+  a = 1/(1 + g*(g + k));
+  ptr[0] = a; ptr[1] = g*a; ptr[2] = g*g*a; ptr[3] = k;
+);
+// Unity-peak band-pass output.
+function wl_svf_bp(ptr, x) local(v1, v2, v3) (
+  v3 = x - ptr[5];
+  v1 = ptr[0]*ptr[4] + ptr[1]*v3;
+  v2 = ptr[5] + ptr[1]*ptr[4] + ptr[2]*v3;
+  ptr[4] = 2*v1 - ptr[4];
+  ptr[5] = 2*v2 - ptr[5];
+  ptr[3]*v1;
+);
+// Low-pass output.
+function wl_svf_lp(ptr, x) local(v1, v2, v3) (
+  v3 = x - ptr[5];
+  v1 = ptr[0]*ptr[4] + ptr[1]*v3;
+  v2 = ptr[5] + ptr[1]*ptr[4] + ptr[2]*v3;
+  ptr[4] = 2*v1 - ptr[4];
+  ptr[5] = 2*v2 - ptr[5];
+  v2;
+);
+// High-pass output.
+function wl_svf_hp(ptr, x) local(v1, v2, v3) (
+  v3 = x - ptr[5];
+  v1 = ptr[0]*ptr[4] + ptr[1]*v3;
+  v2 = ptr[5] + ptr[1]*ptr[4] + ptr[2]*v3;
+  ptr[4] = 2*v1 - ptr[4];
+  ptr[5] = 2*v2 - ptr[5];
+  x - ptr[3]*v1 - v2;
+);
+
+// ---------------------------------------------------------------------------------------
+// Dry air at 101325 Pa: speed of sound, density (ideal gas) and kinematic viscosity
+// (Sutherland's law). Writes air_c, air_rho, air_nu.
+function wl_air(t) local(tk) (
+  tk = 273.15 + t;
+  air_c = 331.3*sqrt(tk/273.15);
+  air_rho = 101325/(287.05*tk);
+  air_nu = 0.00001716*(tk/273.15)^1.5*(273.15 + 110.4)/(tk + 110.4)/air_rho;
+);
+
+// Circular cylinder Strouhal number St = lambda + tau/sqrt(Re): Fey, Koenig and Eckelmann
+// (1998) as tabulated by Selfridge et al. (2018), Table 2, including its critical-regime row
+// (2e5 to 1e6). Below Re 47 there is no shedding; the caller gates the level.
+function wl_st(re) local(r, lam, tau) (
+  r = wl_clamp(re, 47, 1000000);
+  r < 180 ? (lam = 0.2684; tau = -1.0356) :
+  r < 230 ? (lam = 0.2437; tau = -0.8607) :
+  r < 240 ? (lam = 0.4291; tau = -3.6735) :
+  r < 360 ? (lam = 0.2492; tau = -0.8861) :
+  r < 1300 ? (lam = 0.2257; tau = -0.4402) :
+  r < 5000 ? (lam = 0.2040; tau = 0.3364) :
+  r < 200000 ? (lam = 0.1776; tau = 2.2023) :
+  (lam = 0.5760; tau = -175.956);
+  lam + tau/sqrt(r);
+);
+
+// Lift-tone Q from Selfridge et al. (2018) Eq. 11 (Norberg's data, -3 dB width in % of f).
+// Held at its value for Re 2e5: Eq. 12 is fitted only up to 237000 and does not join Eq. 11.
+function wl_q_circle(re) ( 100/(0.00004624*wl_clamp(re, 0, 200000) + 0.9797); );
+
+// Harmonic intensity from the paper's dB rule (Table 3: L_h = frac x L_1, dB re 1e-12 W/m^2),
+// limited to `maxrel` x the fundamental so very quiet fundamentals never invert the order.
+function wl_harm(i, frac, maxrel) local(lv) (
+  i <= 0.00000000000000000001 ? 0 : (
+    lv = 10*log10(i/0.000000000001);
+    min(0.000000000001*10^(frac*lv/10), i*maxrel);
+  );
+);

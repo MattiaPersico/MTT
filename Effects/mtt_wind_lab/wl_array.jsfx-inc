@@ -1,0 +1,273 @@
+// MTT Wind Lab: the microphone array (0.2.1; directions 0.3.1). Functions only; imported by mtt_wind_lab.jsfx
+// after wl_core, before wl_models (whose microphone and gust code calls it).
+//
+// Space, seen from above, in degrees clockwise, as on the interface's map turned so that the
+// wind comes from the top (0.3.1): a circle of radius arr_R (half of slider 82, Max
+// distance); the wind's source is the arc of its rim as wide as Wind width, centred on the
+// top, where the arrows are. The array stands lis_r (slider 32) from the arrows' point, on
+// the side given by sm_lis (slider 31, its angle from upstream seen from the arrows), and
+// hears every engine from where it is on that arc: the cavity from the arrows' point, the
+// three obstacles from the arc's centre and a third of its half-width either side (the
+// cavity also from two decorrelated copies at the obstacles' outer directions, at least
+// 40 deg either side), the
+// twelve ensemble groups and six air streams spread over the whole arc (each set's power
+// weighted by 1/r^2 and renormalised, so the nearer part of a wide arc dominates without
+// changing the level). lis_r sets the models' 1/r and the air absorption. sm_lis also sets the obstacles' and the
+// cavity's directivity (their tone). The array's front points at arr_rot (slider 67, re the
+// wind's direction, 0 = facing it). Each capsule is an output channel. Point sources reach
+// the capsules by
+// format: mono, one cardioid; stereo, a coincident cardioid pair at +-90 deg x Stereo width;
+// LCR, pairwise panning over the front arc with cardioid-like rear rejection; quad, 5.1,
+// 7.1, 7.1.4, pairwise (2D VBAP) panning around the ear-level ring. Every source has a sum
+// of squared gains of 2 (like the stereo pair straight ahead). In 7.1.4 the height capsules
+// take a quarter of the diffuse power (air bed, ensemble). Each capsule gets its own wind
+// noise, more on the capsules facing the arrows, and the gust push follows the same
+// direction. The LFE channel carries only the gust push.
+//
+// Memory: CHA (12) capsule azimuths re the array front, CHF (12) kinds (0 ear level, 1 LFE,
+// 2 height), CHC/CHS (12 each) their cosines and sines, RINGE/RINGH ear-level and height
+// channels sorted by azimuth, SG (24 sources x 12 channels) gains (0-2 obstacles, 3 cavity,
+// 4-15 ensemble groups, 16-21 air streams, 22-23 the cavity's decorrelated sides), OUTC
+// (12) the mix, FARC (12) air absorption,
+// DCX/DCY (12 each) DC blockers, MICC (12 x 12) capsule noise states, MICW/MICWS (12 each)
+// capsule noise gains (target, smoothed), MICO (12) capsule noise, PG (12) gust push gains,
+// PKEY (12) limiter keys, PGN (12) limiter gains, PUSH (12) the push, AIRK (6 x 16) air
+// streams.
+
+@init
+
+// Channel layout for format f (0 mono, 1 stereo, 2 LCR, 3 quad, 4 5.1, 5 7.1, 6 7.1.4).
+// Channel order (SMPTE): L R C LFE Ls Rs (5.1), L R C LFE Lss Rss Lrs Rrs (7.1), then Ltf Rtf
+// Ltr Rtr (7.1.4); quad L R - - Ls Rs (outputs 3 and 4, C and LFE, stay silent; 0.3.1,
+// before on 1-4); LCR L R C; mono on outputs 1 and 2. Kinds: 0 ear level, 1 LFE, 2 height,
+// 3 unused (silent).
+function arr_set(c, az, kind) ( CHA[c] = az; CHF[c] = kind; );
+function arr_layout(f) local(i, j, t, m) (
+  memset(CHA, 0, 12); memset(CHF, 0, 12);
+  arr_fmt = f;
+  f == 0 ? ( arr_n = 1; arr_set(0, 0, 0); ) :
+  f == 1 ? ( arr_n = 2; arr_set(0, -90, 0); arr_set(1, 90, 0); ) :
+  f == 2 ? ( arr_n = 3; arr_set(0, -30, 0); arr_set(1, 30, 0); arr_set(2, 0, 0); ) :
+  f == 3 ? ( arr_n = 6; arr_set(0, -45, 0); arr_set(1, 45, 0); arr_set(2, 0, 3); arr_set(3, 0, 3);
+             arr_set(4, -135, 0); arr_set(5, 135, 0); ) :
+  f == 4 ? ( arr_n = 6; arr_set(0, -30, 0); arr_set(1, 30, 0); arr_set(2, 0, 0); arr_set(3, 0, 1);
+             arr_set(4, -110, 0); arr_set(5, 110, 0); ) :
+  ( arr_n = f == 5 ? 8 : 12;
+    arr_set(0, -30, 0); arr_set(1, 30, 0); arr_set(2, 0, 0); arr_set(3, 0, 1);
+    arr_set(4, -90, 0); arr_set(5, 90, 0); arr_set(6, -150, 0); arr_set(7, 150, 0);
+    f == 6 ? ( arr_set(8, -45, 2); arr_set(9, 45, 2); arr_set(10, -135, 2); arr_set(11, 135, 2); );
+  );
+  // Rings sorted by azimuth (insertion sort; at most 7 entries).
+  arr_ne = arr_nh = 0; i = 0;
+  loop(arr_n,
+    CHF[i] == 0 ? ( RINGE[arr_ne] = i; arr_ne += 1; ) : CHF[i] == 2 ? ( RINGH[arr_nh] = i; arr_nh += 1; );
+    i += 1;
+  );
+  i = 1; loop(max(arr_ne - 1, 0), t = RINGE[i]; j = i - 1;
+    while (j >= 0 && CHA[RINGE[j]] > CHA[t]) ( RINGE[j + 1] = RINGE[j]; j -= 1; );
+    RINGE[j + 1] = t; i += 1; );
+  i = 1; loop(max(arr_nh - 1, 0), t = RINGH[i]; j = i - 1;
+    while (j >= 0 && CHA[RINGH[j]] > CHA[t]) ( RINGH[j + 1] = RINGH[j]; j -= 1; );
+    RINGH[j + 1] = t; i += 1; );
+  m = 0; loop(12, CHC[m] = cos(CHA[m]*$pi/180); CHS[m] = sin(CHA[m]*$pi/180); m += 1; );
+);
+
+// Pairwise panning of direction a (deg) over a closed ring of m channels (sorted), scaled so
+// the squared gains sum to sc. Adds to p[channel].
+function arr_vbap(p, ring, m, a, sc) local(i, j, t1, t2, d, span, u1x, u1y, u2x, u2y, px, py, det, g1, g2, n, found)
+(
+  i = 0; found = 0;
+  loop(m,
+    j = (i + 1) % m;
+    t1 = CHA[ring[i]]; t2 = CHA[ring[j]];
+    span = t2 - t1; span <= 0 ? span += 360;
+    d = a - t1; d -= 360*floor(d/360);
+    !found && d <= span ? (
+      u1x = sin(t1*$pi/180); u1y = cos(t1*$pi/180); u2x = sin(t2*$pi/180); u2y = cos(t2*$pi/180);
+      px = sin(a*$pi/180); py = cos(a*$pi/180);
+      det = u1x*u2y - u1y*u2x;
+      abs(det) > 0.000001 ? (
+        g1 = (px*u2y - py*u2x)/det; g2 = (u1x*py - u1y*px)/det;
+      ) : ( g1 = 1 - d/span; g2 = d/span; );
+      g1 = max(g1, 0); g2 = max(g2, 0);
+      n = sqrt(sc/max(g1*g1 + g2*g2, 0.000000001));
+      p[ring[i]] += g1*n; p[ring[j]] += g2*n;
+      found = 1;
+    );
+    i += 1;
+  );
+);
+
+// Gains of source s from direction a (deg re the array front, + right) into SG + 12 s.
+// diffuse: in 7.1.4 a quarter of the power goes to the height ring. Width (0..1): the stereo
+// pair's angle; for LCR and the surround arrays a power blend between the panned gains (1)
+// and the same gain on every capsule (0: mono), keeping the squared gains' sum.
+function arr_gain(s, a, diffuse) local(p, t, n, e, att, c, u)
+(
+  p = SG + 12*s;
+  memset(p, 0, 12);
+  a = scene_wrap(a);
+  arr_fmt == 0 ? (
+    p[0] = max(0.05, 0.5*(1 + cos(a*$pi/180)));
+  ) : arr_fmt == 1 ? (
+    t = a*$pi/180; n = 1/(1 + cos(scene_phi));
+    p[0] = (1 + cos(t + scene_phi))*n; p[1] = (1 + cos(t - scene_phi))*n;
+    // Mic directivity (slider 85): the pattern raised to arr_dirk, rescaled to the cardioid's
+    // power for this direction (only the balance between the capsules changes).
+    arr_dirk > 1.001 ? (
+      c = p[0]^arr_dirk; u = p[1]^arr_dirk; e = sqrt((sqr(p[0]) + sqr(p[1]))/max(sqr(c) + sqr(u), 0.0000000001));
+      p[0] = c*e; p[1] = u*e;
+    );
+  ) : arr_fmt == 2 ? (
+    // Front arc -30..30; beyond it the nearer edge with cardioid-like rejection.
+    abs(a) <= 30 ? arr_vbap(p, RINGE, 3, a, 2) : (
+      att = max(0.15, (1 + cos(a*$pi/180))/(1 + cos($pi/6)));
+      p[a < 0 ? 0 : 1] = sqrt(2)*att;
+    );
+  ) : (
+    e = diffuse && arr_nh > 0 ? 0.75 : 1;
+    arr_vbap(p, RINGE, arr_ne, a, 2*e);
+    e < 1 ? arr_vbap(p, RINGH, arr_nh, a, 2*(1 - e));
+  );
+  arr_fmt >= 2 && g_width < 1 ? (
+    c = 0;
+    loop(arr_n,
+      CHF[c] == 0 || CHF[c] == 2 ? (
+        u = CHF[c] == 2 ? 2*(1 - e)/max(arr_nh, 1) : arr_fmt == 2 ? 2/3 : 2*e/arr_ne;
+        p[c] = sqrt(g_width*p[c]*p[c] + (1 - g_width)*u);
+      );
+      c += 1;
+    );
+  );
+);
+
+// A point of the wind's arc, at rim angle a (degrees from the top): its direction from the
+// array re the array's front (returned) and its distance (arr_dd, at least 0.25 m).
+function arr_src(a) local(x, y) (
+  x = arr_R*sin(a*$pi/180) - arr_ax; y = arr_R*cos(a*$pi/180) - arr_ay;
+  arr_dd = max(0.25, sqrt(x*x + y*y));
+  scene_wrap(atan2(x, y)*180/$pi - arr_rot);
+);
+// Audio rate: one allpass of the cavity's decorrelators (gain 0.6, delay d, buffer of 4096
+// written at cav_wi; 21.1 ms at 192 kHz fits).
+function cav_ap(buf, d, x) local(v, w) (
+  v = buf[(cav_wi - d) & 4095]; w = x + 0.6*v; buf[cav_wi] = w; v - 0.6*w;
+);
+// Scale every gain of source s by g.
+function arr_scale(s, g) local(p) ( p = SG + 12*s; loop(12, p[0] *= g; p += 1; ); );
+// Control rate: layout, smoothing of rotation and wind width, the array's place, every
+// source's gains, the capsules' noise and push weights. Needs lis_r, sm_lis, arr_R, mic_dev.
+function arr_update() local(k, w, cw, dk, sd, a, m, nn)
+(
+  arr_want != arr_fmt ? arr_layout(arr_want);
+  arr_rot = scene_wrap(arr_rot + param_alpha*scene_wrap(t_rot - arr_rot));
+  arr_ww += param_alpha*(t_ww - arr_ww);
+  scene_phi = 0.5*$pi*g_width;
+  arr_fmt == 1 ? ( CHA[0] = -90*g_width; CHA[1] = 90*g_width;
+                   CHC[0] = CHC[1] = cos(scene_phi); CHS[0] = -sin(scene_phi); CHS[1] = sin(scene_phi); );
+  // Independent share of the capsule noise: none for mono, Width for the others.
+  arr_w = arr_fmt == 0 ? 0 : g_width;
+  // The array's place: its side seen from the arrows (sm_lis is 180 - side; values under 90,
+  // the upstream form of older projects, mirror to the same side downstream), lis_r away.
+  sd = scene_wrap(180 - sm_lis); abs(sd) > 90 ? sd = (sd < 0 ? -1 : 1)*(180 - abs(sd));
+  arr_ax = -lis_r*sin(sd*$pi/180); arr_ay = arr_R - lis_r*cos(sd*$pi/180);
+  // The arrows' point seen from the array: the cavity, the capsules' wind noise and push.
+  arr_wind = scene_wrap(sd - arr_rot);
+  arr_gain(3, arr_wind, 0);
+  // The cavity's decorrelated sides (sources 22, 23): as far apart as the obstacles' outer
+  // points seen from the array, at least 40 deg each side.
+  w = 180*arr_ww;
+  a = abs(scene_wrap(arr_src(w/3) - arr_src(-w/3)))/2;
+  arr_gain(22, arr_wind - max(40, a), 0); arr_gain(23, arr_wind + max(40, a), 0);
+  // The obstacles: the arc's centre and a third of its half-width either side; the arc:
+  // ensemble groups (shuffled) and six air streams. Each set's power ~ 1/r^2, renormalised
+  // (the level stays lis_r's; Wind width only moves it towards the nearer part of the arc).
+  w = 180*arr_ww;
+  m = 0; k = 0; loop(3, arr_src((k - 1)*w/3); m += 1/sqr(arr_dd); k += 1; );
+  m = 3/m; k = 0;
+  loop(3,
+    a = (k - 1)*w/3; arr_gain(k, arr_src(a), 0); arr_scale(k, sqrt(m)/arr_dd);
+    // Its directivity: the wind blows from the top past every obstacle; cosine from upstream
+    // of the way from the obstacle to the array (straight downwind: -1, the drag octave).
+    OBC[k] = (arr_ay - arr_R*cos(a*$pi/180))/max(0.001, sqrt(sqr(arr_ax - arr_R*sin(a*$pi/180)) + sqr(arr_ay - arr_R*cos(a*$pi/180))));
+    k += 1;
+  );
+  m = 0; k = 0; loop(12, arr_src(w*(2*((k*5) % 12)/11 - 1)); m += 1/sqr(arr_dd); k += 1; );
+  m = 12/m; k = 0;
+  loop(12, a = w*(2*((k*5) % 12)/11 - 1); arr_gain(4 + k, arr_src(a), 1); arr_scale(4 + k, sqrt(m)/arr_dd); k += 1; );
+  m = 0; k = 0; loop(6, arr_src(w*((2*k + 1)/6 - 1)); m += 1/sqr(arr_dd); k += 1; );
+  m = 6/m; k = 0;
+  loop(6, a = w*((2*k + 1)/6 - 1); arr_gain(16 + k, arr_src(a), 1); arr_scale(16 + k, sqrt(m)/arr_dd); k += 1; );
+  // Capsules facing the arrows get more noise (0.7..1.3) and a stronger gust push (+-10 dB),
+  // both fading as the wind widens (all around: no direction).
+  mic_from = scene_wrap(arr_wind + mic_dev);
+  // (The stereo pair's angle already carries Width; the other arrays scale by it.)
+  dk = (1 - arr_ww)*(arr_fmt == 1 ? 1 : g_width);
+  // Mic directivity (slider 85) narrows them too: each capsule's cardioid towards the wind
+  // raised to (directivity order - 1) x (1 - Wind width), at least -30 dB, the capsules'
+  // power renormalised (0.3.1: a wind on one side stays in that side's capsules).
+  m = 0; nn = 0; k = 0;
+  loop(12,
+    k < arr_n && (CHF[k] == 0 || CHF[k] == 2) ? (
+      cw = 1 + 0.3*cos((CHA[k] - mic_from)*$pi/180)*dk;
+      MICD[k] = max(0.03, max(0.0001, 0.5 + 0.5*cos((CHA[k] - mic_from)*$pi/180))^((arr_dirk - 1)*(1 - arr_ww)));
+      m += sqr(cw*MICD[k]); nn += sqr(cw);
+    ) : MICD[k] = 1;
+    k += 1;
+  );
+  m = sqrt(nn/max(m, 0.000000000001));
+  k = 0;
+  loop(12,
+    cw = cos((CHA[k] - mic_from)*$pi/180)*dk;
+    MICW[k] = (1 + 0.3*cw)*MICD[k]*(CHF[k] == 1 ? 1 : m);
+    PG[k] = exp(1.1513*cw)*MICD[k]*(CHF[k] == 1 ? 1 : m);
+    k += 1;
+  );
+);
+
+// Air bed streams: filter coefficients (control rate).
+function arr_air_set(fc, hc) local(k) (
+  k = 0; loop(6, wl_svf_set(AIRK + 16*k, fc, 0.7071); wl_svf_set(AIRK + 16*k + 8, hc, 0.7071); k += 1; );
+);
+
+// Audio rate: add a mono source s with signal x to the mix.
+function arr_add(s, x) local(p, q) (
+  p = SG + 12*s; q = OUTC;
+  loop(arr_n, q[0] += x*p[0]; p += 1; q += 1; );
+);
+
+// Audio rate: six air streams (each 1/sqrt 6 of the bed's amplitude).
+function arr_air_run(g) local(k, y) (
+  k = 0;
+  loop(6,
+    y = wl_svf_hp(AIRK + 16*k + 8, wl_svf_lp(AIRK + 16*k, wl_noise()))*g;
+    arr_add(16 + k, y);
+    k += 1;
+  );
+);
+
+// Audio rate: the wind noise of every capsule (Corcos split: a common part below 6.24 U Hz,
+// independent above it, scaled by arr_w), into MICO.
+function arr_mic_run() local(nc, c, p, x, a) (
+  nc = wl_noise();
+  mic_cl += mic_ac*(nc - mic_cl);
+  mic_g += mic_gd;
+  mic_gs += mic_sa*(mic_g - mic_gs);
+  c = 0; p = MICC;
+  loop(arr_n,
+    CHF[c] == 0 || CHF[c] == 2 ? (
+      x = wl_noise();
+      p[0] += mic_ac*(x - p[0]);
+      a = mic_cl + arr_w*(x - p[0]) + (1 - arr_w)*(nc - mic_cl);
+      p[1] += mic_a1*(a - p[1]);
+      p[2] += mic_a2*(p[1] - p[2]);
+      MICWS[c] += mic_sa*(MICW[c] - MICWS[c]);
+      MICO[c] = wl_svf_hp(p + 4, p[2])*mic_gs*MICWS[c];
+    ) : MICO[c] = 0;
+    c += 1; p += 12;
+  );
+);
+// Control rate: the capsules' low cut (2-pole at 25 Hz).
+function arr_mic_set() local(c) (
+  c = 0; loop(12, wl_svf_set(MICC + 12*c + 4, 25, 0.7071); c += 1; );
+);

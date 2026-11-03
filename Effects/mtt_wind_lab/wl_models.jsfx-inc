@@ -1,0 +1,563 @@
+// MTT Wind Lab: physical source models. Control-rate updates (every 32 samples) and
+// per-sample runners. Functions only; they read and write the effect's global state.
+// Imported after wl_core.jsfx-inc. Provenance and assumptions: docs/effects/mtt_wind_lab.md.
+
+@init
+
+// ---------------------------------------------------------------------------------------
+// Wind. Dryden-type longitudinal gusts: first-order (AR(1)) process at control rate with
+// time constant L/U and standard deviation TI (relative to the mean speed, so gusts vanish
+// with the mean wind), plus a small-scale component (2 m, 0.1 x Turbulence).
+// Wait until the next gust event (s): gamma(2) with the mean 60 / rate.
+function gev_wait() (
+  -0.5*(log(max(0.001, 0.5 + 0.5*wl_wnoise())) + log(max(0.001, 0.5 + 0.5*wl_wnoise())))*60/gev_rate;
+);
+function wind_update() local(um, a, k, free, x, sum, big) (
+  um = max(sm_speed, 0.5);
+  a = exp(-ctl_dt*um/gust_len);
+  gust_n = a*gust_n + sqrt(1 - a*a)*gust_ti*1.7320508*wl_wnoise();
+  a = exp(-ctl_dt*um/2);
+  small_n = a*small_n + sqrt(1 - a*a)*0.1*sm_turb*1.7320508*wl_wnoise();
+  // Gust events: discrete gusts on top (a calm base with occasional gusts, which the
+  // continuous process cannot make). Arrivals at gev_rate per minute on average, intervals
+  // gamma-distributed (shape 2: irregular, less clustered than Poisson); each gust lasts
+  // gev_dur x (0.6..1.4) with a raised-cosine rise (35 %) and a slower fall (65 %), and adds
+  // gev_str x (0.4..1.6) of the mean speed at its peak. Up to four overlap; overlapping
+  // gusts add only 30 % of all but the strongest, so peaks stay near one gust's size.
+  // All three controls act at once: a gust keeps only its random factors, so a new strength
+  // or duration also reshapes the gusts under way, and a new rate rescales the pending wait
+  // (dragging the rate up from a tiny value would otherwise leave a wait of minutes).
+  gev_rate > 0 ? (
+    !gev_armed ? ( gev_next = gev_wait(); gev_armed = 1; gev_rused = gev_rate; );
+    gev_rate != gev_rused ? ( gev_next *= gev_rused/gev_rate; gev_rused = gev_rate; );
+    gev_next -= ctl_dt;
+    gev_next <= 0 ? (
+      free = -1; k = 0;
+      loop(4, GEV[4*k + 3] <= 0 && free < 0 ? free = k; k += 1; );
+      free >= 0 ? (
+        GEV[4*free] = 0;
+        GEV[4*free + 1] = 0.6 + 0.4*(1 + wl_wnoise());   // duration factor
+        GEV[4*free + 2] = 0.4 + 0.6*(1 + wl_wnoise());   // strength factor
+        GEV[4*free + 3] = 1;
+      );
+      gev_next = gev_wait();
+    );
+  ) : gev_armed = 0;
+  sum = big = 0; k = 0;
+  loop(4,
+    GEV[4*k + 3] > 0 ? (
+      GEV[4*k] += ctl_dt;
+      x = GEV[4*k]/(gev_dur*GEV[4*k + 1]);
+      x >= 1 ? GEV[4*k + 3] = 0 : (
+        x = gev_str*GEV[4*k + 2]*(x < 0.35 ? 0.5 - 0.5*cos($pi*x/0.35) : 0.5 + 0.5*cos($pi*(x - 0.35)/0.65));
+        sum += x; big = max(big, x);
+      );
+    );
+    k += 1;
+  );
+  gust_ev = big + 0.3*(sum - big);
+);
+
+// Geometry of obstacle v (0..2): ob_d (diameter, m) and ob_u (normal speed, m/s).
+// Moving object: three points of a swung object at 1/3, 2/3 and the full length, speed
+// proportional to the radius (Selfridge et al. sword model); spread tapers the tip.
+function ob_geom(v) (
+  motion ? (
+    ob_d = sm_diam*2^((1 - v)*sm_spread);
+    ob_u = wind_speed*(v + 1)/3*yaw_cos;
+  ) : (
+    ob_d = sm_diam*2^((v - 1)*sm_spread);
+    ob_u = wind_speed*yaw_cos;
+  );
+);
+
+// ---------------------------------------------------------------------------------------
+// Rigid obstacle (Selfridge et al. 2018 compact source). Six bands per obstacle at
+// OB + 72 v: lift (correlation cell A), lift (cell B), 3f and 5f (lift harmonics), 2f and 4f
+// (drag). Wake record at WAKE + 10 v: [low-pass a, gain, SVF record (6), low-pass state,
+// gain step].
+function ob_rigid_update(v) local(re, st, gi, crit, sq, f, q, l, mcos, base, i1, id1, nc, w2, det, p, iw, fl, wp, k)
+(
+  ob_geom(v);
+  re = max(ob_u*ob_d/air_nu, 0.000001);
+  sq = obstacle_type == 1;
+  st = sq ? 0.13 : wl_st(re);
+  // Shedding starts at Re 47; near onset the intensity grows ~ (Re - Re_c) (Landau).
+  gi = wl_clamp((re - 47)/53, 0, 1);
+  // Critical regime of the circular cylinder (Re 2e5..5e5): organised shedding breaks up.
+  // The tone widens and weakens here (heuristic; the paper only tabulates St).
+  crit = sq ? 0 : wl_smooth((re - 200000)/300000);
+  mcos = ob_u/air_c*lis_cos;
+  // Moving source: Doppler shift towards the listener (theta measured from the direction
+  // of travel). Wind past a fixed object has no Doppler shift.
+  f = st*ob_u/max(ob_d, 0.00001)*(motion ? 1/(1 - mcos) : 1);
+  q = wl_q_circle(re)/(1 + 2*crit)/(1 + 4*sm_turb);
+  // Spanwise correlation length (Eq. 9), never longer than the span.
+  l = min(101.536*max(re, 47)^-0.245*ob_d, sm_span);
+  // Eq. 6 with kappa = 1 and the exponential neglected (valid at wind Mach numbers).
+  base = 2.5066283*st*st*l*sm_span*air_rho*ob_u^6/(32*air_c^3*lis_r*lis_r*(1 - mcos)^4)*gi;
+  // Square prism: St 0.13 and ~2x the fluctuating lift of a circle (heuristic, +6 dB).
+  k = sq ? 4 : sqr(1 - 0.6*crit);
+  i1 = base*lis_sin2*k;
+  id1 = 0.1*base*lis_cos2*k;             // Eq. 10: drag dipole, 0.1 x intensity, rotated 90 deg
+  // Correlation cells: a span longer than l sheds in independent cells whose local speeds
+  // differ slightly; two detuned bands share the power (beats).
+  nc = sm_span/max(l, 0.000001);
+  w2 = wl_clamp(nc - 1, 0, 1);
+  det = (0.004 + 0.03*sm_turb)*w2;
+  k = air_rho*air_c;                     // intensity -> pressure^2
+  p = OB + v*72;
+  wl_band_set(p, f*(1 - det), q, sqrt(i1*(1 - 0.5*w2)*k));
+  wl_band_set(p + 12, f*(1 + det), q, sqrt(i1*0.5*w2*k));
+  wl_band_set(p + 24, 3*f, q, sqrt(wl_harm(i1, 0.6, 0.2512)*k));
+  wl_band_set(p + 36, 5*f, q, sqrt(wl_harm(i1, 0.1, 0.0631)*k));
+  wl_band_set(p + 48, 2*f, q, sqrt(id1*k));
+  wl_band_set(p + 60, 4*f, q, sqrt(wl_harm(id1, 0.125, 0.2512)*k));
+  // Wake (Eq. 8): lateral quadrupoles ~ U^8, 1/f^2 above the lift frequency, B = 0.7,
+  // Gamma = 1e-4 (the paper's perceptual value). Negligible at wind speeds (about -65 dB
+  // re the lift tone at M = 0.1), kept for fidelity.
+  iw = 0.0001*2.5066283*st*st*l*sm_span*air_rho*ob_u^8/(16*$pi*$pi*air_c^5*(1 + mcos)^5*lis_r*lis_r)
+       *(1 + 0.7*lis_cos2*lis_cos2)*gi;
+  fl = wl_clamp(f, 10, 0.4*srate);
+  wp = WAKE + v*10;
+  wp[0] = wl_lp_coeff(fl);
+  wl_svf_set(wp + 2, fl, 0.7071);
+  // Normalisation: one-pole low-pass x 2-pole high-pass at fl has bandwidth (pi/4) fl.
+  wp[9] = wl_ramp(wp[1], sqrt(iw*k)*sqrt(6*srate/($pi*fl))*wl_audible(f));
+  v == 1 ? ( d_re = re; d_st = st; d_f = f; d_q = q; d_l = l; d_cells = nc; d_crit = crit; d_p1 = sqrt(i1*k); );
+);
+
+// One compact source: a single noise excites all of its bands (paper, Sec. 3.6); the
+// second correlation cell gets its own noise.
+function ob_rigid_run(v, n1, n2) local(p, wp) (
+  p = OB + v*72;
+  wp = WAKE + v*10;
+  wp[8] += wp[0]*(n1 - wp[8]);
+  wp[1] += wp[9];
+  wl_band_run(p, n1) + wl_band_run(p + 12, n2) + wl_band_run(p + 24, n1) + wl_band_run(p + 36, n1)
+  + wl_band_run(p + 48, n1) + wl_band_run(p + 60, n1) + wl_svf_hp(wp + 2, wp[8])*wp[1];
+);
+
+// ---------------------------------------------------------------------------------------
+// Elastic wire (Aeolian harp). A van der Pol wake oscillator q (Facchinetti, de Langre and
+// Biolley 2004: epsilon 0.3, acceleration coupling A = 12, C_L0 = 0.3) drives a 12-mode
+// string; the string's acceleration at the coupling cell feeds back into the wake, so the
+// shedding locks onto a string harmonic over a range of speeds (lock-in) and jumps between
+// harmonics. Wake record WIREQ + 10 v: [q, q', w'^2, eps w, gate, lift/mass, noise, acc,
+// A/D, dipole]. Modes WIREM + 96 v, 8 slots each: [w'^2, 2 zeta w, coupling shape, pickup
+// shape, y, y', -, -]. w' = 2 sin(w dt/2)/dt makes the semi-implicit Euler step oscillate
+// at w. Output: string velocity at the pickup (radiated through an unmodelled soundboard,
+// scaled by K_HARP) plus the wake's own lift dipole (Curle: p = sin(theta) dF/dt/(4 pi c r)).
+function wire_update(v) local(re, st, gi, wf, x, l, wp, n, p, wn, fs, ga) (
+  ob_geom(v);
+  re = max(ob_u*ob_d/air_nu, 0.000001);
+  st = wl_st(re);
+  gi = wl_clamp((re - 47)/53, 0, 1);
+  // The wake oscillator is resolved up to 0.12 fs (5.8 kHz at 48 kHz). Above that it used
+  // to sit at the clamp and lock onto string modes far below the real shedding frequency
+  // (a wrong, often runaway tone); now it fades out between 0.12 and 0.15 fs, and the
+  // shedding of a thin wire in strong wind leaves the wire model (rigid types cover it).
+  fs = st*ob_u/max(ob_d, 0.00001);
+  ga = wl_clamp((0.15*srate - fs)/(0.03*srate), 0, 1);
+  gi *= ga;
+  wf = wl_clamp(2*$pi*fs, 0, 2*$pi*0.12*srate);
+  wp = WIREQ + v*10;
+  x = 2*sin(wf*0.5/srate)*srate;
+  wp[2] = x*x;
+  wp[3] = 0.3*wf;
+  // Self-excited (q^2 - 1) above the shedding onset, damped (q^2 + 1) below it.
+  wp[4] = 2*gi - 1;
+  l = min(101.536*max(re, 47)^-0.245*ob_d, sm_span);
+  // Lift per length over mass per length, rho U^2 C_L0 q / (pi rho_w D), rho_w = 1150
+  // (nylon or gut). A vibrating wire correlates the shedding along its span (lock-in), so
+  // the load acts on the whole span; the coupling shape below sets each mode's share.
+  wp[5] = ga*air_rho*ob_u*ob_u*0.3/($pi*1150*max(ob_d, 0.00001));
+  // Lift dipole of the wake: 1/2 rho U^2 D (C_L0/2) per q, over sqrt(l x span) of
+  // incoherent cells, times sin(theta)/(4 pi c r); multiplied by dq/dt in wire_run.
+  // Ramped over the control period (step in WIRED + v).
+  WIRED[v] = wl_ramp(wp[9], ga*sqrt(lis_sin2)*0.5*air_rho*ob_u*ob_u*ob_d*0.15*sqrt(l*sm_span)/(4*$pi*air_c*lis_r));
+  wp[6] = 0.3*sm_turb*wf*wf;
+  wp[8] = 12/max(ob_d, 0.00001);
+  WFS[v] = wf/(2*$pi);
+  n = 1;
+  p = WIREM + v*96;
+  loop(12,
+    wn = 2*$pi*n*sm_wf1*sqrt(1 + 0.0001*n*n);
+    wn < 1.9*srate ? (
+      x = 2*sin(wn*0.5/srate)*srate;
+      p[0] = x*x;
+      p[1] = 2*wire_zeta*wn;
+      p[2] = sin(n*$pi*0.3);
+      p[3] = sin(n*$pi*0.04);
+    ) : (
+      p[0] = p[1] = p[2] = p[3] = 0;
+    );
+    n += 1;
+    p += 8;
+  );
+);
+
+// Returns the bridge-end string velocity (m/s); n adds turbulent forcing to the wake.
+function wire_run(v, n) local(wp, p, qdd, f, acc, out, ydd, e, em, g, c) (
+  wp = WIREQ + v*10;
+  // The wake's nonlinear damping eps w (q^2 - gate) is stiff at high shedding frequencies
+  // (eps w dt up to 0.23): integrated explicitly it diverged once q passed about 3, and the
+  // output went to full-scale bursts (the fault guard then reset the effect every few
+  // blocks: a train of impulses). Semi-implicit in q' it is stable for any q (denominator
+  // above 0.77). The string's push on the wake, A/D x acceleration, saturates smoothly at
+  // what would hold q at 4 (the free wake cycles at about 2).
+  c = 4*wp[2];
+  g = wp[8]*wp[7];
+  g = c*g/sqrt(c*c + g*g);
+  qdd = -wp[2]*wp[0] + g + wp[6]*n;
+  wp[1] = (wp[1] + qdd/srate)/(1 + wp[3]*(wp[0]*wp[0] - wp[4])/srate);
+  wp[0] += wp[1]/srate;
+  f = wp[5]*wp[0];
+  acc = 0;
+  out = 0;
+  p = WIREM + v*96;
+  // Vortex-induced vibration saturates near one diameter (Williamson and Govardhan 2004:
+  // about 1 D at low mass-damping); without that the undamped modes grew without bound at
+  // lock-in. Each mode's energy is capped at an amplitude of 1.2 D at the coupling cell.
+  em = 0.72*sqr(ob_d);
+  loop(12,
+    ydd = p[2]*f - p[1]*p[5] - p[0]*p[4];
+    p[5] += ydd/srate;
+    p[4] += p[5]/srate;
+    e = p[5]*p[5] + p[0]*p[4]*p[4];
+    c = p[0]*em/max(p[2]*p[2], 0.01);
+    e > c ? ( e = sqrt(c/e); p[4] *= e; p[5] *= e; );
+    acc += p[2]*ydd;
+    out += p[3]*p[5];
+    p += 8;
+  );
+  wp[7] = acc;
+  wp[9] += WIRED[v];
+  out*K_HARP/lis_r + wp[9]*wp[1];
+);
+
+// ---------------------------------------------------------------------------------------
+// Cavity, compact sources (Selfridge, Reiss and Avital 2017): four Rossiter-Heller dipoles
+// and the depth monopole, gains from Howe's spectrum through the shear-layer thickness.
+// Phi is treated as a power spectrum (amplitude = sqrt(Phi)); the paper applies its gain
+// directly. Bands at CAV + 12 n (n = 0..3 Rossiter, 4 depth mode).
+function cav_shape(s, m) ( m*m*s^(5/3)/(s*s + 0.0144)^1.5; );
+function cav_compact_update() local(u, m, a, zeta, th0, rel, wt, x, dc, cp, conv, ros, ofac, q, base, n, f, s, g, fm, k, br, xx, yy, den, tm, best)
+(
+  u = max(wind_speed, 0.01);
+  m = u/air_c;
+  a = sm_cl*sm_cw;
+  zeta = end_corr ? 0.61*sqrt(a/$pi) : sqrt($pi*a/4);
+  th0 = sm_cl/(9.39*sm_cl/sm_cd + 36.732);            // Eq. 10
+  rel = u*sm_cl/air_nu;
+  wt = 1/(1 + exp(-(log(rel) - log(25000))/0.15));     // laminar -> turbulent, Re_L 25000
+  x = 0.75*sm_cl;
+  dc = (1 - wt)*sqrt(x*sm_cl/rel) + wt*x/(6*sqrt(8));  // Eqs. 12-13, Goertler parameter 6
+  // Eqs. 11, 14, 15. Shape factor 1.29 at all Re: it reproduces the paper's Fig. 5 ordering
+  // (second Rossiter mode dominant); the printed laminar value 2.69 makes mode 1 dominant.
+  cav_dstar = dc/8 + 1.29*th0;
+  cp = cos($pi - lis_th);                               // Howe's angle, from downstream
+  conv = 1/sqr(1 + m*cp);
+  ros = u/sm_cl/(1/0.57 + m/sqrt(1 + 0.2*m*m));         // Eq. 4 (Rossiter-Heller)
+  ofac = wl_smooth((11 - sm_cl/sm_cd)/3);               // open/closed, L/d 8..11
+  q = wl_clamp(87.715 - 5.296*log(rel), 2, 90)/(1 + 4*sm_cdamp + 1.5*sm_turb);  // Eq. 22
+  cav_q = q;
+  base = K_CAV*air_rho*wind_speed*wind_speed*sm_cl/lis_r;
+  best = -1; cav_dom = 0;
+  n = 0;
+  loop(4,
+    f = (n + 0.75)*ros;
+    s = 2*$pi*f*cav_dstar/u;
+    g = cav_shape(s, m)*conv*sqr(cp - m)*ofac*ofac;     // Eq. 21
+    wl_band_set(CAV + n*12, f, q, base*sqrt(g));
+    g*wl_audible(f) > best ? ( best = g*wl_audible(f); cav_dom = n + 1; );
+    n += 1;
+  );
+  cav_fd1 = 0.75*ros;
+  fm = air_c/(4*(sm_cd + zeta));                        // Eq. 9
+  k = 2*$pi*fm/air_c;
+  br = min(30, k*k*a/(2*$pi));
+  xx = cos(k*(sm_cd + zeta))*(exp(br) + exp(-br))/2;
+  yy = sin(k*(sm_cd + zeta))*(exp(br) - exp(-br))/2;
+  den = max(xx*xx + yy*yy, 0.000000000001);
+  tm = 1.02*sin(k*sm_cd)/den;
+  s = 2*$pi*fm*cav_dstar/u;
+  g = cav_shape(s, m)*conv*max(0, sqr(xx*tm) + sqr(yy*tm) + 2*yy*tm*(cp - m));  // Eq. 20
+  wl_band_set(CAV + 48, fm, q, base*sqrt(g));
+  g*wl_audible(fm) > best ? cav_dom = 5;
+  cav_fm = fm;
+);
+function cav_compact_run(n) (
+  wl_band_run(CAV, n) + wl_band_run(CAV + 12, n) + wl_band_run(CAV + 24, n)
+  + wl_band_run(CAV + 36, n) + wl_band_run(CAV + 48, n);
+);
+
+// ---------------------------------------------------------------------------------------
+// Cavity, feedback models: a self-sustained loop instead of noise-excited bands.
+// Shear layer: delay tau = L/(K U) (K = 0.57, Rossiter's convection ratio; 0.45 for a free
+// jet), instability band-pass at f = 0.016 U / theta (Ho and Huerre: f theta / Ubar = 0.032,
+// Ubar = U/2), algebraic saturation, then -d/dt into the resonator. With a resonator of
+// zero phase at resonance the loop phase gives f = (n - 1/4) K U / L, Rossiter's formula
+// at low Mach with alpha = 1/4, so lock-on, stage jumps and hysteresis emerge.
+// Resonators: 1 quarter-wave waveguide (depth + end correction), 2 Helmholtz (opening
+// L x W, neck = depth, volume = cube side^3), 3 none (edge tone: the jet loop alone).
+function fb_update() local(u, a, zeta, th0, q, side, vol, leff, m, cp, k)
+(
+  u = max(wind_speed, 0.01);
+  a = sm_cl*sm_cw;
+  zeta = end_corr ? 0.61*sqrt(a/$pi) : sqrt($pi*a/4);
+  // Momentum thickness: Eq. 10 with L/d held inside its fitted range, or a jet layer.
+  th0 = cav_model == 3 ? 0.1*sm_cw : sm_cl/(9.39*wl_clamp(sm_cl/sm_cd, 0.5, 6) + 36.732);
+  fb_fsl = wl_clamp(0.016*u/th0, 5, 0.4*srate);
+  wl_svf_set(FBF, fb_fsl, 1);
+  // Disturbances much shorter than the layer decay: one-pole at 2 x the instability band
+  // keeps the loop gain falling at high frequency (the -d/dt alone would rise).
+  fb_jla = wl_lp_coeff(2*fb_fsl);
+  fb_tau = wl_clamp(sm_cl/((cav_model == 3 ? 0.45 : 0.57)*u)*srate, 2, 0.25*srate);
+  q = wl_clamp(87.715 - 5.296*log(u*sm_cl/air_nu), 2, 90)/(1 + 4*sm_cdamp);
+  cav_q = q;
+  cav_model == 1 ? (
+    fb_fr = air_c/(4*(sm_cd + zeta));
+    fb_n = wl_clamp(2*(sm_cd + zeta)/air_c*srate, 2, WG_LEN - 4);
+    fb_g = exp(-$pi/(2*q));
+    fb_in = 1 - exp(-$pi/40);           // peak gain 1 at Q 20; more losses, less loop gain
+    fb_lpa = wl_lp_coeff(8*fb_fr);      // wall and radiation losses rise with frequency
+  ) : cav_model == 2 ? (
+    side = sm_helm*0.01;
+    vol = side*side*side;
+    leff = sm_cd + 1.7*sqrt(a/$pi);     // neck plus two flanged end corrections (0.85 a each)
+    fb_fr = air_c/(2*$pi)*sqrt(a/(vol*leff));
+    wl_svf_set(FBF + 8, fb_fr, q);
+    fb_in = q/20;
+  ) : (
+    fb_fr = fb_fsl;
+    fb_in = 1;
+  );
+  fb_wn = 2*$pi*wl_clamp(fb_fr, 5, 0.4*srate);
+  m = u/air_c;
+  cp = cos($pi - lis_th);
+  // Radiation: a monopole of volume velocity A v (mouth area A = L x W, acoustic velocity
+  // v ~ U x the normalised loop signal), p = rho omega A v / (4 pi r), times K_FB; plus the
+  // trailing-edge dipole, smaller by M |cos(phi) - M|. The edge tone has only the jet force.
+  // Both ramp over the control period (fb_amp_d, fb_dip_d).
+  fb_amp_d = wl_ramp(fb_amp, K_FB*air_rho*fb_wn*a*max(0, wind_speed)/(4*$pi*lis_r));
+  fb_dip_d = wl_ramp(fb_dip, cav_model == 3 ? 0 : m*abs(cp - m));
+  // Speeds where the loop phase meets stage n = 1, 2, 3: U = f L / (K (n - 1/4)).
+  k = cav_model == 3 ? 0.45 : 0.57;
+  fb_u1 = fb_fr*sm_cl/(k*0.75); fb_u2 = fb_fr*sm_cl/(k*1.75); fb_u3 = fb_fr*sm_cl/(k*2.75);
+  // Turbulent disturbances enter the shear layer (receptivity at the band-pass input):
+  // below threshold the loop is a noise-excited resonator, above it they seed the tone.
+  fb_noise = 0.05 + 0.5*sm_turb;
+);
+function fb_run(n) local(pos, i0, fr, j1, xd, b, h, src, rd, w, out) (
+  pos = fb_w - fb_tau;
+  pos < 0 ? pos += FB_LEN;
+  i0 = floor(pos);
+  fr = pos - i0;
+  j1 = i0 + 1 >= FB_LEN ? 0 : i0 + 1;
+  xd = FBDL[i0]*(1 - fr) + FBDL[j1]*fr;
+  b = wl_svf_bp(FBF, xd + fb_noise*n);
+  fb_jl += fb_jla*(b - fb_jl);
+  h = fb_jl/sqrt(1 + fb_jl*fb_jl);
+  src = wl_clamp(-FB_G0*(h - fb_h1)*srate/fb_wn, -8, 8);
+  fb_h1 = h;
+  cav_model == 1 ? (
+    rd = fb_wg - fb_n;
+    rd < 0 ? rd += WG_LEN;
+    i0 = floor(rd);
+    fr = rd - i0;
+    j1 = i0 + 1 >= WG_LEN ? 0 : i0 + 1;
+    w = WG[i0]*(1 - fr) + WG[j1]*fr;
+    fb_lp += fb_lpa*(w - fb_lp);
+    out = src*fb_in - fb_g*fb_lp;
+    WG[fb_wg] = out;
+    fb_wg += 1;
+    fb_wg >= WG_LEN ? fb_wg = 0;
+  ) : cav_model == 2 ? (
+    out = wl_svf_bp(FBF + 8, src*fb_in);
+  ) : (
+    out = src;
+  );
+  FBDL[fb_w] = out;
+  fb_w += 1;
+  fb_w >= FB_LEN ? fb_w = 0;
+  fb_env += 0.0005*(abs(out) - fb_env);
+  fb_amp += fb_amp_d;
+  fb_dip += fb_dip_d;
+  fb_amp*(out + fb_dip*src);
+);
+
+// ---------------------------------------------------------------------------------------
+// Ensembles: many incoherent Aeolian sources in 12 groups. Group k has the diameter at the
+// k-th quantile of a log-normal distribution (median e_d mm, log spread e_s %) and its own
+// slowly varying local speed (AR(1), 1.5 s, spread e_u %), e_n elements of length e_l m
+// sheltered to e_h x the wind (a canopy: pine needles 0.4). Lift fundamental only. Group
+// bands at ENS + 12 k, speed states ENSR + k. Types 1-3 have built-in values (ENS_P).
+function ens_update() local(dmed, sig, cnt, b, su, shelter, a, k, dk, uk, re, st, gi, f, q, l, mcos, i, up)
+(
+  dmed = 0.001*e_d; sig = 0.01*e_s; cnt = max(1, e_n); b = e_l; su = 0.01*e_u; shelter = e_h;
+  a = exp(-ctl_dt/1.5);
+  k = 0;
+  loop(12,
+    ENSR[k] = a*ENSR[k] + sqrt(1 - a*a)*1.7320508*wl_xnoise();
+    dk = dmed*exp(sig*ZQ[k]);
+    uk = wind_speed*shelter*yaw_cos*max(0.05, 1 + su*ENSR[k]);
+    re = max(uk*dk/air_nu, 0.000001);
+    st = wl_st(re);
+    gi = wl_clamp((re - 47)/53, 0, 1);
+    // Pitch: Ensemble pitch follow (slider 83) blends the gusty speed with the mean (0.3.1).
+    up = (sm_speed + t_epf*(wind_speed - sm_speed))*shelter*yaw_cos*max(0.05, 1 + su*ENSR[k]);
+    f = wl_st(max(up*dk/air_nu, 0.000001))*max(up, 0)/dk;
+    // The group's own spread of diameters and speeds widens each band.
+    q = 1/((1 + 4*sm_turb)/wl_q_circle(re) + 0.21*sig + 0.5*su);
+    l = min(101.536*max(re, 47)^-0.245*dk, b);
+    // Elements all round, at every angle to the wind: the lift's mean directivity (sin^2 =
+    // 1/2, no convection), whatever the array's place (0.3.1; before, the array position's).
+    i = cnt/12*2.5066283*st*st*l*b*air_rho*uk^6*0.5/(32*air_c^3*lis_r*lis_r)*gi;
+    wl_band_set(ENS + k*12, f, q, sqrt(i*air_rho*air_c));
+    k == 5 ? ens_f = f;
+    k += 1;
+  );
+);
+
+// ---------------------------------------------------------------------------------------
+// Microphone wind noise: pseudo-sound at the capsule, p ~ 0.1 rho U u' (convected
+// turbulence; magnitude of order rho U u'), spectrum from the eddies (one-pole at
+// U/(2 pi 0.5 m)) and the windscreen's spatial averaging (one-pole at U/(pi d)) with a
+// screen reduction (none 1, foam 0.3, fur 0.1). Corcos-style coherence between the two
+// capsules (0.17 m apart): coherent below 0.8 U/(2 pi 0.12 0.17 m) = 6.24 U Hz,
+// independent above (power-complementary one-pole split).
+// Wind direction at the microphone (Mic wind from), shared by the microphone noise and the
+// gust proximity: the windward side gets more (gain 0.7..1.3, scaled by the stereo width in
+// @sample); the direction wanders with the turbulence (AR(1), 0.5 L / U, 8 + 25 x
+// Turbulence degrees). Gains ramp per sample (mic_bl/br, steps mic_bld/brd).
+function wind_dir_update() local(a) (
+  a = exp(-ctl_dt*max(sm_speed, 0.5)/(0.5*gust_len));
+  mic_dev = a*mic_dev + sqrt(1 - a*a)*(8 + 25*sm_turb)*1.7320508*wl_xnoise();
+);
+function mic_update() local(u, su, d, scr, f1, f2) (
+  u = max(amb_speed, 0);
+  su = sqrt(sqr(gust_ti*sm_speed) + sqr(0.1*sm_turb*sm_speed)) + 0.05*u;
+  // Screen reduction compressed to about 3 dB steps (real screens: 10-30 dB), so the
+  // choice sets the timbre and Mic wind noise the level; the darker screens lose more of
+  // their rumble to the 25 Hz low cut, hence their larger factors.
+  windscreen == 0 ? ( d = 0.012; scr = 0.338; ) : windscreen == 1 ? ( d = 0.08; scr = 0.325; ) : ( d = 0.2; scr = 0.355; );
+  f1 = wl_clamp(u/(2*$pi*0.5), 0.5, 0.4*srate);
+  f2 = wl_clamp(u/($pi*d), 1, 0.4*srate);
+  mic_a1 = wl_lp_coeff(f1);
+  mic_a2 = wl_lp_coeff(f2);
+  mic_ac = wl_lp_coeff(wl_clamp(6.24*u, 5, 0.4*srate));
+  mic_p = 0.1*air_rho*u*su*scr;
+  // Capsule and recorder low cut (2-pole at 25 Hz): removes the sub-audio swings of the
+  // eddies (one-pole at U / pi, a few Hz), heard as a slow trembling, not as wind.
+  arr_mic_set();
+  mic_gd = wl_ramp(mic_g, mic_p*sqrt(3*srate*(f1 + f2)/($pi*f1*f2)));
+);
+
+// ---------------------------------------------------------------------------------------
+// Gust proximity (heuristic, perceptual): what a strong gust does to a close microphone.
+// The gust pushes the diaphragm with a large, slow pressure swing; the recorder's limiter
+// catches it, so the rest of the wind is squashed under the lows and breathes back over a
+// second or so after the peak. Two earlier versions missed it: a continuous 16-50 Hz band
+// that followed every gust (too constant), then short 7-26 Hz buffets (inaudible on most
+// systems, so nothing seemed to happen).
+//   gate: e, the relative excess of the instantaneous speed over the mean (continuous gusts,
+//         gust events, turbulence), against its own running statistics (10 s): drive =
+//         ((e - max(0.08, mean + sd/2)) / (sd + 0.15))^1.5, clamped to 0..1; only the upper
+//         part of the clear gusts opens it, whatever the gust settings; never without gusts;
+//   push: the drive swells (attack 30 ms, release 110 ms at reactivity 50 %): it comes and
+//         goes with the peak, decisively, but only above the gate; band noise of RMS
+//         K_PROX (4, +12 dB) x the slow
+//         RMS of the rest of the wind (8 s, the calm level) x (U / Umean)^2 (the gust's own
+//         pressure rise, at most x 9) x swell x fader^2.5, 60 % common to both capsules, the
+//         rest independent (scaled by the stereo width), between a 2-pole high-pass at
+//         pitch / 1.75 and a 4-pole Butterworth low-pass at pitch x 1.75 (pitch 32 Hz:
+//         18-56 Hz, low enough to feel like pressure, high enough for headphones and
+//         monitors); Mic wind from, exaggerated, sets the balance: +-10 dB x sin(from) x width; Relative levels, because the
+//         effect is perceptual: the push must dominate whatever wind it sits in;
+//   limiter: the push keys a recorder-style limiter on the whole output (the push
+//         included): peak detector, 5 ms attack, 0.15 s release at reactivity 50 % (a
+//         slow release sounded like a cinematic boom; real gusts come and go); above the
+//         threshold, 3 x the slow RMS of the rest (about its own peaks), the gain is
+//         threshold / key, at most -30 dB, linked only 20 % between the sides, so the
+//         windward side is squashed harder. Reactivity (0..100 %) moves the swell attack,
+//         swell release and limiter release geometrically from 0.1 / 0.4 / 0.6 s to
+//         9 / 30 / 40 ms. The fader scales the push, hence how
+//         far it drives the limiter: low settings add mostly the lows, high settings
+//         squash the rest.
+// The windward side of Mic wind from gets a stronger push. Own random stream. Wind mode only.
+function prox_rand() (
+  prox_rs *= 16807;
+  prox_rs -= floor(prox_rs/2147483647)*2147483647;
+  prox_rs/2147483647;
+);
+function prox_update() local(e, a, s, th, u, fl, fh, r) (
+  // Band pitch / 1.35 .. pitch x 1.35 (0.3.1; was / 1.75 .. x 1.75): a narrower band swells
+  // instead of rattling.
+  fl = prox_fc/1.35; fh = prox_fc*1.35;
+  r = 0; loop(3, wl_svf_set(PRX + 24*r, fh, 0.5412); wl_svf_set(PRX + 24*r + 8, fh, 1.3066); wl_svf_set(PRX + 24*r + 16, fl, 0.7071); r += 1; );
+  prox_nk = sqrt(3*srate/(2*(fh - fl)));
+  // Reactivity 0..1: times from slow swells to snaps, geometric (50 %: 30 / 110 / 150 ms).
+  r = prox_rx;
+  prox_ta = 0.1*0.09^r; prox_tr = 0.4*0.075^r;
+  prox_dr = 1 - exp(-1/(0.6*0.0625^r*srate));
+  // The gust's excess over the mean, from the gust factors themselves (0.3.1). It was
+  // (wind speed - mean)/mean, and with the pen the mean follows the pen at once while the
+  // wind speed lags 60 ms: every quick release read as a huge gust, a thud at the end of a
+  // swoosh.
+  e = max(0, gust_n + small_n + gust_ev);
+  a = 1 - exp(-ctl_dt/10);
+  prox_em += a*(e - prox_em);
+  prox_ev += a*(sqr(e - prox_em) - prox_ev);
+  s = sqrt(max(prox_ev, 0));
+  th = max(0.08, prox_em + 0.5*s);
+  prox_drive = wl_clamp((e - th)/(s + 0.15), 0, 1)^1.5;
+  prox_sw += (1 - exp(-ctl_dt/(prox_drive > prox_sw ? prox_ta : prox_tr)))*(prox_drive - prox_sw);
+  u = sqrt(max(prox_rp, 0));
+  // Capped at 1000 Pa RMS: in absurd corners (a 100 000-element ensemble at 40 m/s, 0.5 m
+  // away) the rest is already enormous, and a push 36 x over it tripped the output guard.
+  // No push without wind (the gust factors are relative and run at 0 m/s too).
+  prox_p = min(1000, K_PROX*u*min(9, sqr(1 + e))*prox_sw)*min(1, sm_speed);
+  prox_rd = wl_ramp(prox_rum, prox_p);
+  prox_thr = 3*u;
+);
+// Audio rate: push noise, filters, limiter key and gains. Writes prox_sl, prox_sr (the
+// push, after the fader and the direction) and prox_dl, prox_dr_g (the limiter gains).
+function prox_run() local(k, nc, nx, ny, c, x, mx, kk, lf, nl) (
+  prox_rum += prox_rd;
+  k = prox_rum*prox_nk*g_prox*g_prox*sqrt(g_prox);
+  // A first-order pressure field round the array: a common stream and two directional ones
+  // (x, y), each through the push band; capsule c takes 0.6 common + 0.8 x arr_w x
+  // (cos, sin of its direction), times its push gain PG (the wind's side, +-10 dB), glided
+  // per sample (PGS, 2 ms; 0.3.1) so turning the array never steps the push.
+  nc = wl_svf_hp(PRX + 16, wl_svf_lp(PRX + 8, wl_svf_lp(PRX, 2*prox_rand() - 1)));
+  nx = wl_svf_hp(PRX + 40, wl_svf_lp(PRX + 32, wl_svf_lp(PRX + 24, 2*prox_rand() - 1)));
+  ny = wl_svf_hp(PRX + 64, wl_svf_lp(PRX + 56, wl_svf_lp(PRX + 48, 2*prox_rand() - 1)));
+  c = 0; mx = 0; lf = 0; nl = 0;
+  loop(arr_n,
+    CHF[c] == 0 || CHF[c] == 2 ? (
+      PGS[c] += mic_sa*(PG[c] - PGS[c]);
+      PUSH[c] = k*(0.6*nc + 0.8*arr_w*(CHC[c]*nx + CHS[c]*ny))*PGS[c];
+      x = abs(PUSH[c]);
+      PKEY[c] += (x > PKEY[c] ? prox_da : prox_dr)*(x - PKEY[c]);
+      mx = max(mx, PKEY[c]);
+      lf += PGS[c]; nl += 1;
+    );
+    c += 1;
+  );
+  // Recorder limiter: per capsule, linked 20 %; the LFE takes the common push at the mean
+  // capsule gain, unlimited; unused outputs (quad's 3 and 4) nothing.
+  c = 0; prox_duck = 1;
+  loop(arr_n,
+    CHF[c] == 0 || CHF[c] == 2 ? (
+      kk = 0.2*mx + 0.8*PKEY[c];
+      PGN[c] = kk > prox_thr ? max(0.0316, prox_thr/kk) : 1;
+      prox_duck = min(prox_duck, PGN[c]);
+    ) : (
+      PUSH[c] = CHF[c] == 1 ? k*0.6*nc*lf/max(nl, 1) : 0;
+      PGN[c] = 1;
+    );
+    c += 1;
+  );
+  prox_dl = PGN[0]; prox_dr_g = PGN[arr_n > 1];
+);

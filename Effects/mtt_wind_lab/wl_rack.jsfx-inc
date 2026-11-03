@@ -1,0 +1,55 @@
+// Breeze chain orchestration. Graphics edits configuration; audio owns lane histories.
+@init
+function wfx_reset() local(i) (
+  memset(fx_st,0,276*32);memset(FX_MOD,0,23*4);
+  i=0;loop(276,conv_tab[2560+i*8]=-1;i+=1;);
+);
+function wfx_init() local(i) (
+  fx_cfg=310000;fx_st=311000;FX_ROUTE=320000;FX_MOD=320100;fx_on=320500;
+  fx_curve=321000;FX_SUM=323000;FX_VISIBLE=323100;GUI_FXSEL=324000;
+  // Both algorithms use the same lane's arena, never another lane's. All FFT arenas align.
+  FX_STRIDE=262144;fx_buf=1048576;conv_st=fx_buf;
+  conv_hb=73400320;conv_irm=79429632;
+  conv_stg=85458944;conv_pre=85721088;conv_scr=85786624;GUI_IR_SCR=85983232;
+  conv_init();
+  !wfx_ready ? (
+    memset(fx_curve,0,1559);i=0;loop(23,fx_curve_preset(i,0);FX_ROUTE[i]=wfx_route(i);i+=1;);
+    wfx_ready=1;
+  );wfx_reset();
+);
+function wfx_prepare() local(i,j,p,route,quiet,owner,slot) (
+  memset(FX_VISIBLE,0,23);owner=0;
+  loop(6,j=0;loop(3,slot=wfx_chain_slot(owner,j);slot>=0?FX_VISIBLE[slot]=1;j+=1;);owner+=1;);
+  i=0;loop(23,
+    p=fx_cfg+i*6;p[0]=floor(wl_clamp(slider(wfx_slider(i,0)),0,11));p[0]==7?p[0]=8;
+    j=1;loop(5,p[j]=wl_clamp(slider(wfx_slider(i,j)),0,1);j+=1;);
+    route=wfx_route(i);
+    route!=FX_ROUTE[i] ? (
+      quiet=1;j=0;loop(12,fx_st[(i*12+j)*32+1]>0?quiet=0;j+=1;);
+      quiet ? (
+        memset(fx_st+i*12*32,0,12*32);FX_ROUTE[i]=route;
+        j=0;loop(12,conv_tab[2560+(i*12+j)*8]=-1;j+=1;);
+      );
+    );i+=1;
+  );
+  // File reads finish in graphics before publication; audio only commits staged samples.
+  gui_conv_req==1 ? (
+    conv_commit(gui_conv_entry,gui_conv_frames,gui_conv_rate,gui_conv_channels);
+    strcpy(800+gui_conv_entry,#gui_conv_name);gui_conv_req=0;
+  ) : gui_conv_req==2 ? (conv_clear(gui_conv_entry);gui_conv_req=0;) :
+  gui_conv_req==3 ? (conv_tab[2304+gui_conv_entry*8+4]=3;gui_conv_req=0;);
+  fx_prepare();
+);
+function wfx_process(point) local(i,c) (
+  // Process in the same legacy-first/fixed-slot order used by the panel. A departing
+  // insert keeps its old point during its short fade; FX_VISIBLE controls its target Wet.
+  i=0;loop(23,
+    FX_ROUTE[i]==point && (FX_VISIBLE[i] || fx_st[i*12*32+1]>0) ? (
+      c=0;loop(arr_n,CHF[c]!=3?OUTC[c]=fx_lane(i*12+c,OUTC[c],0);c+=1;);
+    );i+=1;
+  );
+);
+function wfx_begin(point) (fx_on[point]?(memcpy(FX_SUM,OUTC,12);memset(OUTC,0,12);););
+function wfx_end(point) local(c) (
+  fx_on[point]?(wfx_process(point);c=0;loop(arr_n,OUTC[c]+=FX_SUM[c];c+=1;););
+);
