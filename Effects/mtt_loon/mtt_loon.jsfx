@@ -1,5 +1,5 @@
 desc:MTT Loon
-// Version: 0.34 - Loon. Asymmetric two-mass vocal folds (Ishizaka-Flanagan 1972; left/right
+// Version: 0.35 - Loon. Asymmetric two-mass vocal folds (Ishizaka-Flanagan 1972; left/right
 // asymmetry after Steinecke-Herzel 1995) coupled to a five-section Kelly-Lochbaum
 // tract with an optional five-branch side-cavity junction, an optional second fold
 // pair (voice 2, coupled to the first) and an air-sac supply drained by the glottal flow.
@@ -27,6 +27,8 @@ filename:4,wm.png
 filename:5,wm_dark.png
 filename:6,Chiaro.png
 filename:7,Scuro.png
+// Private copy of the Breeze icon atlas; @gfx applies Loon's theme colours.
+filename:8,ui_icons_2x.png
 // Performance
 slider1:0<0,1,1{Mouse / XY,MIDI channel 1}>-Play mode
 slider2:0.5<0,1,0.001>-XY X
@@ -1186,20 +1188,21 @@ file_avail(0)<0 ? (
   fx_ready=1; lk_ready=1;
 );
 
-@gfx 902 693
+@gfx 1200 867
 // THREADING: REAPER runs @gfx on another thread than @block/@sample. Never use a
 // global temporary here that the audio code also uses (loop counters above all):
 // gfx-only temporaries are prefixed g or are function locals. The only globals
 // written from here are the control flags gui_*, hold_on, loop_*, play_i, panic,
 // last_mode, and slider89 (the pen request; tests/coupled.cpp checks this list).
 // ---------- helpers ----------
-// Drawing is written in g_W x 630 points; g_s = pixels per point (window size and Retina).
+// Drawing is written in g_W x g_H points; g_s = pixels per point (window size and Retina).
 // The layout scales with the window (and the Retina factor). g_dx: how far the right edge
 // is from where it was at 820 points; g_cw: the width of the tab column (395 at 820).
-g_W=820; g_dx=g_W-820; c1x=405; g_cw=g_W-20-c1x;
+g_H=650;g_W=900; g_dx=g_W-820; c1x=405; g_cw=g_W-20-c1x;
+// The wider parameter area gives navigation, labels and values the spacing of Breeze.
 // Two control columns in the tab column: c1x and c2x, each g_fw wide (610 and 185 at 820).
 c2x=c1x+205*g_cw/395; g_fw=185*g_cw/395;
-g_s=gfx_w>0 && gfx_h>0 ? max(.5,min(gfx_w/g_W,gfx_h/630)) : max(1,gfx_ext_retina); g_mx=mouse_x/g_s; g_my=mouse_y/g_s; g_dark=slider72>=.5;
+g_s=gfx_w>0 && gfx_h>0 ? max(.5,min(gfx_w/g_W,gfx_h/g_H)) : max(1,gfx_ext_retina); g_mx=mouse_x/g_s; g_my=mouse_y/g_s; g_dark=slider72>=.5;
 // Use physical-pixel spacing for low-density concentric strokes.
 g_arc_step=gfx_ext_retina<1.5 ? 1/g_s : .6;
 g_arrow_step=gfx_ext_retina<1.5 ? 1/g_s : .5;
@@ -1260,20 +1263,49 @@ function tbutton(x,y,w,h,str,align,on,enabled) local(tw,th,over,tx) (
   gfx_x=align ? x*g_s+(w*g_s-tw)/2 : tx*g_s; gfx_y=y*g_s+(h*g_s-th)/2; gtext(str);
   press && over && enabled;
 );
-// Circular arrow (undo when m = 1, redo when m = -1, mirrored), at the centre of a box.
-function arrowbutton(x,y,w,h,m,enabled) local(over,cx,cy,r,a,k,ex,ey,dx,dy,nx,ny) (
-  over=hit(x,y,w,h); cx=x+w/2; cy=y+h/2; r=5.5;
-  !enabled ? col_mark() : over && down ? col_warm() : over ? col_text() : col_dim();
-  // Arc from just right of the top, round the right and bottom, to the upper left.
-  k=0; loop(3,
-    a=-.15*$pi; gfx_x=(cx+m*(r-k*g_arrow_step)*sin(a))*g_s; gfx_y=(cy-(r-k*g_arrow_step)*cos(a))*g_s;
-    loop(40, a+=1.4*$pi/40; gfx_lineto((cx+m*(r-k*g_arrow_step)*sin(a))*g_s,(cy-(r-k*g_arrow_step)*cos(a))*g_s,1););
-    k+=1;
+// Lock in physical pixels, normalized to 24 units. Opening mirrors the U around
+// its right attachment (x=15): that leg stays on the body, the free leg swings to
+// x=23, outside the body at x=5..17. Both effects use this same hinge geometry.
+function g_lockicon(x,y,size,on) local(sc,t,cx,cy,k,lx,rx,bx,by,bw,bh) (
+  sc=size/24; t=max(1,floor(1.1*sc+.5));
+  bx=floor(x+5*sc-t/2+.5); by=floor(y+10*sc-t/2+.5);
+  bw=max(t+1,floor(12*sc+.5)); bh=max(t+1,floor(10*sc+.5));
+  gfx_rect(bx,by,bw+t,t); gfx_rect(bx,by+bh,bw+t,t);
+  gfx_rect(bx,by,t,bh); gfx_rect(bx+bw,by,t,bh);
+  cx=x+(on?11:19)*sc; cy=y+6.5*sc;
+  lx=floor(cx-4*sc-t/2+.5); rx=floor(cx+4*sc-t/2+.5);
+  k=0; loop(t,
+    gfx_arc(cx,cy,max(.5,4*sc-t/2+.5+k),-$pi/2,$pi/2,1); k+=1;
   );
-  // Head at the start, pointing back along the arc (anticlockwise for undo).
-  a=-.15*$pi; ex=cx+m*(r-g_arrow_step)*sin(a); ey=cy-(r-g_arrow_step)*cos(a);
-  dx=-m*cos(a); dy=-sin(a); nx=m*sin(a); ny=-cos(a);
-  gfx_triangle((ex+dx*3.4)*g_s,(ey+dy*3.4)*g_s,(ex+nx*3-dx*.5)*g_s,(ey+ny*3-dy*.5)*g_s,(ex-nx*3-dx*.5)*g_s,(ey-ny*3-dy*.5)*g_s);
+  gfx_rect(lx,floor(cy+.5),t,max(1,by+t-floor(cy+.5)));
+  gfx_rect(rx,floor(cy+.5),t,max(1,by+t-floor(cy+.5)));
+  on ? gfx_rect(floor(x+11*sc-t/2+.5),floor(y+14*sc+.5),t,max(1,floor(3*sc+.5)));
+);
+// Same glyphs and state hierarchy as Breeze, recoloured once per theme. The atlas is
+// private to this effect (slot 8); slots 9/10 cache ink/red variants. No per-frame files.
+function gicon(col,row,x,y,size) local(img,k) (
+  col==5 || col==6 ? (
+    row==0 ? col_dim() : row==1 ? col_text() : row==2 ? col_warm() : col_mark();
+    g_lockicon(x*g_s,y*g_s,size*g_s,col==6);
+  ) : (
+    img=9+g_dark;
+    !(g_icons_ready & (1+g_dark)) ? (
+      gfx_setimgdim(img,896,256); gfx_dest=img; gfx_a=1; gfx_mode=2;
+      gfx_blit(8,1,0,0,0,896,256,0,0,896,256);
+      k=0; loop(4,
+        k==0 ? col_dim() : k==1 ? col_text() : k==2 ? col_warm() : col_mark();
+        gfx_muladdrect(0,k*64,896,64,0,0,0,1,gfx_r,gfx_g,gfx_b,0); k+=1;
+      );
+      gfx_dest=-1; g_icons_ready|=1+g_dark;
+    );
+    gfx_a=1; gfx_mode=0;
+    gfx_blit(img,1,0,col*64+8,row*64+8,48,48,x*g_s,y*g_s,size*g_s,size*g_s);
+  );
+);
+// Circular arrows, including the lighter disabled state, match Breeze's header.
+function arrowbutton(x,y,w,h,m,enabled) local(over) (
+  over=hit(x,y,w,h);
+  gicon(m==1?1:2,!enabled?3:over && down?2:over?1:0,x+(w-g_tool_size)/2,y+(h-g_tool_size)/2,g_tool_size);
   press && over && enabled;
 );
 function button(x,y,w,h,str,on) local(tw,th,over) (
@@ -1335,22 +1367,10 @@ function checkbox(x,y,str,on,left) local(tw,th,over,cy) (
   left ? rlabel(x-6,y-1,str) : label(x+14,y-1,str);
   press && over;
 );
-// Pen (tablet) button: a pen drawn without a box, red while the tablet is on. True on a click.
-// Pencil stroke: one pixel at 1x; on Retina a second, half-point offset pass gives it the
-// weight of the undo arrows.
-function pen_l(x1,y1,x2,y2) (glineaa(x1,y1,x2,y2,1); g_s>=2 ? glineaa(x1+.4,y1+.4,x2+.4,y2+.4,1););
-function penbutton(x,y,on) local(over,tx,ty,dx,dy,nx,ny,ax,ay,bx,by,cx,cy) (
-  over=hit(x-2,y-2,22,22);
-  over && down ? col_warm() : on ? col_warm() : over ? col_text() : col_dim();
-  // A plain pencil at 45 degrees: sharpened tip at the lower left, a straight barrel, a
-  // band near the flat end. Outline only, like the undo arrows.
-  tx=x+2.5; ty=y+16.5; dx=.7071; dy=-.7071; nx=.7071*1.9; ny=.7071*1.9;
-  ax=tx+dx*5; ay=ty+dy*5; bx=tx+dx*19; by=ty+dy*19; cx=tx+dx*16; cy=ty+dy*16;
-  pen_l(ax+nx,ay+ny,bx+nx,by+ny);pen_l(ax-nx,ay-ny,bx-nx,by-ny);
-  pen_l(bx+nx,by+ny,bx-nx,by-ny);pen_l(cx+nx,cy+ny,cx-nx,cy-ny);
-  pen_l(ax+nx,ay+ny,ax-nx,ay-ny);
-  pen_l(ax+nx,ay+ny,tx,ty);pen_l(ax-nx,ay-ny,tx,ty);
-  gfx_triangle((tx)*g_s,(ty)*g_s,(tx+dx*2+nx*.8)*g_s,(ty+dy*2+ny*.8)*g_s,(tx+dx*2-nx*.8)*g_s,(ty+dy*2-ny*.8)*g_s);
+// Pen button shares Breeze's glyph; red indicates the existing Loon request state.
+function penbutton(x,y,on) local(over) (
+  over=hit(x-4.6875,y-4.6875,27.5,27.5);
+  gicon(0,over && down?2:on?2:over?1:0,x,y,g_tool_size);
   press && over;
 );
 // Transport icon (kind 0 play, 1 pause, 2 stop) in an 18x18 box, no outline: dim at rest,
@@ -1430,7 +1450,7 @@ function lk_set(id,ax,lo,hi) (lk_put(id,ax,lo,hi,0); lk_touch(););
 function lk_val(id,which,v) (
   which==2 ? lk_lo[id]=max(-1,min(1,v)) : which==3 ? lk_hi[id]=max(-1,min(1,v)) : lk_c[id]=max(-1,min(1,v)); lk_touch();
 );
-function lk_remove(id) (lk_a[id]=0; lk_touch(););
+function lk_remove(id) (lk_a[id]=0;g_link_edit==id?g_link_edit=0;lk_touch(););
 // Right-click on a fader or knob: link to X, Y or Z, curve, remove (one undo step).
 function link_menu(id) local(k,ax,c,r) (
   k=lk_a[id]>0; ax=k ? lk_a[id]-1 : -1; c=k ? lk_c[id] : 0;
@@ -1442,10 +1462,12 @@ function link_menu(id) local(k,ax,c,r) (
   strcat(#lm,k && abs(c)<=.3 ? "|!Linear" : "|Linear");
   strcat(#lm,k && c>.3 ? "|<!Firm  (fine at the start)" : "|<Firm  (fine at the start)");
   strcat(#lm,k ? "||Remove link" : "||#Remove link");
+  strcat(#lm,k ? "|Edit range / curve..." : "|#Edit range / curve...");
   gfx_x=g_mx*g_s; gfx_y=g_my*g_s; r=gfx_showmenu(#lm);
   r>=1 && r<=3 ? (preview_end(); push_undo(); lk_axis(id,r-1););
   r>=4 && r<=6 && k ? (push_undo(); lk_val(id,4,r==4 ? -.6 : r==5 ? 0 : .6););
   r==7 && k ? (push_undo(); lk_remove(id););
+  r==8 && k ? (preview_end();g_link_edit=id;g_link_drag=0;);
 );
 function axis_name(ax) (ax<.5 ? "X" : ax<1.5 ? "Y" : "Z";);
 // Slider control. Hover previews the value under the pointer (not written to the host,
@@ -1568,7 +1590,8 @@ function knob(id,cx,cy,r,str,fmt,lo,hi,lg) local(u,u0,a,a0,a1,k,over,tw,th,sz,d,
     setparam(id,f_u2v(g_du,lo,hi,lg));
   );
 );
-function heading(x,y,str) (col_warm();label(x,y,str);col_line();grect(x,y+17,g_cw,1););
+// Section titles sit one type size above labels; accent is reserved for active controls.
+function heading(x,y,str) (gfont(2,15);col_text();label(x,y,str);col_line();grect(x,y+19,g_cw-(y<=128?g_fx_heading_gap:0),1);gfont(1,13););
 function note(x,y,str) (col_dim();label(x,y,str););
 // Trace of a ring buffer (n points). Triggered on the last closed->open edge when found.
 function trace(buf,x,y,w,h,n,lo,hi,trig) local(gi,j,start,v,px,py,lim) (
@@ -1591,12 +1614,12 @@ function meter(x,y,w,str,u,warm) (
 );
 // ---------- input ----------
 key=gfx_getchar(); flags=gfx_getchar(65536);
-down=mouse_cap&1; press=down&&!prev_down;
+down=mouse_cap&1; press=down&&!prev_down; g_spress=press; g_rwas=g_research_open;
 // Trackpad pressure clicks belong to the bridge, never to a fader or hover preview.
 // After release, wait for physical buttons up before accepting a new mouse press.
 g_trackpad_live=slider89>=.5 && slider247>=.5 && tb_fresh;
 g_trackpad_live ? g_tp_wait=1 : !(mouse_cap&3) ? g_tp_wait=0;
-g_input_block=g_trackpad_live || g_tp_wait;
+g_input_block=g_trackpad_live || g_tp_wait || g_research_open;
 g_input_block ? (preview_end(); down=press=0; key=0; mouse_wheel=0;);
 g_rpress=!g_input_block && (mouse_cap&2) && !g_prev_r; !down ? g_ldrag=0; g_wheel=0;
 !down || key==-1 || (flags>0 && !(flags&2)) ? (
@@ -1608,18 +1631,30 @@ gfont(1,13);
 col_bg();gfx_rect(0,0,gfx_w,gfx_h);
 // Background: the fill above is the dominant colour of the texture image, so Chiaro by
 // day and Scuro by night read as a delicate grain over their own colour. The fill
-// remains a fallback if an image cannot load.
-gfx_a=g_dark?.25:.35;
+// remains a fallback if an image cannot load. Lower texture contrast keeps small text
+// and fine controls as legible as Breeze while retaining Loon's warm paper.
+gfx_a=g_dark?.18:.22;
 g_iw=g_dark?1431:3280; g_ih=g_dark?1099:2520; g_ar=gfx_w/max(1,gfx_h);
 g_sw=min(g_iw,g_ih*g_ar); g_sh=min(g_ih,g_iw/g_ar);
 gfx_blit(g_dark?7:6,1,0,(g_iw-g_sw)/2,(g_ih-g_sh)/2,g_sw,g_sh,0,0,gfx_w,gfx_h);
 gfx_a=1;
 // ---------- header ----------
+// Breeze uses 60 units between 29-unit glyphs on a 1440-unit canvas.
+g_tool_pitch=37.5;g_tool_size=18.125;g_theme_c=g_W-40;
+g_redo_c=g_theme_c-g_tool_pitch;g_undo_c=g_redo_c-g_tool_pitch;g_pen_c=g_undo_c-g_tool_pitch;
 hover_id=0;
 // Header: fine-nib lettering, natural-history bird, random voice and tools.
-// Preview sits below the right-hand tools, immediately above the divider.
+// Global preferences are in the footer; the header contains branding and actions only.
+// A very light subpixel spread reinforces the original hairlines without resizing them.
+gfx_a=.12;
+gfx_blit(g_dark?3:2,1,0,0,0,224,120,24.82*g_s,8.9*g_s,90*g_s,48.2*g_s);
+gfx_blit(g_dark?3:2,1,0,0,0,224,120,25.18*g_s,8.9*g_s,90*g_s,48.2*g_s);
+gfx_blit(g_dark?3:2,1,0,0,0,224,120,25*g_s,8.72*g_s,90*g_s,48.2*g_s);
+gfx_blit(g_dark?3:2,1,0,0,0,224,120,25*g_s,9.08*g_s,90*g_s,48.2*g_s);
 gfx_a=1; gfx_blit(g_dark?3:2,1,0,0,0,224,120,25*g_s,8.9*g_s,90*g_s,48.2*g_s);
 gfx_blit(g_dark?1:0,1,0,0,0,200,108,143*g_s,13.3*g_s,73*g_s,39.4*g_s);
+g_rhit=hit(25,9,90,48); g_rhit ? hover_id=-999;
+press && g_rhit ? g_research_open=!g_research_open;
 // Sparse broken water rings: fine static ink, separate from the bird artwork.
 function water_arc(cx,cy,rx,ry,a0,a1) local(i,a,x,y) (
   i=0; loop(25,
@@ -1632,14 +1667,14 @@ water_arc(178,46.5,38,2.4,.04*$pi,.46*$pi);
 water_arc(178,46.5,38,2.4,.65*$pi,.98*$pi);
 water_arc(179,50.5,29,2.1,.15*$pi,.88*$pi);
 col_line(); gline(20,64,800+g_dx,64);
-gline(392,80,392,580);
+gline(392,80,392,600);
 gfont(1,13);
 // Takes: a new recorded take becomes an undo step; the snapshot keeps the previous take.
 g_init!=1 ? (g_new_seen=take_new; g_take=take_active; g_init=1;);
 take_new!=g_new_seen ? (push_undo(); g_take=take_active; g_new_seen=take_new;) :
   take_req==0 && take_active!=g_take ? g_take=take_active;
-arrowbutton(718+g_dx,20,24,26,1,undo_n>0) || ((key==26 || ((key==122 || key==90) && (mouse_cap&36))) && !(mouse_cap&8)) ? do_undo();
-arrowbutton(744+g_dx,20,24,26,-1,redo_n>0) || key==25 || ((key==26 || key==122 || key==90) && (mouse_cap&36) && (mouse_cap&8)) ? do_redo();
+arrowbutton(g_undo_c-13.75,19.25,27.5,27.5,1,undo_n>0) || ((key==26 || ((key==122 || key==90) && (mouse_cap&36))) && !(mouse_cap&8)) ? do_undo();
+arrowbutton(g_redo_c-13.75,19.25,27.5,27.5,-1,redo_n>0) || key==25 || ((key==26 || key==122 || key==90) && (mouse_cap&36) && (mouse_cap&8)) ? do_redo();
 // Transport above the pad: Play (loop the last gesture), Pause (hold the sound where it
 // is: the loop point, or the pad point), Stop; then the loop's speed and wait.
 g_pl=loop_on && loop_play && rec_n>=2;
@@ -1658,37 +1693,15 @@ fader(73,134,85,60,0,"speed","%.2f×",.25,4,1);
 fader(50,268,85,60,0,"wait","%.0f ms",0,3000,0);
 g_inline=0; gfont(1,13);
 // Theme, last at the top right: moon by day (switch to dark), sun at night (switch to light).
-g_th_hit=hit(770+g_dx,20,30,26);
-g_th_hit && down ? col_warm() : g_th_hit ? col_text() : col_dim();
-g_dark ? (
-  gcircle(785+g_dx,33,3.6,1);
-  gi=0; loop(8, gline(785+g_dx+5.8*cos(gi*$pi/4),33+5.8*sin(gi*$pi/4),785+g_dx+7.8*cos(gi*$pi/4),33+7.8*sin(gi*$pi/4)); gi+=1;);
-) : (
-  gcircle(785+g_dx,33,5.8,1); gfx_set(.92,.88,.84,1); gcircle(788.3+g_dx,30.5,5,1);
-);
+g_th_hit=hit(g_theme_c-13.75,19.25,27.5,27.5);
+gicon(g_dark?4:3,g_th_hit && down?2:g_th_hit?1:0,g_theme_c-g_tool_size/2,33-g_tool_size/2,g_tool_size);
 press && g_th_hit ? setparam(72,g_dark?0:1);
 g_dice_hover=0; g_lock_hover=0;
-// Right-align to the column edge using the actual font width on this host.
-gfx_measurestr("Parameters Preview",g_ppw,g_pph);
-g_ppw=g_ppw/g_s+14; g_ppx=800+g_dx-g_ppw;
-tbutton(g_ppx,45,g_ppw,18,"Parameters Preview",0,slider64>=.5,1) ? (preview_end(); setparam(64,slider64>=.5?0:1););
 // Pen button: request the pen through the MTT Input Bridge extension. Live connection state:
 // not automation, not an undo step; the extension clears it when capture fails.
-penbutton(685+g_dx,23,slider89>=.5) ? (
+penbutton(g_pen_c-g_tool_size/2,33-g_tool_size/2,slider89>=.5) ? (
   slider89>=.5 ? slider89=0 : (slider89=1; slider1!=0 ? setparam(1,0););
   sliderchange(slider89);
-);
-// What the extension reported. Off: only a failure worth knowing (it cleared the box).
-g_tbs=slider89>=.5 ? (
-  !tb_fresh ? "waiting for the bridge" : tb_st==1 ? "acquiring" :
-  tb_st==2 ? (slider247>=.5 ? (tb_gate ? "trackpad playing" : "trackpad: press to play") : (tb_gate ? "pen down" : tb_c ? "lift the pen first" : tb_r ? "pen near" : "ready")) : -1
-) : -1;
-g_tbs<0 && tb_st>=3 ? g_tbs=tb_st==3 ? "no tablet found" : tb_st==4 ? "several tablets: keep one" :
-  tb_st==5 ? "access denied or in use" : tb_st==6 ? "tablet disconnected" : tb_st==7 ? "capture error" :
-  tb_st==8 ? "busy: another Loon has the pen" : tb_st==9 ? "unsupported system" : tb_st==10 ? "timeout: track not processing" : -1;
-g_tbs>=0 ? (
-  slider89>=.5 && tb_owned ? col_warm() : col_dim();
-  gfont(3,11); rlabel(640+g_dx,49,g_tbs); gfont(1,13);
 );
 // Linkable parameters: names, tabs, and a menu grouped like the tabs.
 function tgt_name(id) (
@@ -1930,49 +1943,32 @@ function dice_roll(pg) (
   // values, so a Random voice with AIR locked skips it.
   g_dk_t=pg<0 && locked(1) ? 0 : time_precise()+.6; g_dk_n=0;
 );
-// Dice button (14x14 points at x, y); true on a click.
+// Header die in an 18-point square; true on a click.
 function dice(x,y) local(over) (
-  over=hit(x-3,y-3,20,20);
-  over && down ? col_warm() : over ? col_text() : col_dim();
-  grectf(x,y,14,14,0); gcircle(x+4,y+4,1.3,1); gcircle(x+7,y+7,1.3,1); gcircle(x+10,y+10,1.3,1);
+  over=hit(x-3,y-3,24,24);
+  gicon(7,over && down?2:over?1:0,x,y,18);
   over ? g_dice_hover=1;
   press && over;
 );
-// Tab icons, 8 points tall with their bottom at by (under the tab name), drawn with
-// one-pixel lines (like the dice's outline) and edges on whole points, so they stay light
-// and crisp at 1x and 2x. Grey at rest, ink on hover; a locked padlock is red.
-// Padlock: body 6 x 4 (filled when locked, outlined when not) and a shackle 4 wide. Locked:
-// the shackle down in the body. Unlocked: the shackle swung round its left leg to the right
-// of the body, its free leg in the air (the open padlock). 9 points wide either way. A
-// click toggles the page's bit in slider 245 (a host undo point, like the theme).
-function shackle(cx,top) local(hw) (
-  // A half ring of outer radius 2 around the point (cx, top+2) and two legs down to the
-  // body (top+4), all one pixel wide. gfx_arc centres on a pixel, the edges here sit
-  // between pixels: hence the half-pixel shift, which keeps the ring on the legs.
-  hw=1/g_s;
-  gfx_arc(cx*g_s-.5,(top+2)*g_s-.5,2*g_s-.5,-$pi/2,$pi/2,1);
-  grect(cx-2,top+2,hw,2); grect(cx+2-hw,top+2,hw,2);
-);
+// Tab glyphs share Breeze's hinged outline lock, keyhole and three-pip die.
+// Both occupy a 14-point square with a separate 16-point hit area; red means locked.
+// Locks protect Random voice only: a section's own die remains available.
 function lock_btn(pg,x,by) local(over,on,y) (
-  y=by-8; over=hit(x-2,y-3,12,14); on=locked(pg);
-  over && down ? col_warm() : on ? col_red(.7) : over ? col_text() : col_mark();
-  on ? grect(x,y+4,6,4) : grectf(x,y+4,6,4,0);
-  shackle(on ? x+3 : x+6,y);
+  y=by-14; over=hit(x-1,y-2,16,18); on=locked(pg);
+  gicon(on?6:5,over && down?2:on?2:over?1:0,x,y,14);
   over ? g_lock_hover=pg+1;
   press && over ? setparam(245,on ? slider245-2^pg : slider245+2^pg);
 );
-// Small dice for a tab (8 x 8, bottom on by); true on a click.
 function dice_s(x,by) local(over,y) (
-  y=by-8; over=hit(x-2,y-3,12,14);
-  over && down ? col_warm() : over ? col_text() : col_mark();
-  grectf(x,y,8,8,0); gcircle(x+2.2,y+2.2,.65,1); gcircle(x+4,y+4,.65,1); gcircle(x+5.8,y+5.8,.65,1);
+  y=by-14; over=hit(x-1,y-2,16,18);
+  gicon(7,over && down?2:over?1:0,x,y,14);
   over ? g_dice_hover=1;
   press && over;
 );
 // Random voice (header): a whole creature at once (one undo step).
-g_rv=hit(509,22,135,22);
-dice(512,26) || (press && g_rv && !hit(509,23,20,20)) ? dice_roll(-1);
-g_rv && down ? col_warm() : g_rv ? col_text() : col_dim(); label(532,25,"Random voice");
+g_rv=hit(509+g_dx,22,139,24);
+dice(512+g_dx,24) || (press && g_rv && !hit(509+g_dx,21,24,24)) ? dice_roll(-1);
+g_rv && down ? col_warm() : g_rv ? col_text() : col_dim(); gfx_measurestr("Random voice",g_rtw,g_rth);gfx_x=(536+g_dx)*g_s;gfx_y=33*g_s-g_rth/2;gtext("Random voice");
 // ---------- XY pad (wheel = zoom at the pointer, right-drag = pan) ----------
 // Working area: transport and tabs share the first row below the header rule.
 // Pad, meters and scope use the same left/right column edges.
@@ -2141,189 +2137,134 @@ g_dk_t>0 && time_precise()>g_dk_t ? (
     g_dk_n+=1; g_dk_t=time_precise()+.5;
   ) : g_dk_t=0;
 );
-// ---------- status under the pad ----------
-meter(20,482,110,"Pressure",pressure/4,0);
-meter(145,482,110,"Glottal area",glottal_area/.25,0);
-meter(270,482,110,"Level",(20*log10(max(.000001,peak))+48)/48,peak>.89);
-panel(20,516,360,38);
-scope_n=floor(min(2000,max(srate*.006,srate*6/max(30,sfreq))));
-col_warm();trace(scope_a,20,518,360,34,scope_n,0,max(.05,slider7+.25),1);
-at(20,562);col_dim();
-gfx_printf("Fold %.0f Hz   Length %.1f cm   Asym %.2f",sfreq,plen,asym);
-rec_n>=2 ? (at(280,562);loop_on?col_warm():col_dim();gfx_printf("Gesture %.2f s",rec_len););
-// Hint when the gate is open but the folds do not vibrate.
-// Shown after 0.25 s, so a normal onset does not flash it.
-g_still=osc_still>.25;
-g_still ? (
-  col_warm(); at(20,580);
-  // The mean area tells why: shut, pushed open well past the rest opening, or resting open.
-  osc_mean<.005 ? gtext("Folds still: pressed shut. Raise Pressure or Rest opening") :
-  osc_mean-slider7>.08 ? gtext("Folds still: blown open. Lower Pressure or Coupling") :
-  slider7>.26 ? gtext("Folds still: too open. Lower Rest opening") :
-  gtext("Folds still: below threshold. Raise Pressure");
-) : faults>0 ? (col_warm();at(20,580);gfx_printf("Numerical resets: %d",faults););
-gfont(3,11);col_mark();rlabel(800+g_dx,603,"v0.34");gfont(1,13);
-// ---------- tabs ----------
+// ---------- pressure response below the performance pad ----------
+// These are the original controls and slider contracts, now always available.
+col_text();gfont(1,13);label(20,488,"Pressure");gfont(3,11);
+gi=0;loop(3,
+  g_on=abs(slider242-gi)<.5;g_ov=hit(116+gi*28,485,26,21);
+  g_on?col_warm():col_dim();label(125+gi*28,488,gi==0?"Z":gi==1?"Y":"X");
+  g_on || g_ov?(g_on?col_warm():col_line();grect(120+gi*28,504,18,1););
+  press && g_ov?(push_undo();setparam(242,gi););g_ov?hover_id=-95;gi+=1;
+);
 gfont(3,10);
+knob(100,50,538,12,"Z → air","%.2f",0,1,0);
+knob(101,110,538,12,"Z curve",slider101<-.005?"soft":slider101>.005?"firm":"linear",-1,1,0);
+knob(17,170,538,12,"X/Y depth","%.2f",0,1,0);
+knob(23,230,538,12,"Attack","%.0f ms",1,200,1);
+knob(24,290,538,12,"Release","%.0f ms",5,500,1);
+knob(22,350,538,12,"Smooth","%.0f ms",1,100,1);
+gfont(1,13);
+// Kept for the independent output trace, not a performance-area oscilloscope.
+scope_n=floor(min(2000,max(srate*.006,srate*6/max(30,sfreq))));
+gfont(3,11);col_mark();rlabel(800+g_dx,623,"v0.34");gfont(1,13);
+// ---------- tabs ----------
+gfont(3,11);
 // Tabs in the order a voice is built: air, folds, pulses, tube, side cavities, mouth, throat,
 // FX, playing, mix. Page ids are historical (0 SOURCE, 1 AIR, 2 GESTURE, 3 TRACT, 4 CAVITIES,
 // 5 MIX, 6 MOUTH, 7 PULSE, 8 FX, 9 THROAT).
-function tab_page(slot) (slot==0?1 : slot==1?0 : slot==2?7 : slot==3?3 : slot==4?4 : slot==5?6 : slot==6?9 : slot==7?8 : slot==8?2 : 5;);
-function tab_name(pg) (pg==0?"SOURCE":pg==1?"AIR":pg==2?"GESTURE":pg==3?"TRACT":pg==4?"CAVITIES":pg==6?"MOUTH":pg==7?"PULSE":pg==8?"FX":pg==9?"THROAT":"MIX";);
+// Historical page ids remain stable; the global FX page is no longer navigation.
+function tab_page(slot) (slot==0?1:slot==1?0:slot==2?7:slot==3?3:slot==4?4:slot==5?6:slot==6?9:5;);
+function tab_name(pg) (pg==0?"SOURCE":pg==1?"AIR":pg==3?"TRACT":pg==4?"CAVITIES":pg==6?"MOUTH":pg==7?"PULSE":pg==9?"THROAT":"OUT";);
+// Current chains only: SOURCE owns point 1, TRACT owns 2 and 6 together, OUT owns 13.
+// Other saved points remain editable through OUT's compatibility selector when occupied.
+function fx_page(p) (p==1?0:p==2||p==6?3:5;);
+function fx_first(pg) (pg==0?1:pg==3?2:pg==5?13:-1;);
+function fx_points(pg) (pg==3?2:fx_first(pg)>=0?1:0;);
+function fx_section_point(pg,k) (pg==3 && k==1?6:fx_first(pg););
+function fx_section_has(pg) local(j,n,yes,p) (
+  yes=0;j=0;n=fx_points(pg)*3;
+  loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;fx_cfg[p]>0?yes=1;j+=1;);yes;
+);
+function fx_section_active(pg) local(j,n,yes,p) (
+  yes=0;j=0;n=fx_points(pg)*3;
+  loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;
+    fx_cfg[p]>0 && fx_cfg[p+5]>=.5 && fx_cfg[p+1]>0?yes=1;j+=1;);yes;
+);
+function fx_section_toggle(pg) local(j,n,on,p) (
+  fx_section_has(pg) ? (
+    on=!fx_section_active(pg);push_undo();j=0;n=fx_points(pg)*3;
+    loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;fx_cfg[p]>0?fx_cfg[p+5]=on;j+=1;);fx_touch();
+  );
+);
+function tab_cell(pg,w) (max(w,tab_rnd(pg)?(fx_points(pg)>0?50:30):20););
+g_tab_count=8;
+page==8 || page==2 ? (page=0;g_fx_view=0;);
 g_page_init!=1 ? (page=1; g_page_init=1;);
-// Layout, from the names as the font measures them: each tab is its name and, under it for
-// the tabs with a dice, the padlock and the dice (20 points, centred under the name); the
-// space left over is shared out between the tabs across 394 to g_W-14 (names in 10 points:
-// ten tabs fit the 820-point layout). g_tabs: per slot the
-// name's left edge and width (the tests read it). g_tbase is the names' baseline, the icons'
-// tops 6 points below it (8-point icons). The open tab's name is red, a hovered one ink: no underline.
-g_tabs=462800; gfx_measurestr("A",g_tw,g_th); g_tbase=83-g_th/g_s*.5+g_th/g_s*.78; g_ticon=floor(g_tbase+14.5);
-g_tn=0; gi=0; loop(10, g_pg=tab_page(gi); gfx_measurestr(tab_name(g_pg),g_tw,g_th);
-  g_tabs[gi*2+1]=g_tw/g_s; g_tn+=max(g_tw/g_s,tab_rnd(g_pg) ? 20 : 0); gi+=1;);
-g_tpad=max(1,(g_W-14-394-g_tn)/20);
-g_tx=394; gi=0; loop(10, g_pg=tab_page(gi); g_tw=max(g_tabs[gi*2+1],tab_rnd(g_pg) ? 20 : 0);
+// Distribute measured names across the widened right column. A minimum 30-point cell
+// keeps the lock/die pair inside its own tab; label and icon hit regions never overlap.
+// Names use 11 points (like Breeze at its default scale), with 14-point icons below.
+// g_tabs stores the name's left edge and width for the offline interaction harness.
+g_tabs=462800; gfx_measurestr("A",g_tw,g_th); g_tbase=83-g_th/g_s*.5+g_th/g_s*.78; g_ticon=floor(g_tbase+16.5);
+g_tn=0; gi=0; loop(g_tab_count, g_pg=tab_page(gi); gfx_measurestr(tab_name(g_pg),g_tw,g_th);
+  g_tabs[gi*2+1]=g_tw/g_s; g_tn+=tab_cell(g_pg,g_tw/g_s); gi+=1;);
+g_tpad=max(1,(g_W-14-394-g_tn)/(2*g_tab_count));
+g_tx=394; gi=0; loop(g_tab_count, g_pg=tab_page(gi); g_tw=tab_cell(g_pg,g_tabs[gi*2+1]);
   g_tabs[gi*2]=g_tx+g_tpad+(g_tw-g_tabs[gi*2+1])/2; g_tx+=2*g_tpad+g_tw; gi+=1;);
 // The name's box (the icons below have their own).
-function tab_hit(slot) (hit(g_tabs[slot*2]-g_tpad,76,g_tabs[slot*2+1]+2*g_tpad,g_ticon-76-11););
-gi=0; loop(10,
+function tab_hit(slot) (hit(g_tabs[slot*2]-g_tpad,76,g_tabs[slot*2+1]+2*g_tpad,g_ticon-76-16););
+gi=0; loop(g_tab_count,
   g_pg=tab_page(gi); g_tx=g_tabs[gi*2]; g_tw=g_tabs[gi*2+1];
   g_ov=tab_hit(gi);
-  page==g_pg ? col_warm() : g_ov ? col_text() : col_dim();
+  page==g_pg || g_ov ? col_warm() : col_text();
   gfx_measurestr(tab_name(g_pg),g_tw2,g_th); gfx_x=g_tx*g_s; gfx_y=83*g_s-g_th/2; gtext(tab_name(g_pg));
-  press && g_ov ? page=g_pg;
+  press && g_ov ? (page=g_pg;g_fx_view=0;g_cv_s=0;g_fx_drag=0;g_link_edit=0;);
   tab_rnd(g_pg) ? (
-    g_tc=floor(g_tx+g_tw/2-10+.5);
+    g_tc=floor(g_tx+g_tw/2-(fx_points(g_pg)>0?25:15)+.5);
     lock_btn(g_pg,g_tc,g_ticon);
-    dice_s(g_tc+12,g_ticon) ? dice_roll(g_pg);
+    dice_s(g_tc+16,g_ticon) ? (dice_roll(g_pg);page=g_pg;g_fx_view=0;g_cv_s=0;);
+  );
+  fx_points(g_pg)>0 ? (
+    g_fx_x=g_tx+g_tw/2+(tab_rnd(g_pg)?17:0);
+    g_ov=hit(g_fx_x-10,g_ticon-16,20,18);
+    fx_section_active(g_pg)?col_warm():col_mark();
+    gfx_measurestr("FX",g_tw2,g_th);gfx_x=g_fx_x*g_s-g_tw2/2;gfx_y=(g_ticon-13)*g_s;gtext("FX");
+    g_ov?hover_id=-3000-g_pg;
+    press && g_ov?fx_section_toggle(g_pg);
   );
   gi+=1;
 );
 gfont(1,13);
-page==0 ? (
-  heading(c1x,106,"Vocal folds");
-  control(6,c1x,130,"Fold Hz","%.0f Hz",10,8000,1);   control(8,c2x,130,"Asymmetry","%.2f",.25,1,0);
-  control(14,c1x,170,"Fold length","%.2f cm",.3,3,0);
-  heading(c1x,210,"Tissue");
-  control(11,c1x,234,"Damping","%.3f",.01,.5,0);      control(12,c2x,234,"Hardening","%.2f",0,1,0);
-  control(13,c1x,274,"Contact damping","%.2f",0,2,0);
-  heading(c1x,314,"Voice 2  ·  second fold pair");
-  control(54,c1x,338,"Voice 2 level","%.2f",0,1,0);    control(55,c2x,338,"Voice 2 interval","%.2f st",-24,24,0);
-  control(60,c1x,378,"Voice interaction","%.2f",0,1,0);
+// Internal FX button changes view; tab FX indicators only bypass the section's chain.
+// Stop the first heading rule eight units before the FX border.
+g_fx_heading_gap=fx_points(page)>0?48:0;
+fx_points(page)>0 ? (
+  g_ov=hit(c1x+g_cw-40,125,40,21);
+  g_fx_view?col_warm():g_ov?col_text():col_dim();grectf(c1x+g_cw-40,125,40,21,0);
+  gfx_measurestr("FX",g_tw,g_th);gfx_x=(c1x+g_cw-20)*g_s-g_tw/2;gfx_y=128*g_s;gtext("FX");
+  g_ov?hover_id=-3100;
+  press && g_ov?(g_fx_view=!g_fx_view;g_fx_point=fx_first(page);g_fx_slot=0;g_cv_s=0;g_fx_drag=0;g_link_edit=0;);
 );
-page==1 ? (
-  heading(c1x,108,"Airflow  ·  pressure, closure, coupling");
-  control(5,c1x,134,"Pressure","%.2f",0,4,0);          control(7,c2x,134,"Rest opening","%.3f cm²",-.3,.3,0);
-  control(9,c1x,176,"Coupling","%.2f",0,1,0);          control(10,c2x,176,"Breath","%.2f",0,1,0);
-  heading(c1x,220,"Air sacs  ·  supply");
-  control(51,c1x,246,"Air sac Hz","%.1f Hz",4,80,1);   control(52,c2x,246,"Air sac load","%.2f",0,3,0);
-  control(53,c1x,288,"Air sac damping","%.2f",.02,1,0);
-  meter(c2x,288,g_fw,"Supply / target",lung/max(.001,2*pressure),lung<pressure*.7);
-  heading(c1x,332,"Noise  ·  whistle");
-  control(15,c1x,358,"Pressure noise","%.3f",0,.3,0); control(16,c2x,358,"Noise cutoff","%.0f Hz",20,8000,1);
-  control(70,c1x,400,"Whistle","%.2f",0,1,0);         control(71,c2x,400,"Whistle pitch",slider71<5?"tube":"%.0f Hz",10,4000,4);
+!g_fx_view && page==0 ? (
+  heading(c1x,126,"Vocal folds");
+  control(6,c1x,150,"Fold Hz","%.0f Hz",10,8000,1);   control(8,c2x,150,"Asymmetry","%.2f",.25,1,0);
+  control(14,c1x,190,"Fold length","%.2f cm",.3,3,0);
+  heading(c1x,230,"Tissue");
+  control(11,c1x,254,"Damping","%.3f",.01,.5,0);      control(12,c2x,254,"Hardening","%.2f",0,1,0);
+  control(13,c1x,294,"Contact damping","%.2f",0,2,0);
+  heading(c1x,334,"Voice 2  ·  second fold pair");
+  control(54,c1x,358,"Voice 2 level","%.2f",0,1,0);    control(55,c2x,358,"Voice 2 interval","%.2f st",-24,24,0);
+  control(60,c1x,398,"Voice interaction","%.2f",0,1,0);
 );
-page==2 ? (
-  heading(c1x,106,"Pressure  ·  response");
-  // Pressure axis: Z (pen pressure; the mouse falls back to Y), Y or X.
-  gfont(3,10); col_mark(); label(c1x,127,"pressure axis");
-  gfont(3,11);
-  gi=0; loop(3,
-    g_ax=gi==0 ? 0 : gi==1 ? 1 : 2; g_on=abs(slider242-g_ax)<.5; g_ov=hit(c1x+gi*28,141,26,20);
-    g_on ? col_warm() : col_text();
-    gfx_measurestr(gi==0?"Z":gi==1?"Y":"X",g_tw,g_th); gfx_x=(c1x+gi*28+13)*g_s-g_tw/2; gfx_y=(144)*g_s; gtext(gi==0?"Z":gi==1?"Y":"X");
-    (g_on || g_ov) ? (g_on ? col_warm() : col_line(); grect(c1x+gi*28+4,160,18,1););
-    press && g_ov ? (push_undo(); setparam(242,g_ax););
-    g_ov ? hover_id=-95;
-    gi+=1;
-  );
-  gfont(3,10); slider242<.5 && pen_on && p_z ? col_warm() : col_mark();
-  label(c1x,166,slider242<.5 ? (p_z ? "pen pressure" : "no pen: Y") : slider242<1.5 ? "pad / pen Y" : "pad / pen X");
-  knob(100,c1x+128*g_cw/395,148,13,"Z → air","%.2f",0,1,0);
-  knob(101,c1x+175*g_cw/395,148,13,"Z curve",slider101<-.005?"soft":slider101>.005?"firm":"linear",-1,1,0);
-  knob(17,c1x+222*g_cw/395,148,13,"X/Y depth","%.2f",0,1,0);
-  knob(23,c1x+280*g_cw/395,148,13,"Attack","%.0f ms",1,200,1);
-  knob(24,c1x+326*g_cw/395,148,13,"Release","%.0f ms",5,500,1);
-  knob(22,c1x+372*g_cw/395,148,13,"Smooth","%.0f ms",1,100,1);
-  gfont(1,13);
-  heading(c1x,196,"Links  ·  right-click any fader to link it");
-  gfont(3,10); col_mark();
-  label(c1x,217,"parameter"); label(c1x+124,217,"axis"); label(c1x+156,217,"range on its fader: from, to"); label(c1x+g_cw-61,217,"curve");
-  gfont(3,11);
-  // Linked parameters in id order; the list scrolls with the wheel past nine rows.
-  g_lst=462600; g_ln=0; gi=5; loop(157, lk_a[gi]>0 && linkable(gi) ? (g_lst[g_ln]=gi; g_ln+=1;); gi+=1;);
-  hit(c1x,226,g_cw,230) && g_wheel!=0 ? g_lscroll-=g_wheel>0 ? 1 : -1;
-  g_lscroll=max(0,min(g_lscroll,g_ln+1-9));
-  !down ? (g_pdrag=0; g_cdrag=0;);
-  g_r=0; loop(min(9,g_ln+1-g_lscroll),
-    g_li=g_r+g_lscroll; g_py=234+g_r*22;
-    g_li<g_ln ? (
-      gi=g_lst[g_li]; g_pt=gi; g_pa=lk_a[gi]-1;
-      // Name: click to open its tab.
-      g_ov=hit(c1x,g_py-3,118,18); g_ov ? (hover_id=-200-gi*4;);
-      g_ov ? col_warm() : col_text(); label(c1x,g_py,tgt_name(g_pt));
-      press && g_ov && param_page(g_pt)>=0 ? (page=param_page(g_pt); g_gtarget=g_pt; g_gt_t=time_precise(););
-      // Axis: click cycles X, Y, Z.
-      tbutton(c1x+124,g_py-2,24,18,axis_name(g_pa),1,-1,1) ? (preview_end(); push_undo(); lk_axis(gi,g_pa>=1.5?0:g_pa+1););
-      hit(c1x+124,g_py-2,24,18) ? hover_id=-201-gi*4;
-      // Range on the target's fader travel: the fader's position (grey mark), the band from
-      // the "from" tick to the "to" tick; drag the nearer end, double-click: full range.
-      g_rx=c1x+156; g_rw=g_cw-225; g_u=f_v2u(slider(g_pt),tlo[g_pt],thi[g_pt],tlg[g_pt]);
-      g_f=min(1,max(0,g_u+lk_lo[gi])); g_t=min(1,max(0,g_u+lk_hi[gi]));
-      g_ov=hit(g_rx-4,g_py-3,g_rw+8,19); g_ov ? hover_id=-202-gi*4;
-      col_line(); grect(g_rx,g_py+5,g_rw,2);
-      col_mark(); grect(g_rx+g_rw*g_u,g_py+1,1,10);
-      col_acc(); grect(g_rx+g_rw*min(g_f,g_t),g_py+4,max(1,g_rw*abs(g_t-g_f)),4);
-      grect(g_rx+g_rw*g_f-1,g_py,2,12);
-      // The "to" end as an arrow pointing where the parameter goes as the axis rises.
-      g_t>=g_f ? gfx_triangle((g_rx+g_rw*g_t+3.4)*g_s,(g_py+6)*g_s,(g_rx+g_rw*g_t-.5)*g_s,(g_py+9)*g_s,(g_rx+g_rw*g_t-.5)*g_s,(g_py+3)*g_s) :
-                 gfx_triangle((g_rx+g_rw*g_t-3.4)*g_s,(g_py+6)*g_s,(g_rx+g_rw*g_t+.5)*g_s,(g_py+9)*g_s,(g_rx+g_rw*g_t+.5)*g_s,(g_py+3)*g_s);
-      press && g_ov ? (
-        push_undo();
-        time_precise()-g_plast_t<.3 && g_plast_id==gi ? (lk_val(gi,2,-g_u); lk_val(gi,3,1-g_u); g_plast_id=-1;) : (
-          g_lmx=-1; g_pdrag=gi+1; g_pwhich=abs(g_mx-(g_rx+g_rw*g_f))<=abs(g_mx-(g_rx+g_rw*g_t)) ? 2 : 3;
-          g_plast_t=time_precise(); g_plast_id=gi;
-        );
-      );
-      g_pdrag==gi+1 && down && g_mx!=g_lmx ? (g_lmx=g_mx; lk_val(gi,g_pwhich,(g_mx-g_rx)/g_rw-g_u););
-      // Curve: drag up or down; double-click: straight. The dot is the axis now.
-      g_cx=c1x+g_cw-61; g_c=lk_c[gi];
-      g_ov=hit(g_cx,g_py-3,30,19);
-      g_ov ? (hover_id=-203-gi*4; g_dark ? (col_hover(); grect(g_cx,g_py-3,30,19);););
-      col_line(); grectf(g_cx,g_py-3,30,19,0);
-      col_acc();
-      g_k=0; loop(13, g_u=g_k/12; g_v=pen_shape(g_u,g_c);
-        g_k ? glineto(g_cx+2+26*g_u,g_py+14-15*g_v) : (gfx_x=(g_cx+2)*g_s; gfx_y=(g_py+14)*g_s;); g_k+=1;);
-      g_u=g_pa<.5 ? sx : g_pa<1.5 ? sy : pn_z; (g_pa<1.5 || pen_on) ? (col_warm(); gcircle(g_cx+2+26*g_u,g_py+14-15*pen_shape(g_u,g_c),2,1););
-      press && g_ov ? (
-        push_undo();
-        time_precise()-g_clast_t<.3 && g_clast_id==gi ? (lk_val(gi,4,0); g_clast_id=-1;) : (
-          g_cdrag=gi+1; g_cmy=g_my; g_c0=g_c; g_clast_t=time_precise(); g_clast_id=gi;);
-      );
-      g_cdrag==gi+1 && down && g_my!=g_lmy ? (g_lmy=g_my; lk_val(gi,4,g_c0+(g_cmy-g_my)/60););
-      // Remove.
-      g_ov=hit(c1x+g_cw-25,g_py-3,20,19);
-      g_ov && down ? col_warm() : g_ov ? col_text() : col_mark();
-      gline(c1x+g_cw-19,g_py+2,c1x+g_cw-11,g_py+10); gline(c1x+g_cw-11,g_py+2,c1x+g_cw-19,g_py+10);
-      g_ov ? hover_id=-89;
-      press && g_ov ? (push_undo(); lk_remove(gi););
-    ) : (
-      // Last row: link another parameter on Y, initially over its full range.
-      g_ov=hit(c1x,g_py-3,200,18); g_ov ? hover_id=-88;
-      g_ov && down ? col_warm() : g_ov ? col_text() : col_dim(); label(c1x,g_py,"+ link a parameter…");
-      press && g_ov ? (g_sel=route_menu(c1x,g_py+16,0); g_sel>0 && linkable(g_sel) && !lk_a[g_sel] ? (preview_end(); push_undo(); lk_axis(g_sel,1);););
-    );
-    g_r+=1;
-  );
-  gfont(1,13);
+!g_fx_view && page==1 ? (
+  heading(c1x,128,"Airflow  ·  pressure, closure, coupling");
+  control(5,c1x,154,"Pressure","%.2f",0,4,0);          control(7,c2x,154,"Rest opening","%.3f cm²",-.3,.3,0);
+  control(9,c1x,196,"Coupling","%.2f",0,1,0);          control(10,c2x,196,"Breath","%.2f",0,1,0);
+  heading(c1x,240,"Air sacs  ·  supply");
+  control(51,c1x,266,"Air sac Hz","%.1f Hz",4,80,1);   control(52,c2x,266,"Air sac load","%.2f",0,3,0);
+  control(53,c1x,308,"Air sac damping","%.2f",.02,1,0);
+  meter(c2x,308,g_fw,"Supply / target",lung/max(.001,2*pressure),lung<pressure*.7);
+  heading(c1x,352,"Noise  ·  whistle");
+  control(15,c1x,378,"Pressure noise","%.3f",0,.3,0); control(16,c2x,378,"Noise cutoff","%.0f Hz",20,8000,1);
+  control(70,c1x,420,"Whistle","%.2f",0,1,0);         control(71,c2x,420,"Whistle pitch",slider71<5?"tube":"%.0f Hz",10,4000,4);
 );
-page==7 ? (
-  heading(c1x,108,"Muscle tremor  ·  pulses");
-  control(56,c1x,134,"Tremor rate","%.1f Hz",1,80,1); control(58,c2x,134,"Irregularity","%.2f",0,1,0);
-  control(57,c1x,176,"Pitch depth","%.2f st",0,6,0);  control(59,c2x,176,"Pressure depth","%.2f",0,1,0);
-  control(69,c1x,218,"Pulse width",slider69<1?"%.2f":"smooth",.05,1,0);
+!g_fx_view && page==7 ? (
+  heading(c1x,128,"Muscle tremor  ·  pulses");
+  control(56,c1x,154,"Tremor rate","%.1f Hz",1,80,1); control(58,c2x,154,"Irregularity","%.2f",0,1,0);
+  control(57,c1x,196,"Pitch depth","%.2f st",0,6,0);  control(59,c2x,196,"Pressure depth","%.2f",0,1,0);
+  control(69,c1x,238,"Pulse width",slider69<1?"%.2f":"smooth",.05,1,0);
   // Three cycles of the tremor shape: pressure (ink) and pitch (red), as set.
-  panel(c1x,260,g_cw,196);
-  col_grid(); gline(c1x+10,410,c1x+g_cw-10,410); gline(c1x+10,350,c1x+g_cw-10,350);
+  panel(c1x,280,g_cw,196);
+  col_grid(); gline(c1x+10,430,c1x+g_cw-10,430); gline(c1x+10,370,c1x+g_cw-10,370);
   g_k=0; loop(2,
     gi=0; loop(300,
       g_ph=(gi/100-floor(gi/100))*2*$pi; g_sn=sin(g_ph);
@@ -2333,24 +2274,24 @@ page==7 ? (
       ) : (
         g_v=g_k ? (pv[57]/6)*g_sn : 1-min(1,pv[59])*(1-sqr((1+g_sn)*.5));
       );
-      g_px=c1x+10+(g_cw-20)*gi/299; g_py=g_k ? 410-36*min(1,max(-1,g_v)) : 350-68*g_v;
+      g_px=c1x+10+(g_cw-20)*gi/299; g_py=g_k ? 430-36*min(1,max(-1,g_v)) : 370-68*g_v;
       g_k ? col_warm() : col_acc();
       gi ? glineto(g_px,g_py) : (gfx_x=g_px*g_s; gfx_y=g_py*g_s;);
       gi+=1;
     );
     g_k+=1;
   );
-  col_dim(); at(c1x+8,264); gtext("pressure"); col_warm(); at(c1x+8,356); gtext("pitch");
+  col_dim(); at(c1x+8,284); gtext("pressure"); col_warm(); at(c1x+8,376); gtext("pitch");
 );
-page==3 ? (
-  heading(c1x,106,"Tube  ·  glottis to lips");
-  control(25,c1x,130,"Length","%.1f cm",3,1000,1);  control(36,c2x,130,"Tract loss","%.3f",0,.3,0);
-  control(37,c1x,168,"Wall lowpass","%.0f Hz",200,18000,1);
+!g_fx_view && page==3 ? (
+  heading(c1x,126,"Tube  ·  glottis to lips");
+  control(25,c1x,150,"Length","%.1f cm",3,1000,1);  control(36,c2x,150,"Tract loss","%.3f",0,.3,0);
+  control(37,c1x,188,"Wall lowpass","%.0f Hz",200,18000,1);
   // The tube runs top to bottom (glottis at the top, lips at the bottom): each section's height
   // is its share of the length, its width ~ sqrt(area). Beside it, one row per section in
   // fixed slots, joined to its section by a thin line: area and length share (the areas
   // follow X through their default links: the old X morph).
-  g_ty0=214; g_th=230; g_tcx=c1x+28; g_tsum=sec_w[0]+sec_w[1]+sec_w[2]+sec_w[3]+sec_w[4];
+  g_ty0=234; g_th=230; g_tcx=c1x+28; g_tsum=sec_w[0]+sec_w[1]+sec_w[2]+sec_w[3]+sec_w[4];
   panel(c1x,g_ty0-4,56,g_th+8);
   gfont(3,10); col_mark();
   gfx_measurestr("glottis",g_tw,g_tt); gfx_x=g_tcx*g_s-g_tw/2; gfx_y=(g_ty0-17)*g_s; gtext("glottis");
@@ -2372,26 +2313,26 @@ page==3 ? (
   );
   gfont(1,13);
 );
-page==6 ? (
-  heading(c1x,108,"Jaw and tongue  ·  the shape of the mouth");
-  control(65,c1x,134,"Jaw depth",slider65>0?"%.2f":"off",0,1,0);  control(86,c2x,134,"Jaw opening","%.2f",0,1,0);
-  control(67,c1x,176,"Jaw time","%.0f ms",5,500,1);
-  control(87,c1x,218,"Tongue",slider87<-.005?"back %.2f":slider87>.005?"front %.2f":"centre",-1,1,0);
-  heading(c1x,260,"Lips  ·  radiation");
-  control(66,c1x,286,"Mouth radius",slider66>0?"%.2f cm":"fixed",0,8,0); control(40,c2x,286,"Radiation","%.2f",0,1,0);
-  control(38,c1x,328,"Mouth reflection","%.3f",.2,.995,0);
-  slider66>0 ? (col_dim();label(c2x,328,"Mouth lowpass");rlabel(c2x+g_fw,328,"set by radius");
-    col_line();grect(c2x,347,g_fw,5);) :
-  control(39,c2x,328,"Mouth lowpass","%.0f Hz",200,18000,1);
+!g_fx_view && page==6 ? (
+  heading(c1x,128,"Jaw and tongue  ·  the shape of the mouth");
+  control(65,c1x,154,"Jaw depth",slider65>0?"%.2f":"off",0,1,0);  control(86,c2x,154,"Jaw opening","%.2f",0,1,0);
+  control(67,c1x,196,"Jaw time","%.0f ms",5,500,1);
+  control(87,c1x,238,"Tongue",slider87<-.005?"back %.2f":slider87>.005?"front %.2f":"centre",-1,1,0);
+  heading(c1x,280,"Lips  ·  radiation");
+  control(66,c1x,306,"Mouth radius",slider66>0?"%.2f cm":"fixed",0,8,0); control(40,c2x,306,"Radiation","%.2f",0,1,0);
+  control(38,c1x,348,"Mouth reflection","%.3f",.2,.995,0);
+  slider66>0 ? (col_dim();label(c2x,348,"Mouth lowpass");rlabel(c2x+g_fw,348,"set by radius");
+    col_line();grect(c2x,367,g_fw,5);) :
+  control(39,c2x,348,"Mouth lowpass","%.0f Hz",200,18000,1);
   // Live mouth: lip gap from the current lip area.
-  panel(c1x,368,g_fw+5,88);
+  panel(c1x,388,g_fw+5,88);
   g_lip=min(30,max(1,10*sqrt(ar[4])));
-  col_line();grect(c1x+30,410-g_lip-10,g_fw-55,10);grect(c1x+30,410+g_lip,g_fw-55,10);
-  col_ink(.15+.5*jaw_o);grect(c1x+30,410-g_lip,g_fw-55,2*g_lip);
-  col_dim();at(c1x+6,372);gfx_printf("jaw %.0f%%",100*jaw_o*(slider65>0));
-  slider66>0 ? (rlabel(c1x+g_fw+1,440,sprintf(#mfc,"> %.0f Hz",mouth_fc)););
+  col_line();grect(c1x+30,430-g_lip-10,g_fw-55,10);grect(c1x+30,430+g_lip,g_fw-55,10);
+  col_ink(.15+.5*jaw_o);grect(c1x+30,430-g_lip,g_fw-55,2*g_lip);
+  col_dim();at(c1x+6,392);gfx_printf("jaw %.0f%%",100*jaw_o*(slider65>0));
+  slider66>0 ? (rlabel(c1x+g_fw+1,460,sprintf(#mfc,"> %.0f Hz",mouth_fc)););
   // Vowel pad: drag for tongue (left back "u", right front "i") and jaw opening (up "a").
-  g_vx=c2x; g_vy=368; g_vw=g_fw+5; g_vh=88;
+  g_vx=c2x; g_vy=388; g_vw=g_fw+5; g_vh=88;
   g_vov=hit(g_vx,g_vy,g_vw,g_vh);
   col_mark(); label(g_vx+6,g_vy+g_vh-18,"u"); rlabel(g_vx+g_vw-6,g_vy+g_vh-18,"i"); label(g_vx+g_vw/2-4,g_vy+4,"a");
   g_vdx=g_vx+8+(g_vw-16)*(slider87+1)/2; g_vdy=g_vy+g_vh-8-(g_vh-16)*slider86;
@@ -2405,15 +2346,15 @@ page==6 ? (
   );
   g_vov ? (hover_id=-2;);
 );
-page==4 ? (
-  heading(c1x,108,"Side cavities  ·  junction between areas 2 and 3");
-  control(41,c1x,134,"Coupling","%.2f",0,2,0);       control(42,c2x,134,"Size","%.1f cm",3,300,1);
-  control(43,c1x,172,"Reflection","%.4f",0,.9995,0); control(44,c2x,172,"Lowpass","%.0f Hz",100,12000,1);
-  control(61,c1x,210,"Branch radiation","%.2f",0,1,0);
+!g_fx_view && page==4 ? (
+  heading(c1x,128,"Side cavities  ·  junction between areas 2 and 3");
+  control(41,c1x,154,"Coupling","%.2f",0,2,0);       control(42,c2x,154,"Size","%.1f cm",3,300,1);
+  control(43,c1x,192,"Reflection","%.4f",0,.9995,0); control(44,c2x,192,"Lowpass","%.0f Hz",100,12000,1);
+  control(61,c1x,230,"Branch radiation","%.2f",0,1,0);
   // One row per branch, like TRACT: on the left the branch leaving the junction (length to
   // scale against the longest, line weight ~ level, red open end when it radiates), then
   // its length and level faders and its pan knob.
-  g_ty0=262; g_bmax=.001;
+  g_ty0=282; g_bmax=.001;
   gi=0; loop(5, g_bmax=max(g_bmax,ratios[gi]*slider(147+gi)); gi+=1;);
   panel(c1x,g_ty0-6,56,5*39+8);
   gfont(3,10); col_mark();
@@ -2436,16 +2377,16 @@ page==4 ? (
   );
   gfont(1,13);
 );
-page==9 ? (
-  heading(c1x,108,"Pickups  ·  sound from inside the body");
-  control(45,c1x,134,"Throat mix","%.2f",0,1,0);      control(48,c2x,134,"Flow pickup","%.3f",0,1,5);
-  control(46,c1x,176,"Throat filter","%.0f Hz",60,8000,1); control(47,c2x,176,"Throat Q","%.2f",.5,3,0);
+!g_fx_view && page==9 ? (
+  heading(c1x,128,"Pickups  ·  sound from inside the body");
+  control(45,c1x,154,"Throat mix","%.2f",0,1,0);      control(48,c2x,154,"Flow pickup","%.3f",0,1,5);
+  control(46,c1x,196,"Throat filter","%.0f Hz",60,8000,1); control(47,c2x,196,"Throat Q","%.2f",.5,3,0);
 );
-page==5 ? (
-  heading(c1x,108,"Stereo  ·  dynamics");
-  control(62,c1x,134,"Stereo width","%.2f",0,1,0);    control(63,c2x,134,"Compression","%.2f",0,1,0);
-  panel(c1x,180,g_cw,276);
-  col_warm();trace(scope_o,c1x,184,g_cw,268,scope_n,-1,1,0);
+!g_fx_view && page==5 ? (
+  heading(c1x,128,"Stereo  ·  dynamics");
+  control(62,c1x,154,"Stereo width","%.2f",0,1,0);    control(63,c2x,154,"Compression","%.2f",0,1,0);
+  panel(c1x,200,g_cw,276);
+  col_warm();trace(scope_o,c1x,204,g_cw,268,scope_n,-1,1,0);
 );
 // Custom rack controls edit saved state, with one local undo step per gesture.
 function fx_name(t) (t==1?"Ring Mod":t==2?"Flanger":t==3?"Chorus":t==4?"Delay":t==5?"Reverb":t==6?"Saturation":t==8?"Group Delay":t==9?"Curve Volume":t==10?"Convolver":t==11?"Resonance Suppressor":"+ Add effect");
@@ -2600,139 +2541,90 @@ function fx_control(idx,x,y,w,str,t,f) local(v,ov,rate,def) (
     fx_cfg[idx]!=v ? fx_touch();
   );
 );
-// Curve editor state: g_cv_s = edited slot + 1 (0 = closed). The "Curve" button in a Curve Volume
-// slot's controls opens it and the same button closes it; only for a Curve Volume slot of the point
-// on screen. There is no confirmation: edits are live.
-g_cv_on=page==8 && g_cv_s>0 && fx_cfg[(g_cv_s-1)*6]==9 && floor((g_cv_s-1)/3)==g_fx_point;
+// Section chains use the original point/slot arrays without migrating any saved data.
+g_cv_on=g_fx_view && g_cv_s>0 && fx_cfg[(g_cv_s-1)*6]==9 && floor((g_cv_s-1)/3)==g_fx_point;
 !g_cv_on ? g_cv_s=0;
-// An audio file dropped on the FX page becomes the impulse response of the Convolver under the
-// pointer (else the first one of the point on screen); @block loads it into that slot's entry.
-page==8 ? (
-  gfx_getdropfile(0,#g_drop) ? (g_drop_pend=1; gfx_getdropfile(-1););
-) : g_drop_pend=0;
-page==8 ? (
-  heading(c1x,108,"Insert effects");
-  // Count main and legacy occupied slots.
-  g_fx_main_n=0; gi=0; loop(4,
-    gj=fx_main_point(gi)*3; gj2=0; loop(3,fx_cfg[(gj+gj2)*6]>0 ? g_fx_main_n+=1; gj2+=1;); gi+=1;
-  );
-  g_fx_leg_n=0; gi=0; loop(14,
-    !fx_is_main(gi) ? (gj=0; loop(3,fx_cfg[(gi*3+gj)*6]>0 ? g_fx_leg_n+=1; gj+=1;)); gi+=1;
-  );
-  col_dim();
-  g_fx_leg_n>0 ? sprintf(#fx_count,"%d / 12 slots   %d legacy",g_fx_main_n,g_fx_leg_n) : sprintf(#fx_count,"%d / 12 slots",g_fx_main_n);
-  rlabel(c1x+g_cw,108,#fx_count);
-  // Main view: four-rack selector.
-  g_fx_legacy==0 ? (
-    !fx_is_main(g_fx_point) ? g_fx_point=1;
-    strcpy(#fx_point_label,fx_rack_name_pt(g_fx_point));
-    menubutton(c1x,129,g_cw,24,#fx_point_label,1) ? (
-      strcpy(#fx_menu,""); gi=0; loop(4,
-        gi>0 ? strcat(#fx_menu,"|"); g_fx_point==fx_main_point(gi) ? strcat(#fx_menu,"!");
-        strcat(#fx_menu,fx_rack_name(gi));
-        g_fx_count=0; gj=0; loop(3,fx_cfg[(fx_main_point(gi)*3+gj)*6]>0 ? g_fx_count+=1; gj+=1;);
-        sprintf(#fx_count,"  (%d/3)",g_fx_count); strcat(#fx_menu,#fx_count); gi+=1;
-      );
-      gfx_x=c1x*g_s; gfx_y=153*g_s; g_fx_choice=gfx_showmenu(#fx_menu);
-      g_fx_choice>0 ? (g_fx_point=fx_main_point(g_fx_choice-1); g_fx_drag=0;);
-    );
-    g_fx_leg_n>0 ? (
-      button(c1x,156,g_cw,20,"Previous routing\u2026",0) ? (g_fx_legacy=1; g_fx_drag=0;);
-    );
-  ) : (
-    // Legacy view: non-main points.
-    fx_is_main(g_fx_point) ? g_fx_point=0;
-    strcpy(#fx_point_label,fx_point_name(g_fx_point));
-    menubutton(c1x,129,g_cw,24,#fx_point_label,1) ? (
-      strcpy(#fx_menu,""); gi=0; loop(14,
-        fx_is_main(gi) ? (gi+=1;) : (
-          gi>0 ? strcat(#fx_menu,"|"); g_fx_point==gi ? strcat(#fx_menu,"!");
-          strcat(#fx_menu,fx_point_name(gi));
-          g_fx_count=0; gj=0; loop(3,fx_cfg[(gi*3+gj)*6]>0 ? g_fx_count+=1; gj+=1;);
-          sprintf(#fx_count,"  (%d/3)",g_fx_count); strcat(#fx_menu,#fx_count); gi+=1;
-        );
-      );
-      gfx_x=c1x*g_s; gfx_y=153*g_s; g_fx_choice=gfx_showmenu(#fx_menu);
-      g_fx_choice>0 ? (g_fx_point=fx_legacy_pt(g_fx_choice-1); g_fx_drag=0;);
-    );
-    button(c1x,156,g_cw,20,"Main racks",0) ? (g_fx_legacy=0; g_fx_drag=0;);
-  );
-  // Three serial slots for the selected point (unchanged rendering).
-  g_fx_jump=0; g_drop_hit=-1; g_drop_first=-1; gi=0; loop(3,
-    g_fx_p=(g_fx_point*3+gi)*6; g_fx_y=164+gi*98; g_fx_t=fx_cfg[g_fx_p];
-    panel(c1x,g_fx_y,g_cw,91); g_fe=g_cw-395;
-    col_dim(); sprintf(#fx_num,"%d",gi+1); label(c1x+8,g_fx_y+8,#fx_num);
-    button(c1x+27,g_fx_y+4,(g_fx_t==9?100:157)+g_fe,23,fx_name(g_fx_t),0) ? (
-      gfx_x=(c1x+27)*g_s; gfx_y=(g_fx_y+27)*g_s;
-      g_fx_choice=gfx_showmenu(fx_conv_fits(g_fx_p/6,g_fx_point) ? "Off|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|Convolver|Resonance Suppressor" : "Off|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|#Convolver|Resonance Suppressor");
-      g_fx_choice>0 && !(g_fx_choice==10 && !fx_conv_fits(g_fx_p/6,g_fx_point)) ? (
-        push_undo(); g_fx_new=g_fx_choice>=8 ? g_fx_choice : g_fx_choice-1; fx_cfg[g_fx_p]=g_fx_new;
-        gj=1; loop(5,fx_cfg[g_fx_p+gj]=fx_default(g_fx_new,gj); gj+=1;);
-        g_fx_new==9 ? fx_curve_preset(g_fx_p/6,0);
-        g_fx_new==10 ? conv_assign(g_fx_p/6);
-        g_fx_new!=9 && g_cv_s==g_fx_p/6+1 ? g_cv_s=0;
-        fx_touch();
-      );
-    );
-    g_fx_t>0 ? (
-
-      button(c1x+188+g_fe,g_fx_y+4,46,23,"Move",0) ? g_fx_jump=fx_move_menu(g_fx_p/6,c1x+188+g_fe,g_fx_y+27);
-      button(c1x+240+g_fe,g_fx_y+4,47,23,fx_cfg[g_fx_p+5]>=.5?"ON":"OFF",fx_cfg[g_fx_p+5]>=.5) ? (
-        push_undo(); fx_cfg[g_fx_p+5]=fx_cfg[g_fx_p+5]>=.5?0:1; fx_touch();
-      );
-      iconbutton(c1x+292+g_fe,g_fx_y+4,29,23,0,gi>0) ? fx_swap(g_fx_p,g_fx_p-6);
-      iconbutton(c1x+325+g_fe,g_fx_y+4,29,23,1,gi<2) ? fx_swap(g_fx_p,g_fx_p+6);
-      iconbutton(c1x+358+g_fe,g_fx_y+4,29,23,2,1) ? (push_undo(); fx_cfg[g_fx_p]=0; fx_touch(););
-      gfont(3,10);
-      // Curve Volume: slightly narrower faders and, at the right of them, the Curve button that
-      // shows / hides the curve editor below (same button).
-      g_fx_t==9 ? (
-        g_fcw=(g_cw-107)/4;
-        fx_control(g_fx_p+1,c1x+8,g_fx_y+35,g_fcw,fx_label(g_fx_t,1),g_fx_t,1);
-        fx_control(g_fx_p+2,c1x+8+(g_fcw+10),g_fx_y+35,g_fcw,fx_label(g_fx_t,2),g_fx_t,2);
-        fx_control(g_fx_p+3,c1x+8+2*(g_fcw+10),g_fx_y+35,g_fcw,fx_label(g_fx_t,3),g_fx_t,3);
-        fx_control(g_fx_p+4,c1x+8+3*(g_fcw+10),g_fx_y+35,g_fcw,fx_label(g_fx_t,4),g_fx_t,4);
-        g_cv_t=g_cv_s==g_fx_p/6+1;
-        button(c1x+g_cw-59,g_fx_y+38,51,22,"Curve",g_cv_t) ? g_cv_s=g_cv_t ? 0 : g_fx_p/6+1;
+g_fx_jump=0;g_drop_hit=-1;g_drop_first=-1;
+g_fx_view && fx_points(page)>0 ? (
+  fx_page(g_fx_point)!=page?g_fx_point=fx_first(page);
+  sprintf(#fx_title,"%s FX",page==5?"Output":page==0?"Source":page==1?"Air":page==3?"Tract":page==4?"Cavities":"Mouth");
+  heading(c1x,128,#fx_title);
+  // TRACT shares one bypass indicator across Tract and Feedback. OUT exposes only
+  // occupied historical routes, preserving access without advertising new insertion points.
+  g_fx_old=0;gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?g_fx_old+=1;gi+=1;);
+  // Return to Output after removing the last insert from a historical route.
+  page==5 && !fx_is_main(g_fx_point) && !fx_pt_occ(g_fx_point)?(g_fx_point=13;g_fx_slot=0;g_cv_s=0;);
+  page==3 || (page==5 && g_fx_old>0) ? (
+    strcpy(#fx_point_label,fx_is_main(g_fx_point)?fx_rack_name_pt(g_fx_point):fx_point_name(g_fx_point));
+    menubutton(c1x,155,g_cw-52,23,#fx_point_label,0) ? (
+      strcpy(#fx_menu,"");
+      page==3 ? (
+        strcat(#fx_menu,g_fx_point==2?"!Tract|Feedback":"Tract|!Feedback");
       ) : (
-        g_fcw=(g_cw-52)/4;
-        fx_control(g_fx_p+1,c1x+8,g_fx_y+35,g_fcw,fx_label(g_fx_t,1),g_fx_t,1);
-        fx_control(g_fx_p+2,c1x+8+(g_fcw+12),g_fx_y+35,g_fcw,fx_label(g_fx_t,2),g_fx_t,2);
-        g_fx_t!=1 ? (
-          fx_control(g_fx_p+3,c1x+8+2*(g_fcw+12),g_fx_y+35,g_fcw,fx_label(g_fx_t,3),g_fx_t,3);
-          fx_control(g_fx_p+4,c1x+8+3*(g_fcw+12),g_fx_y+35,g_fcw,fx_label(g_fx_t,4),g_fx_t,4);
+        strcat(#fx_menu,g_fx_point==13?"!Output":"Output");
+        gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?(
+          strcat(#fx_menu,"|");g_fx_point==gi?strcat(#fx_menu,"!");strcat(#fx_menu,"Previous: ");strcat(#fx_menu,fx_point_name(gi));
+        );gi+=1;);
+      );
+      gfx_x=c1x*g_s;gfx_y=178*g_s;g_fx_choice=gfx_showmenu(#fx_menu);
+      g_fx_choice>0?(
+        page==3?g_fx_point=g_fx_choice==1?2:6:g_fx_choice==1?g_fx_point=13:(
+          gj=2;gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?(gj==g_fx_choice?g_fx_point=gi;gj+=1;);gi+=1;);
+        );
+        g_fx_slot=0;g_cv_s=0;g_fx_drag=0;
+      );
+    );
+  );
+  g_fx_slot=max(0,min(2,g_fx_slot));g_fx_left=205*g_cw/475;
+  gi=0;loop(3,
+    g_fx_p=(g_fx_point*3+gi)*6;g_fx_y=200+gi*36;g_fx_t=fx_cfg[g_fx_p];
+    // Slot bypass is separate from selecting/replacing its type.
+    g_ov=hit(c1x,g_fx_y-3,18,22);
+    g_fx_t>0 && fx_cfg[g_fx_p+5]>=.5?col_warm():col_mark();gcircle(c1x+7,g_fx_y+7,3.5,g_fx_t>0 && fx_cfg[g_fx_p+5]>=.5);
+    press && g_ov && g_fx_t>0?(push_undo();fx_cfg[g_fx_p+5]=fx_cfg[g_fx_p+5]>=.5?0:1;fx_touch(););
+    g_ov=hit(c1x+20,g_fx_y-3,g_fx_left-24,25);
+    gi==g_fx_slot?col_warm():g_ov?col_text():col_dim();
+    gfont(3,11);sprintf(#fx_item,"%d  %s",gi+1,g_fx_t?fx_name(g_fx_t):"Empty");label(c1x+22,g_fx_y,#fx_item);gfont(1,13);
+    col_line();gline(c1x,g_fx_y+25,c1x+g_fx_left,g_fx_y+25);
+    press && g_ov ? (
+      g_fx_menu_open=g_fx_slot==gi || g_fx_t==0;g_fx_slot=gi;g_cv_s=0;g_fx_drag=0;
+      g_fx_menu_open ? (
+        gfx_x=(c1x+20)*g_s;gfx_y=(g_fx_y+24)*g_s;
+        g_fx_choice=gfx_showmenu(fx_conv_fits(g_fx_p/6,g_fx_point)?"Empty|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|Convolver|Resonance Suppressor":"Empty|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|#Convolver|Resonance Suppressor");
+        g_fx_choice>0 && !(g_fx_choice==10 && !fx_conv_fits(g_fx_p/6,g_fx_point)) ? (
+          push_undo();g_fx_new=g_fx_choice>=8?g_fx_choice:g_fx_choice-1;fx_cfg[g_fx_p]=g_fx_new;
+          gj=1;loop(5,fx_cfg[g_fx_p+gj]=fx_default(g_fx_new,gj);gj+=1;);
+          g_fx_new==9?fx_curve_preset(g_fx_p/6,0);g_fx_new==10?conv_assign(g_fx_p/6);fx_touch();
         );
       );
-      // Convolver: which impulse response is loaded (drop a file to replace it).
-      g_fx_t==10 ? (
-        col_dim();
-        // This slot's own impulse response: loading, loaded (name, length), failed (reason) or none
-        // yet (shown in red). Drop an audio file on the slot to load it.
-        g_ce=conv_entry(g_fx_p/6); g_cm=conv_tab+160+max(0,g_ce)*8;
-        g_cn=g_ce>=0 ? g_cm[0] : 0; g_cs=g_ce>=0 ? g_cm[4] : 0;
-        g_drop_first<0 ? g_drop_first=g_fx_p/6;
-        g_drop_pend && hit(c1x,g_fx_y,g_cw,91) ? g_drop_hit=g_fx_p/6;
-        g_cs==1 ? (
-          col_acc(); strcpy(#g_ir,"Loading the impulse response...");
-        ) : g_cs==3 ? (
-          col_warm(); sprintf(#g_ir,g_cn>0 ? "Not loaded: %s (previous IR kept)" : "No IR: %s. Drop another audio file here.",820+g_ce);
-        ) : g_cn>0 ? (
-          strcpy_substr(#g_irn,800+g_ce,0,22);
-          g_cr=g_fx_point==13 ? srate : ir;
-          sprintf(#g_ir,"IR  %s  %.2f s  %s%s",strlen(#g_irn)>0 ? #g_irn : "(from project)",g_cn/g_cm[1],g_cm[2]>1 ? "stereo" : "mono",g_cn*g_cr/g_cm[1]>CONV_MAXT ? "  cut" : "");
-        ) : (
-          col_warm(); strcpy(#g_ir,"No IR loaded: drop an audio file on this slot.");
-        );
-        label(c1x+8,g_fx_y+76,#g_ir);
-        col_dim();
-        g_cn>0 && conv_req==0 && button(c1x+g_cw-50,g_fx_y+75,42,14,"Clear",0) ? (conv_req_e=g_ce; conv_req=2; g_cm[4]=0;);
-      );
-      g_fx_t==11 ? sup_meter(g_fx_p/6,c1x+8,g_fx_y+76,g_cw-16,11);
-      gfont(1,13);
     );
     gi+=1;
   );
-);
+  g_fx_p=(g_fx_point*3+g_fx_slot)*6;g_fx_t=fx_cfg[g_fx_p];
+  g_fx_t>0 ? (
+    gfont(3,11);col_text();label(c1x+g_fx_left+20,200,fx_name(g_fx_t));
+    gj=1;loop(4,
+      (g_fx_t!=1 || gj<=2)?fx_control(g_fx_p+gj,c1x+g_fx_left+20,228+(gj-1)*59,g_cw-g_fx_left-25,fx_label(g_fx_t,gj),g_fx_t,gj);gj+=1;
+    );
+    button(c1x,317,60,23,"Move",0)?g_fx_jump=fx_move_menu(g_fx_p/6,c1x,340);
+    iconbutton(c1x+68,317,28,23,0,g_fx_slot>0)?(fx_swap(g_fx_p,g_fx_p-6);g_fx_slot-=1;);
+    iconbutton(c1x+100,317,28,23,1,g_fx_slot<2)?(fx_swap(g_fx_p,g_fx_p+6);g_fx_slot+=1;);
+    iconbutton(c1x+132,317,28,23,2,1)?(push_undo();fx_cfg[g_fx_p]=0;g_cv_s=0;fx_touch(););
+    g_fx_t==9 ? button(c1x,354,g_fx_left,24,"Edit curve",g_cv_s==g_fx_p/6+1)?g_cv_s=g_cv_s?0:g_fx_p/6+1;
+    g_fx_t==10 ? (
+      g_ce=conv_entry(g_fx_p/6);g_cm=conv_tab+160+max(0,g_ce)*8;g_cn=g_ce>=0?g_cm[0]:0;
+      col_dim();label(c1x,360,"Impulse response");
+      g_cn>0?sprintf(#g_ir,"%.0f frames · %.0f Hz",g_cn,g_cm[1]):strcpy(#g_ir,"No IR: passes dry");label(c1x,381,#g_ir);
+      g_cm[4]==3?(col_warm();label(c1x,402,"Load failed; previous IR kept"));
+      col_dim();label(c1x,425,"Drop audio here");
+      g_cn>0 && conv_req==0 && button(c1x,450,75,20,"Clear IR",0)?(conv_req_e=g_ce;conv_req=2;g_cm[4]=0;);
+      gfx_getdropfile(0,#g_drop)?(g_drop_pend=1;g_drop_hit=g_fx_p/6;g_drop_first=g_fx_p/6;gfx_getdropfile(-1););
+    );
+    g_fx_t==11?sup_meter(g_fx_p/6,c1x,365,g_fx_left,34);
+    gfont(1,13);
+  );
+) : g_drop_pend=0;
+
 g_drop_pend ? (
   g_drop_hit<0 ? g_drop_hit=g_drop_first;
   g_drop_hit<0 ? g_drop_pend=0 : conv_req==0 ? (
@@ -2741,12 +2633,15 @@ g_drop_pend ? (
     g_drop_pend=0;
   );
 );
-g_fx_jump>0 ? (g_fx_point=g_fx_jump-1; g_fx_legacy=fx_is_main(g_fx_point)?0:1; g_fx_jump=0; g_fx_drag=0; g_fx_last_id=-1;);
+g_fx_jump>0 ? (g_fx_point=g_fx_jump-1;page=fx_page(g_fx_point);g_fx_view=1;g_fx_slot=0; g_fx_jump=0; g_fx_drag=0; g_fx_last_id=-1;);
 !down ? g_fx_drag=0;
 
 // Output level: always visible beneath the full-width footer rule.
-col_line(); gline(20,596,800+g_dx,596);
-g_inline=1; fader(49,66,602,610+g_dx,0,"Output",slider49<=-119.9?"-inf dB":"%.1f dB",-120,0,2); g_inline=0;
+col_line(); gline(20,616,800+g_dx,616);
+// Global preferences occupy the footer, like Breeze. Output keeps its own right column.
+gfont(1,13);gfx_measurestr("Parameters Preview",g_ppw,g_pph);g_ppw=g_ppw/g_s+14;g_ppx=20;g_ppy=620;
+tbutton(g_ppx,g_ppy,g_ppw,21,"Parameters Preview",0,slider64>=.5,1)?(preview_end();setparam(64,slider64>=.5?0:1););
+g_inline=1; fader(49,c1x+46,622,g_cw-155,0,"Output",slider49<=-119.9?"-inf dB":"%.1f dB",-120,0,2); g_inline=0;
 preview_end_check=g_prev_id>0 && hover_id!=g_prev_id; preview_end_check ? preview_end();
 // ---------- help panel (bottom right): hovered control, element, or the open tab ----------
 function wraptext(x,y,w,maxy,str) local(n,k,st,lw,lh) (
@@ -2768,7 +2663,7 @@ function wraptext(x,y,w,maxy,str) local(n,k,st,lw,lh) (
   strlen(#hl) && gfx_y<=maxy*g_s ? (gfx_x=x*g_s; gtext(#hl););
 );
 function param_help(id) (
-  id==5 ? "Subglottal pressure (1 = about 800 Pa). More: louder, brighter, closer to breaks. Pressed folds need more to start; open folds can be blown apart by too much and stop. The hint under the pad says which. Y scales it (GESTURE)." :
+  id==5 ? "Subglottal pressure (1 = about 800 Pa). More: louder, brighter, closer to breaks. Pressed folds need more to start; open folds can be blown apart by too much and stop. The pressure axis below the pad scales it." :
   id==6 ? "Mechanical frequency of the folds alone: about the output pitch with Coupling 0 and symmetric folds. Y scales it. From 10 Hz (single pulses, fry, growls) to 8 kHz for birds; lower Output when you go high." :
   id==7 ? "Glottal area at rest. Negative: pressed folds, hard onsets, need more pressure (about 1.5 at -0.1, 3 at -0.2). Positive: breathy, soft onsets; above about 0.25 the folds stop when Pressure or Coupling is high. Pressed folds make Tremor pressure and Air sac load pulse." :
   id==8 ? "Stiffness ratio of the right fold (1 = symmetric). Below about 0.6: period doubling, two pitches, chaos. Y break lowers it further in the upper half of the pad." :
@@ -2852,9 +2747,32 @@ function tab_help(n) (
   n==9 ? "Sound picked up inside the body, mixed into what the mouth radiates. Throat: a resonant lowpass of the pressure at the glottis (mix, cutoff, resonance). Flow pickup: the glottal flow derivative, silent while the folds are closed." :
   "Stereo and dynamics. Stereo width splits the branches left and right; Compression evens out the level. The trace shows the output. Output level is at the bottom of the window. Not drawn by the dice.";
 );
-hx=c1x;hy=468;hw=g_cw;hh2=112;
+hx=c1x;hy=488;hw=g_cw;hh2=112;
 panel(hx,hy,hw,hh2);
-g_cv_on ? (
+// Separate contextual help (or the curve editor) from the controls above.
+col_line(); gline(hx,hy,hx+hw,hy);
+// Right-click owns the full link editor, including ranges on knobs and custom curves.
+g_link_edit>0 && !lk_a[g_link_edit]?g_link_edit=0;
+!down?g_link_drag=0;
+g_link_edit>0 ? (
+  col_text();sprintf(#g_link_title,"%s · %s",tgt_name(g_link_edit),axis_name(lk_a[g_link_edit]-1));label(hx+8,hy+7,#g_link_title);
+  iconbutton(hx+hw-28,hy+3,24,20,2,1)?(g_link_edit=0;g_link_drag=0;);
+  gfont(3,11);gi=0;loop(g_link_edit>0?3:0,
+    g_link_y=hy+35+gi*25;g_link_x=hx+65;g_link_w=hw-150;
+    g_link_v=gi==0?lk_lo[g_link_edit]:gi==1?lk_hi[g_link_edit]:lk_c[g_link_edit];
+    col_dim();label(hx+8,g_link_y-4,gi==0?"From":gi==1?"To":"Curve");
+    col_line();grect(g_link_x,g_link_y+2,g_link_w,2);col_warm();grect(g_link_x+g_link_w*(g_link_v+1)/2-1,g_link_y-2,2,10);
+    gi<2 ? (
+      g_link_u=f_v2u(slider(g_link_edit),tlo[g_link_edit],thi[g_link_edit],tlg[g_link_edit]);
+      sprintf(#g_link_value,"%.4g",f_u2v(min(1,max(0,g_link_u+g_link_v)),tlo[g_link_edit],thi[g_link_edit],tlg[g_link_edit]));
+    ) : sprintf(#g_link_value,"%+.2f",g_link_v);
+    col_text();rlabel(hx+hw-8,g_link_y-4,#g_link_value);
+    g_ov=hit(g_link_x-3,g_link_y-7,g_link_w+6,20);
+    press && g_ov?(push_undo();g_link_drag=gi+1;);
+    down && g_link_drag==gi+1?lk_val(g_link_edit,gi+2,max(-1,min(1,2*(g_mx-g_link_x)/g_link_w-1)));
+    gi+=1;
+  );gfont(1,13);
+) : g_cv_on ? (
   // Curve Volume editor: one cycle of the gain curve, 64 points; drag to draw, new points
   // are filled between pointer samples. Each stroke is one undo step.
   g_cv_c=fx_curve+(g_cv_s-1)*65;
@@ -2894,23 +2812,29 @@ g_cv_on ? (
     g_cv_px=g_cv_x+g_cv_w*fx_st[(g_cv_s-1)*32+5]/(2*$pi);
     col_ink(.5); gline(g_cv_px,g_cv_y,g_cv_px,g_cv_y+g_cv_h);
   );
+) : hover_id<=-3000 && hover_id>=-3009 ? (
+  col_acc();label(hx+8,hy+7,"Section FX bypass");col_dim();
+  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Red: at least one insert is active with nonzero Wet. Click to bypass or enable this section's inserts together. Use the boxed FX button inside the panel to edit its chain.");
+) : hover_id==-3100 || g_fx_view ? (
+  col_acc();label(hx+8,hy+7,"Insert effects");col_dim();
+  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Select a slot on the left; click Empty or the selected name to choose an effect. The dot bypasses that insert. Edit its controls on the right. Select a section tab to return to its controls. Tract and Feedback share a selector and one section bypass. OUT also provides access to occupied previous routing.");
 ) : hover_id>0 ? (
   (hover_id>=26 && hover_id<=35) || (hover_id>=142 && hover_id<=161) ? sprintf(hover_lbl=#hsec,hover_id<=30?"Area %d":hover_id<=35?"X morph %d":hover_id<=146?"Length %d":hover_id<=151?"Branch %d length":hover_id<=156?"Branch %d level":"Branch %d pan",hover_id<=30?hover_id-25:hover_id<=35?hover_id-30:hover_id<=146?hover_id-141:hover_id<=151?hover_id-146:hover_id<=156?hover_id-151:hover_id-156);
   col_acc();label(hx+8,hy+7,hover_id==50?"Loop wait":hover_id==73?"Loop speed":hover_id>=76 && hover_id<=85 && (hover_id-76)%3==0?"Route amount":hover_lbl);
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,param_help(hover_id));
-) : hit(770+g_dx,20,30,26) ? (
+) : hit(g_theme_c-13.75,19.25,27.5,27.5) ? (
   col_acc();label(hx+8,hy+7,g_dark?"Light theme":"Dark theme");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Switches between the day look (ink on paper) and the night look (paper on ink). Saved with the project; not an undo step.");
-) : hit(683+g_dx,21,22,22) ? (
+) : hit(g_pen_c-13.75,19.25,27.5,27.5) ? (
   col_acc();label(hx+8,hy+7,"Pen / trackpad");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"MTT Input Bridge: the pen icon enables USB pen X/Y and pressure. For a Mac Force Touch trackpad, turn USB pen off, focus Loon in this window, point over its pad and hold Option alone. Touch and press with one finger to play; release Option or press Escape to free the pointer. Both sources record X/Y/Z gestures. GESTURE sets their links. Turn live capture off before rendering.");
-) : hit(g_ppx,45,g_ppw,18) ? (
+  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"MTT Input Bridge: the pen icon enables USB pen X/Y and pressure. For a Mac Force Touch trackpad, turn USB pen off, focus Loon in this window, point over its pad and hold Option alone. Touch and press with one finger to play; release Option or press Escape to free the pointer. Both sources record X/Y/Z gestures. Right-click controls to assign gesture links. Turn live capture off before rendering.");
+) : hit(g_ppx,g_ppy,g_ppw,21) ? (
   col_acc();label(hx+8,hy+7,"Parameters Preview");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"On: resting the pointer on a fader's bar plays the value under it, and leaving restores the previous one; click to keep it. Off: faders change only when you click or drag. Saved with the project.");
 ) : hit(px,py,pw,ph) ? (
   col_acc();label(hx+8,hy+7,tb_owned ? (slider247>=.5 ? "XY pad  ·  trackpad" : "XY pad  ·  the pen plays it") : "XY pad");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tb_owned && slider247>=.5 ? "Hold Option to use the full trackpad: one finger sets X/Y, pressing sets Z. Release Option or press Escape to restore the pointer. Each gesture records its pressure. Lift all fingers before starting another gesture." : tb_owned ? "The pen is on: it plays the pad and the mouse cannot. X and Y cover the whole tablet; pen pressure sets the air drive. Each pen gesture is recorded for Play, with its pressure. Turn the pen off (pen icon) to play with the mouse again." : "Hold and move to play. The pad's X and Y (or the pen's) play every linked parameter (GESTURE lists them; by default Y pitch and jaw, X length and tube shape) and, on the pressure axis, the air. The loon is only a landmark. Each gesture is recorded for Play. Wheel zooms at the pointer, right-drag pans, FIT resets the view.");
-) : hit(718+g_dx,20,50,26) ? (
+  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tb_owned && slider247>=.5 ? "Hold Option to use the full trackpad: one finger sets X/Y, pressing sets Z. Release Option or press Escape to restore the pointer. Each gesture records its pressure. Lift all fingers before starting another gesture." : tb_owned ? "The pen is on: it plays the pad and the mouse cannot. X and Y cover the whole tablet; pen pressure sets the air drive. Each pen gesture is recorded for Play, with its pressure. Turn the pen off (pen icon) to play with the mouse again." : "Hold and move to play. The pad's X and Y (or the pen's) play every linked parameter (right-click controls to assign them; by default Y pitch and jaw, X length and tube shape) and, on the pressure axis, the air. The loon is only a landmark. Each gesture is recorded for Play. Wheel zooms at the pointer, right-drag pans, FIT resets the view.");
+) : hit(g_undo_c-13.75,19.25,g_tool_pitch+27.5,27.5) ? (
   col_acc();label(hx+8,hy+7,"UNDO / REDO  (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z)");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Steps back and forth through parameter changes made in this window (clicks, drags, double-click resets) and recorded pad gestures: up to 100 steps. Hover previews are not steps until you click.");
 ) : hit(20,80,20,18) ? (
@@ -2922,34 +2846,9 @@ g_cv_on ? (
 ) : hit(64,80,20,18) ? (
   col_acc();label(hx+8,hy+7,"STOP");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Ends the loop and the pause. The recorded gesture stays: Play starts it again from the beginning.");
-) : hover_id==-89 ? (
-  col_acc();label(hx+8,hy+7,"Remove link");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"The parameter goes back to its fader alone. UNDO brings the link back.");
-) : hover_id==-88 ? (
-  col_acc();label(hx+8,hy+7,"Link a parameter");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Pick any parameter to tie to a performance axis. A new link covers its full range on Y; the fader still moves the range. You can narrow it by dragging an end. The same works with a right-click on any fader or knob.");
 ) : hover_id==-95 ? (
   col_acc();label(hx+8,hy+7,"Pressure axis");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"The axis that carries the air drive, the base of every call. Z: pen pressure (Z to air and Z curve shape it); with the mouse, or a pen held in PAUSE, it falls back to Y. Y or X: the pad (or pen) position raises and lowers it around the middle by X/Y depth, as Y effort always did.");
-) : hover_id<=-200 ? (
-  g_ht=floor((-hover_id-200)/4); g_hp=(-hover_id-200)%4;
-  g_hp==0 ? (
-    sprintf(#pr,"%s  ·  linked to %s",tgt_name(g_ht),axis_name(lk_a[g_ht]-1));
-    col_acc();label(hx+8,hy+7,#pr);
-    col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Click to open its tab: the fader shows the range under its bar, a tick and an arrow you can drag. Right-click the fader to change the axis or the curve, or to remove the link.");
-  ) : g_hp==1 ? (
-    col_acc();label(hx+8,hy+7,"Axis");
-    col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"X and Y: the pad position, or the pen's on the tablet. Z: pen pressure (0 in the air); without a pen a Z link rests at its fader. Click to change.");
-  ) : g_hp==2 ? (
-    g_ht>0 && g_ht<250 ? (g_u=f_v2u(slider(g_ht),tlo[g_ht],thi[g_ht],tlg[g_ht]);
-      sprintf(#pr,"%s: %.4g to %.4g",tgt_name(g_ht),f_u2v(min(1,max(0,g_u+lk_lo[g_ht])),tlo[g_ht],thi[g_ht],tlg[g_ht]),f_u2v(min(1,max(0,g_u+lk_hi[g_ht])),tlo[g_ht],thi[g_ht],tlg[g_ht]));
-    ) : strcpy(#pr,"Range");
-    col_acc();label(hx+8,hy+7,#pr);
-    col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Where the axis takes the parameter, anchored to its fader (grey mark): the tick is \"from\" (axis at 0), the arrow is \"to\" (axis at 1) and points where the parameter goes as the axis rises; \"to\" can sit left of \"from\" to reverse (the arrow then points back). Moving the fader moves the range, clipped at its limits. Drag either end to narrow or reshape it; double-click: full range.");
-  ) : (
-    col_acc();label(hx+8,hy+7,"Curve");
-    col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Drag up for a firm curve (fine control at the start of the axis, the value rises late), down for a soft one (rises early). Double-click: straight. The dot is the axis now.");
-  );
 ) : hover_id==-2 ? (
   col_acc();label(hx+8,hy+7,"Vowel pad");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Drag to shape the mouth: left and right move the tongue (back \"u\", front \"i\"), up opens the jaw (\"a\"). The light dot is the set shape, the small dark one the jaw as it moves now. Turns Jaw depth on if it is off.");
@@ -2967,16 +2866,41 @@ g_cv_on ? (
 ) : g_rv ? (
   col_acc();label(hx+8,hy+7,"Random voice");
   strcpy(#rvh,"A whole creature: a size from a small bird to a large animal sets the tract length, and every unlocked tab is drawn around it (the padlocks under the tab names). ");
-  g_lc=0; gi=0; loop(10, g_pg=tab_page(gi); locked(g_pg) ? (strcat(#rvh,g_lc ? ", " : "Locked: "); strcat(#rvh,tab_name(g_pg)); g_lc+=1;); gi+=1;);
+  g_lc=0; gi=0; loop(g_tab_count, g_pg=tab_page(gi); locked(g_pg) ? (strcat(#rvh,g_lc ? ", " : "Locked: "); strcat(#rvh,tab_name(g_pg)); g_lc+=1;); gi+=1;);
   strcat(#rvh,g_lc ? ". One undo step." : "Nothing locked. One undo step.");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,#rvh);
-) : hit(20,438,360,140) ? (
-  col_acc();label(hx+8,hy+7,"Status");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Pressure at the folds, total glottal area and output level. The trace shows the glottal area over about six cycles: alternating pulse heights mean period doubling, uneven pulses mean chaos.");
+) : hit(20,485,360,95) ? (
+  col_acc();label(hx+8,hy+7,"Pressure response");
+  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Choose the pressure axis and its response below the pad. Z uses pen pressure, with Y as the mouse fallback. Right-click any parameter to assign X, Y or Z; Edit range / curve keeps all link settings accessible here.");
 ) : (
-  hover_tab=page; gi=0; loop(10, tab_hit(gi) ? hover_tab=tab_page(gi); gi+=1;);
+  hover_tab=page; gi=0; loop(g_tab_count, tab_hit(gi) ? hover_tab=tab_page(gi); gi+=1;);
   col_acc();label(hx+8,hy+7,tab_name(hover_tab));
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tab_help(hover_tab));
   gfx_x=(hx+hw-8)*g_s;
+);
+g_research_open ? (
+  col_veil(.65); gfx_rect(0,0,gfx_w,gfx_h);
+  col_panel(); grect(60,80,700,470);
+  col_line(); gline(60,80,760,80); gline(60,550,760,550); gline(60,80,60,550); gline(760,80,760,550);
+  gfont(1,13);
+  col_acc(); label(80,95,"References");
+  col_line(); gline(80,112,740,112);
+  g_ry=128;
+  gfont(1,12); col_ink(1); wraptext(80,g_ry,660,540,"Ishizaka & Flanagan (1972), Bell System Technical Journal.");
+  g_ry+=15; gfont(3,11); col_dim(); wraptext(88,g_ry,652,540,"Two-mass model of vocal folds.");
+  g_ry+=15+14;
+  gfont(1,12); col_ink(1); wraptext(80,g_ry,660,540,"Steinecke & Herzel (1995), J. Acoust. Soc. Am. 97.");
+  g_ry+=15; gfont(3,11); col_dim(); wraptext(88,g_ry,652,540,"Bifurcations in an asymmetric vocal-fold model.");
+  g_ry+=15+14;
+  gfont(1,12); col_ink(1); wraptext(80,g_ry,660,540,"Fitch, Neubauer & Herzel (2002).");
+  g_ry+=15; gfont(3,11); col_dim(); wraptext(88,g_ry,652,540,"Nonlinear phenomena in mammal calls.");
+  g_ry+=15+20;
+  col_line(); gline(80,g_ry,740,g_ry); g_ry+=18;
+  gfont(1,12); col_acc(); label(80,g_ry,"Inspirations");
+  g_ry+=19;
+  gfont(3,11); col_dim(); wraptext(80,g_ry,660,540,"Jean-Edouard Miclot (JED): Kyma creature voices, \"Kelly-Lochbaum Vocal Tract 7 junctions + 5 Radiis\".");
+  g_ry+=30;
+  col_dim(); wraptext(80,g_ry,660,540,"xoxos: Fauna — a five-segment KL tract coupled to a mass-spring glottis.");
+  g_rwas && g_spress && !(g_mx>=60 && g_mx<760 && g_my>=80 && g_my<550) ? g_research_open=0;
 );
 prev_down=down; g_prev_r=mouse_cap&2;

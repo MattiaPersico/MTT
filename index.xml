@@ -90,7 +90,7 @@
   </category>
   <category name="Loon">
     <reapack name="mtt_loon.jsfx" type="effect" desc="MTT Loon">
-      <version name="0.34" author="Mattia Persico" time="2026-11-03T21:27:37Z">
+      <version name="0.35" author="Mattia Persico" time="2026-11-04T16:55:08Z">
           <source file="loon_conv.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_conv.jsfx-inc</source>
           <source file="loon_fx.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_fx.jsfx-inc</source>
           <source file="loon_supp.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_supp.jsfx-inc</source>
