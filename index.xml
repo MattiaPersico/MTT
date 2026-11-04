@@ -122,7 +122,7 @@
   </category>
   <category name="Breeze">
     <reapack name="mtt_wind_lab.jsfx" type="effect" desc="MTT Breeze">
-      <version name="0.5.0" author="Mattia Persico" time="2026-11-03T21:15:08Z">
+      <version name="0.5.1" author="Mattia Persico" time="2026-11-04T16:55:31Z">
           <source main="main" file="mtt_wind_lab.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_wind_lab.jsfx</source>
           <source file="wl_array.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_array.jsfx-inc</source>
           <source file="wl_conv.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_conv.jsfx-inc</source>
