@@ -1,5 +1,5 @@
 desc:MTT Loon
-// Version: 0.35 - Loon. Asymmetric two-mass vocal folds (Ishizaka-Flanagan 1972; left/right
+// Version: 0.36 - Loon. Asymmetric two-mass vocal folds (Ishizaka-Flanagan 1972; left/right
 // asymmetry after Steinecke-Herzel 1995) coupled to a five-section Kelly-Lochbaum
 // tract with an optional five-branch side-cavity junction, an optional second fold
 // pair (voice 2, coupled to the first) and an air-sac supply drained by the glottal flow.
@@ -15,8 +15,19 @@ in_pin:none
 out_pin:Left
 out_pin:Right
 options:maxmem=16777216
-import loon_conv.jsfx-inc
-import loon_supp.jsfx-inc
+// Shared FX modules (copies of lib/fx/ made by make sync-lib; edit them in lib/fx/).
+import mtt_fx_core.jsfx-inc
+import mtt_fx_ringmod.jsfx-inc
+import mtt_fx_flanger.jsfx-inc
+import mtt_fx_chorus.jsfx-inc
+import mtt_fx_delay.jsfx-inc
+import mtt_fx_reverb.jsfx-inc
+import mtt_fx_saturation.jsfx-inc
+import mtt_fx_groupdelay.jsfx-inc
+import mtt_fx_curvevolume.jsfx-inc
+import mtt_fx_convolver.jsfx-inc
+import mtt_fx_suppressor.jsfx-inc
+import mtt_fx_types.jsfx-inc
 import loon_fx.jsfx-inc
 // Title icon, loaded from the effect's folder into image slot 0.
 filename:0,loon.png
@@ -339,7 +350,9 @@ fx_cfg=480000; fx_st=482000; fx_on=484000; fx_buf=2400000;
 // 65536 where an FFT buffer lives.
 fx_curve=8400000; conv_stg=8500000; conv_pre=8800000; conv_scr=9175040; conv_hb=9240576; conv_st=11862016; conv_irm=14000000;
 fx_ready!=1 ? (memset(fx_cfg,0,252); memset(fx_curve,0,2730); fx_ready=1;);
-conv_init(); fx_validate();
+// Convolver: conv_tab at 9170000, 8 IR entries, entry metadata at +160, engine build records
+// at +300, one spectra bank per engine (Loon's lanes run at two rates).
+conv_init(9170000,8,160,300,0); fx_validate();
 // Fader laws, shared by the interface and the pad routes (u = fader position 0..1):
 // 0 linear, 1 log, 2 output (first tenth -inf..-70 dB, then linear in dB to 0),
 // 3 log with the low end spread out (log range ^1.8), 4 whistle pitch (first 3 % = tube,
@@ -1446,7 +1459,18 @@ function lk_axis(id,ax) local(u) (
   lk_touch();
 );
 // Set a whole link (the dice).
-function lk_set(id,ax,lo,hi) (lk_put(id,ax,lo,hi,0); lk_touch(););
+function lk_set(id,ax,lo,hi) local(c,m) (
+  c=0;
+  g_random_mix ? (
+    m=g_random_amount/100;
+    // An unlinked parameter starts at a neutral zero-depth link. A partial roll
+    // preserves an existing axis so a tiny amount cannot abruptly reroute it.
+    lo=(lk_a[id]>0?lk_lo[id]:0)*(1-m)+lo*m;
+    hi=(lk_a[id]>0?lk_hi[id]:0)*(1-m)+hi*m;
+    lk_a[id]>0?(ax=lk_a[id]-1;c=lk_c[id]*(1-m););
+  );
+  lk_put(id,ax,lo,hi,c);lk_touch();
+);
 function lk_val(id,which,v) (
   which==2 ? lk_lo[id]=max(-1,min(1,v)) : which==3 ? lk_hi[id]=max(-1,min(1,v)) : lk_c[id]=max(-1,min(1,v)); lk_touch();
 );
@@ -1591,7 +1615,7 @@ function knob(id,cx,cy,r,str,fmt,lo,hi,lg) local(u,u0,a,a0,a1,k,over,tw,th,sz,d,
   );
 );
 // Section titles sit one type size above labels; accent is reserved for active controls.
-function heading(x,y,str) (gfont(2,15);col_text();label(x,y,str);col_line();grect(x,y+19,g_cw-(y<=128?g_fx_heading_gap:0),1);gfont(1,13););
+function heading(x,y,str) (gfont(2,15);col_text();label(x,y,str);col_line();grect(x,y+19,g_cw,1);gfont(1,13););
 function note(x,y,str) (col_dim();label(x,y,str););
 // Trace of a ring buffer (n points). Triggered on the last closed->open edge when found.
 function trace(buf,x,y,w,h,n,lo,hi,trig) local(gi,j,start,v,px,py,lim) (
@@ -1627,6 +1651,9 @@ g_rpress=!g_input_block && (mouse_cap&2) && !g_prev_r; !down ? g_ldrag=0; g_whee
 );
 gui_live ? gui_tick=time_precise();
 gfx_alive=time_precise(); rdown=!g_input_block && (mouse_cap&2);
+g_ra_edit && press && !hit(538+g_dx,36,50,17) ? (
+  match("%f",#g_ra_text,g_ra_value)?g_random_amount=max(0,min(100,g_ra_value));g_ra_edit=0;
+);
 gfont(1,13);
 col_bg();gfx_rect(0,0,gfx_w,gfx_h);
 // Background: the fill above is the dominant colour of the texture image, so Chiaro by
@@ -1646,7 +1673,7 @@ hover_id=0;
 // Header: fine-nib lettering, natural-history bird, random voice and tools.
 // Global preferences are in the footer; the header contains branding and actions only.
 // A very light subpixel spread reinforces the original hairlines without resizing them.
-gfx_a=.12;
+gfx_a=.19;
 gfx_blit(g_dark?3:2,1,0,0,0,224,120,24.82*g_s,8.9*g_s,90*g_s,48.2*g_s);
 gfx_blit(g_dark?3:2,1,0,0,0,224,120,25.18*g_s,8.9*g_s,90*g_s,48.2*g_s);
 gfx_blit(g_dark?3:2,1,0,0,0,224,120,25*g_s,8.72*g_s,90*g_s,48.2*g_s);
@@ -1670,7 +1697,7 @@ col_line(); gline(20,64,800+g_dx,64);
 gline(392,80,392,600);
 gfont(1,13);
 // Takes: a new recorded take becomes an undo step; the snapshot keeps the previous take.
-g_init!=1 ? (g_new_seen=take_new; g_take=take_active; g_init=1;);
+g_init!=1 ? (g_new_seen=take_new; g_take=take_active; g_init=1;g_random_amount=100;);
 take_new!=g_new_seen ? (push_undo(); g_take=take_active; g_new_seen=take_new;) :
   take_req==0 && take_active!=g_take ? g_take=take_active;
 arrowbutton(g_undo_c-13.75,19.25,27.5,27.5,1,undo_n>0) || ((key==26 || ((key==122 || key==90) && (mouse_cap&36))) && !(mouse_cap&8)) ? do_undo();
@@ -1701,6 +1728,7 @@ g_dice_hover=0; g_lock_hover=0;
 // not automation, not an undo step; the extension clears it when capture fails.
 penbutton(g_pen_c-g_tool_size/2,33-g_tool_size/2,slider89>=.5) ? (
   slider89>=.5 ? slider89=0 : (slider89=1; slider1!=0 ? setparam(1,0););
+  g_bridge_wait=slider89>=.5?time_precise()+2:0;
   sliderchange(slider89);
 );
 // Linkable parameters: names, tabs, and a menu grouped like the tabs.
@@ -1818,6 +1846,13 @@ function route_menu(x,y,cur) local(n,k,r,id,t) (
   gfx_x=x*g_s; gfx_y=y*g_s; r=gfx_showmenu(#rmenu);
   r>0 && r<=t ? g_mi[r-1] : -1;
 );
+g_bridge_wait>0 && time_precise()>g_bridge_wait ? (
+  g_bridge_wait=0;
+  !tb_fresh && slider89>=.5 ? (
+    gfx_x=(g_pen_c-150)*g_s;gfx_y=64*g_s;
+    gfx_showmenu("#MTT Input Bridge is not responding|#Install MTT Input Bridge via ReaPack > Browse packages|#Then restart REAPER and enable the pencil again|#If already installed: check that this track is processing|Close");
+  );
+);
 // ---------- dice: coherent random settings ----------
 // Each tab's dice draws values that work together and with the other tabs: the air is
 // drawn so the folds can start (pressure above the threshold of the rest opening), the
@@ -1825,6 +1860,14 @@ function route_menu(x,y,cur) local(n,k,r,id,t) (
 // sizes follow the pitch. After a dice, if the voice is sounding but the folds stay still,
 // the "folds still" diagnosis nudges Pressure or Rest opening a few times (see below).
 // rand(x) never goes below rand(1) in EEL2 (a max under 1 counts as 1): scale rand(1).
+// At 100% use the original recipe value directly; percentage only blends partial rolls.
+function rnd_set(id,v) local(u) (
+  g_random_mix && thi[id]>tlo[id] ? (
+    u=f_v2u(slider(id),tlo[id],thi[id],tlg[id]);
+    v=f_u2v(u+(f_v2u(v,tlo[id],thi[id],tlg[id])-u)*g_random_amount/100,tlo[id],thi[id],tlg[id]);
+  ) : g_random_mix ? v=slider(id)+(v-slider(id))*g_random_amount/100;
+  setparam(id,v);
+);
 function rnd(lo,hi) (lo+rand(1)*(hi-lo););
 function rlog(lo,hi) (lo*(hi/lo)^rand(1););
 function chance(p) (rand(1)<p;);
@@ -1838,38 +1881,38 @@ function rnd_air() local(r,p,n) (
   // Too high a threshold for this pitch and damping: bring the rest opening towards 0.
   n=0; while(n<10 && p_thr(r,slider6,slider11)*1.3>4) (r*=.6; n+=1;);
   p=min(4,max(.6,p_thr(r,slider6,slider11)*rnd(1.5,2.4)));
-  setparam(7,r); setparam(9,r>0 ? rnd(.03,.25) : rnd(.05,.45));
-  setparam(10,chance(.6) ? rnd(0,.15) : rnd(.15,.45));
+  rnd_set(7,r); rnd_set(9,r>0 ? rnd(.03,.25) : rnd(.05,.45));
+  rnd_set(10,chance(.6) ? rnd(0,.15) : rnd(.15,.45));
   // Open folds lose the drive easily: keep their supply load light.
-  setparam(51,rlog(8,40)); setparam(52,chance(.5) ? 0 : r>0 ? rnd(0,.3) : rnd(.2,1.2)); setparam(53,rnd(.08,.5));
+  rnd_set(51,rlog(8,40)); rnd_set(52,chance(.5) ? 0 : r>0 ? rnd(0,.3) : rnd(.2,1.2)); rnd_set(53,rnd(.08,.5));
   // A loaded supply sags: give it more pressure.
   slider52>0 ? p=min(4,p*(1+.5*slider52));
-  setparam(5,p);
-  setparam(15,chance(.5) ? 0 : rnd(.005,.06)); setparam(16,rlog(40,2000));
-  setparam(70,chance(.65) ? 0 : rnd(.25,.65)); setparam(71,chance(.5) ? 0 : rlog(150,2500));
+  rnd_set(5,p);
+  rnd_set(15,chance(.5) ? 0 : rnd(.005,.06)); rnd_set(16,rlog(40,2000));
+  rnd_set(70,chance(.65) ? 0 : rnd(.25,.65)); rnd_set(71,chance(.5) ? 0 : rlog(150,2500));
 );
 // Pitch from the tract length: about 600 Hz at 8 cm, an octave lower per doubled length.
 function rnd_source() local(f,d) (
   f=min(5000,max(20,600*(8/slider25)^.9*2^rnd(-1.2,1.2)));
-  setparam(8,chance(.6) ? rnd(.85,1) : rnd(.45,.85));
+  rnd_set(8,chance(.6) ? rnd(.85,1) : rnd(.45,.85));
   // Keep the folds able to start at the present pressure and rest opening: limit the pitch
   // of pressed folds and the damping of open ones.
   slider7<0 ? f=min(f,max(20,60*((slider5/1.3)/(3.8*(-slider7)))^(1/.6)));
-  setparam(6,f); setparam(14,min(3,max(.3,1.4*(600/f)^.3*2^rnd(-.4,.4))));
+  rnd_set(6,f); rnd_set(14,min(3,max(.3,1.4*(600/f)^.3*2^rnd(-.4,.4))));
   d=rnd(.04,.2); slider7>0 ? d=min(d,slider5/1.5/(200*slider7*(f/600)^.55));
-  setparam(11,max(.01,d));
-  setparam(12,rnd(0,.4)); setparam(13,rnd(.6,1.4));
+  rnd_set(11,max(.01,d));
+  rnd_set(12,rnd(0,.4)); rnd_set(13,rnd(.6,1.4));
   chance(.35) ? (
-    setparam(54,rnd(.3,.8)); setparam(60,rnd(.1,.8));
-    d=floor(rand(9)); setparam(55,(d==0?-12:d==1?-7:d==2?-5:d==3?-3:d==4?3:d==5?4:d==6?5:d==7?7:12)+rnd(-.3,.3));
-  ) : setparam(54,0);
+    rnd_set(54,rnd(.3,.8)); rnd_set(60,rnd(.1,.8));
+    d=floor(rand(9)); rnd_set(55,(d==0?-12:d==1?-7:d==2?-5:d==3?-3:d==4?3:d==5?4:d==6?5:d==7?7:12)+rnd(-.3,.3));
+  ) : rnd_set(54,0);
 );
 function rnd_pulse() local(k) (
   k=rand(1);
-  k<.25 ? (setparam(57,0); setparam(59,0); setparam(69,1); setparam(56,rlog(4,35));) :
-  k<.7 ? (setparam(56,rlog(4,35)); setparam(57,rnd(.2,2)); setparam(59,rnd(0,.3)); setparam(69,1);) :
-  (setparam(56,rlog(3,25)); setparam(59,rnd(.6,1)); setparam(57,rnd(0,2)); setparam(69,chance(.5) ? 1 : rnd(.2,.6)););
-  setparam(58,rnd(0,.7));
+  k<.25 ? (rnd_set(57,0); rnd_set(59,0); rnd_set(69,1); rnd_set(56,rlog(4,35));) :
+  k<.7 ? (rnd_set(56,rlog(4,35)); rnd_set(57,rnd(.2,2)); rnd_set(59,rnd(0,.3)); rnd_set(69,1);) :
+  (rnd_set(56,rlog(3,25)); rnd_set(59,rnd(.6,1)); rnd_set(57,rnd(0,2)); rnd_set(69,chance(.5) ? 1 : rnd(.2,.6)););
+  rnd_set(58,rnd(0,.7));
 );
 // Area profiles (glottis to lips) after the common vowel shapes: /a/ narrow back, wide
 // front; /i/ wide back, narrow front; /u/ rounded small lips; /e/ and /o/ between. Areas:
@@ -1885,40 +1928,40 @@ function rnd_tract(keep_len) local(a,b,k,pa,pb,j) (
   a=floor(rand(5)); b=(a+1+floor(rand(4)))%5;
   k=0; loop(5,
     pa=g_vow[a*5+k]; pb=g_vow[b*5+k]; j=2^rnd(-.3,.3);
-    setparam(26+k,min(8,max(.1,sqrt(pa*pb)*j)));
+    rnd_set(26+k,min(8,max(.1,sqrt(pa*pb)*j)));
     // Area k follows X from one vowel to the other (its link: octaves over the fader's log travel).
     j=min(2,max(-2,.5*log(pb/pa)/log(2)+rnd(-.15,.15)))/(log(80)/log(2)); lk_set(26+k,0,-j,j);
     k+=1;
   );
-  !keep_len ? setparam(25,min(80,max(3,8*(600/slider6)^.7*2^rnd(-.7,.7))));
-  setparam(36,rlog(.004,.05)); setparam(37,rlog(3000,16000));
+  !keep_len ? rnd_set(25,min(80,max(3,8*(600/slider6)^.7*2^rnd(-.7,.7))));
+  rnd_set(36,rlog(.004,.05)); rnd_set(37,rlog(3000,16000));
   // Half the time equal sections, otherwise uneven ones (a short neck, a long cavity...).
-  k=0; loop(5, setparam(142+k,chance(.5) ? 1 : rlog(.4,2.5)); k+=1;);
-  chance(.5) ? (k=0; loop(5, setparam(142+k,1); k+=1;););
+  k=0; loop(5, rnd_set(142+k,chance(.5) ? 1 : rlog(.4,2.5)); k+=1;);
+  chance(.5) ? (k=0; loop(5, rnd_set(142+k,1); k+=1;););
 );
 function rnd_cavities() local(c) (
-  c=chance(.3) ? 0 : rnd(.2,1.2); setparam(41,c);
-  setparam(42,min(300,max(3,slider25*1.75*2^rnd(-1.2,1.2))));
+  c=chance(.3) ? 0 : rnd(.2,1.2); rnd_set(41,c);
+  rnd_set(42,min(300,max(3,slider25*1.75*2^rnd(-1.2,1.2))));
   // Strong coupling with ringing branches can hold the folds: keep the reflection lower.
-  setparam(43,c>.8 ? rnd(.9,.97) : rnd(.9,.995));
-  setparam(44,rlog(1500,10000)); setparam(61,chance(.5) ? 0 : rnd(.1,.6));
+  rnd_set(43,c>.8 ? rnd(.9,.97) : rnd(.9,.995));
+  rnd_set(44,rlog(1500,10000)); rnd_set(61,chance(.5) ? 0 : rnd(.1,.6));
   // Half the time the classic branches, otherwise each with its own length, level and pan.
-  chance(.5) ? (c=0; loop(5, setparam(147+c,1); setparam(152+c,1); setparam(157+c,c%2 ? 1 : -1); c+=1;);) :
-  (c=0; loop(5, setparam(147+c,rlog(.5,2)); setparam(152+c,rnd(.3,1.5)); setparam(157+c,rnd(-1,1)); c+=1;););
+  chance(.5) ? (c=0; loop(5, rnd_set(147+c,1); rnd_set(152+c,1); rnd_set(157+c,c%2 ? 1 : -1); c+=1;);) :
+  (c=0; loop(5, rnd_set(147+c,rlog(.5,2)); rnd_set(152+c,rnd(.3,1.5)); rnd_set(157+c,rnd(-1,1)); c+=1;););
 );
 function rnd_mouth() (
-  setparam(65,rnd(.4,1)); setparam(86,rnd(.5,1)); setparam(87,rnd(-1,1));
-  setparam(67,rlog(15,200));
+  rnd_set(65,rnd(.4,1)); rnd_set(86,rnd(.5,1)); rnd_set(87,rnd(-1,1));
+  rnd_set(67,rlog(15,200));
   // The jaw opening follows Y by a random share (its link: from a lower opening up to the set one).
   lk_set(86,1,-slider86*rnd(0,1),0);
-  setparam(66,chance(.4) ? 0 : rnd(.8,4)); setparam(40,rnd(.6,1));
-  setparam(38,rnd(.85,.98)); setparam(39,rlog(2000,12000));
+  rnd_set(66,chance(.4) ? 0 : rnd(.8,4)); rnd_set(40,rnd(.6,1));
+  rnd_set(38,rnd(.85,.98)); rnd_set(39,rlog(2000,12000));
 );
 // THROAT: the pickups inside the body. GESTURE (the playing setup) and MIX (stereo, dynamics,
 // output) are never drawn.
 function rnd_throat() (
-  setparam(45,chance(.5) ? 0 : rnd(.05,.4)); setparam(46,rlog(200,3000)); setparam(47,rnd(.5,2));
-  setparam(48,chance(.6) ? 0 : rnd(.005,.06));
+  rnd_set(45,chance(.5) ? 0 : rnd(.05,.4)); rnd_set(46,rlog(200,3000)); rnd_set(47,rnd(.5,2));
+  rnd_set(48,chance(.6) ? 0 : rnd(.005,.06));
 );
 // Tabs with a dice and a Random voice padlock: SOURCE, AIR, TRACT, CAVITIES, MOUTH, PULSE, THROAT.
 function tab_rnd(pg) (pg==0||pg==1||pg==3||pg==4||pg==6||pg==7||pg==9;);
@@ -1930,23 +1973,25 @@ function locked(pg) (tab_rnd(pg) && (floor(slider245+.5)&(2^pg))!=0;);
 // every unlocked section is drawn around it. A locked TRACT keeps its length, so the
 // pitch and the other sizes follow the length already set.
 function rnd_voice() (
-  !locked(3) ? setparam(25,5*12^rand(1)*2^rnd(-.3,.3));
+  !locked(3) ? rnd_set(25,5*12^rand(1)*2^rnd(-.3,.3));
   !locked(0) ? rnd_source(); !locked(1) ? rnd_air(); !locked(3) ? rnd_tract(1);
   !locked(4) ? rnd_cavities(); !locked(6) ? rnd_mouth(); !locked(7) ? rnd_pulse();
   !locked(9) ? rnd_throat();
 );
 function dice_roll(pg) (
-  push_undo();
+  (pg>=0 || g_random_amount>0) ? (
+  preview_end();push_undo();g_random_mix=pg<0 && g_random_amount<100;
   pg==1 ? rnd_air() : pg==0 ? rnd_source() : pg==7 ? rnd_pulse() : pg==3 ? rnd_tract(0) :
   pg==4 ? rnd_cavities() : pg==6 ? rnd_mouth() : pg==9 ? rnd_throat() : rnd_voice();
   // Watch the result for a moment (see the check after the pad). The fix changes AIR
   // values, so a Random voice with AIR locked skips it.
-  g_dk_t=pg<0 && locked(1) ? 0 : time_precise()+.6; g_dk_n=0;
+  g_dk_t=pg<0 && (locked(1) || g_random_amount<100) ? 0 : time_precise()+.6; g_dk_n=0;g_random_mix=0;
+  );
 );
-// Header die in an 18-point square; true on a click.
+// Header die spans the title and amount rows; true on a click.
 function dice(x,y) local(over) (
-  over=hit(x-3,y-3,24,24);
-  gicon(7,over && down?2:over?1:0,x,y,18);
+  over=hit(x-3,y-3,32,32);
+  gicon(7,over && down?2:over?1:0,x,y,26);
   over ? g_dice_hover=1;
   press && over;
 );
@@ -1966,9 +2011,29 @@ function dice_s(x,by) local(over,y) (
   press && over;
 );
 // Random voice (header): a whole creature at once (one undo step).
-g_rv=hit(509+g_dx,22,139,24);
-dice(512+g_dx,24) || (press && g_rv && !hit(509+g_dx,21,24,24)) ? dice_roll(-1);
-g_rv && down ? col_warm() : g_rv ? col_text() : col_dim(); gfx_measurestr("Random voice",g_rtw,g_rth);gfx_x=(536+g_dx)*g_s;gfx_y=33*g_s-g_rth/2;gtext("Random voice");
+g_rv=hit(503+g_dx,18,32,32) || hit(538+g_dx,19,111,17);
+dice(506+g_dx,21) || (press && hit(538+g_dx,19,111,17)) ? dice_roll(-1);
+g_rv && down ? col_warm() : g_rv ? col_text() : col_dim();label(540+g_dx,20,"Random voice");
+// Session-only global dice amount; click to type, drag right/up to increase.
+g_ra_over=hit(538+g_dx,36,50,17);
+press && g_ra_over ? (
+  g_ra_edit=g_ra_select=g_ra_drag=1;g_ra_x=g_mx;g_ra_y=g_my;g_ra_start=g_random_amount;
+  sprintf(#g_ra_text,"%.0f",g_random_amount);
+);
+g_ra_drag && down && abs(g_mx-g_ra_x)+abs(g_my-g_ra_y)>2 ? (
+  g_random_amount=floor(max(0,min(100,g_ra_start+g_mx-g_ra_x-g_my+g_ra_y))+.5);
+  sprintf(#g_ra_text,"%.0f",g_random_amount);g_ra_select=1;
+);
+!down?g_ra_drag=0;
+g_ra_edit ? (
+  key>=48 && key<=57 ? (g_ra_select?strcpy(#g_ra_text,"");g_ra_select=0;strlen(#g_ra_text)<3?strcat(#g_ra_text,sprintf(#g_ra_digit,"%c",key)););
+  key==8 ? (g_ra_select?strcpy(#g_ra_text,""):strcpy_substr(#g_ra_text,#g_ra_text,0,max(0,strlen(#g_ra_text)-1));g_ra_select=0;);
+  key==13 || (press && !g_ra_over) ? (match("%f",#g_ra_text,g_ra_value)?g_random_amount=max(0,min(100,g_ra_value));g_ra_edit=0;);
+  key==27?g_ra_edit=0;
+);
+gfont(3,10);g_ra_edit?col_warm():col_dim();
+g_ra_edit?sprintf(#g_ra_label,"%s%%",#g_ra_text):sprintf(#g_ra_label,"%.0f%%",g_random_amount);
+label(540+g_dx,37,#g_ra_label);gfont(1,13);
 // ---------- XY pad (wheel = zoom at the pointer, right-drag = pan) ----------
 // Working area: transport and tabs share the first row below the header rule.
 // Pad, meters and scope use the same left/right column edges.
@@ -1984,7 +2049,7 @@ function vband(y0,y1) local(a,b) (
   a=max(y0,vy); b=min(y1,vy+span);
   b>a ? grect(px,to_py(b),pw,max(1,to_py(a)-to_py(b)));
 );
-mouse_wheel!=0 ? (
+mouse_wheel!=0 && !g_area ? (
   hit(px,py,pw,ph) ? (
     wux=vx+(g_mx-px)/pw*span; wuy=vy+(1-(g_my-py)/ph)*span;
     zoom=min(32,max(1,zoom*2^(mouse_wheel/120*.25)));
@@ -1993,7 +2058,7 @@ mouse_wheel!=0 ? (
   mouse_wheel=0;
 );
 rdown=!g_input_block && (mouse_cap&2);
-rdown && !prev_rdown && hit(px,py,pw,ph) ? (pan_on=1; pan_mx=g_mx; pan_my=g_my; pan_vx=vx; pan_vy=vy;);
+rdown && !prev_rdown && !g_area && hit(px,py,pw,ph) ? (pan_on=1; pan_mx=g_mx; pan_my=g_my; pan_vx=vx; pan_vy=vy;);
 !rdown ? pan_on=0;
 pan_on ? (vx=pan_vx-(g_mx-pan_mx)/pw*span; vy=pan_vy+(g_my-pan_my)/ph*span; clampview(););
 prev_rdown=rdown;
@@ -2092,9 +2157,43 @@ zoom>1.001 ? (
   col_line();grectf(px+9,py+ph-59,50,50,0);
   col_acc();grectf(px+9+50*vx,py+ph-9-50*(vy+span),max(2,50*span),max(2,50*span),0);
 );
+// Shift-left-drag selects a value-space rectangle without sounding or recording a take.
+function lk_fit_area(x0,x1,y0,y1) local(id,a,b,lo,hi,u) (
+  preview_end();push_undo();id=5;
+  loop(245,
+    (lk_a[id]==1 || lk_a[id]==2) && thi[id]>tlo[id] ? (
+      a=lk_a[id]==1?x0:y0;b=lk_a[id]==1?x1:y1;
+      u=f_v2u(slider(id),tlo[id],thi[id],tlg[id]);
+      lo=lk_lo[id];hi=lk_hi[id];
+      // Evaluate both selected edges through the current curve, clip like the live
+      // parameter, then store ordinary fader-relative endpoints. Reversed links stay reversed.
+      lk_lo[id]=min(1,max(0,u+lo+(hi-lo)*pen_shape(a,lk_c[id])))-u;
+      lk_hi[id]=min(1,max(0,u+lo+(hi-lo)*pen_shape(b,lk_c[id])))-u;
+    );id+=1;
+  );
+  lk_touch();
+);
+press && (mouse_cap&8) && hit(px,py,pw,ph) && !fit_hit && !tb_owned ? (
+  g_area=1;g_area_x0=min(1,max(0,vx+(g_mx-px)/pw*span));g_area_y0=min(1,max(0,vy+(1-(g_my-py)/ph)*span));
+  g_area_mx=g_mx;g_area_my=g_my;
+);
+g_area ? (
+  g_area_x1=min(vx+span,max(vx,vx+(g_mx-px)/pw*span));g_area_y1=min(vy+span,max(vy,vy+(1-(g_my-py)/ph)*span));
+  key==27 || key==-1 || g_input_block || (flags>0 && !(flags&2)) ? g_area=0 : (
+    g_area_left=min(g_area_x0,g_area_x1);g_area_right=max(g_area_x0,g_area_x1);
+    g_area_bottom=min(g_area_y0,g_area_y1);g_area_top=max(g_area_y0,g_area_y1);
+    col_red(.10);grect(to_px(g_area_left),to_py(g_area_top),(g_area_right-g_area_left)*pw*zoom,(g_area_top-g_area_bottom)*ph*zoom);
+    col_warm();grectf(to_px(g_area_left),to_py(g_area_top),(g_area_right-g_area_left)*pw*zoom,(g_area_top-g_area_bottom)*ph*zoom,0);
+    !down ? (
+      abs(g_mx-g_area_mx)>=4 && abs(g_my-g_area_my)>=4 && g_area_right-g_area_left>.000001 && g_area_top-g_area_bottom>.000001 ?
+        lk_fit_area(g_area_left,g_area_right,g_area_bottom,g_area_top);
+      g_area=0;
+    );
+  );
+);
 // While the pen owns the pad the mouse cannot play it (or overwrite the pen's point).
 tb_owned && gui_drag ? (setparam(4,0); gui_drag=0; gui_live=0;);
-press && hit(px,py,pw,ph) && !fit_hit && !tb_owned ? (
+press && hit(px,py,pw,ph) && !fit_hit && !tb_owned && !g_area && !(mouse_cap&8) ? (
   hold_on && loop_on ? (loop_on=0; loop_play=0;);
   setparam(1,0);setparam(4,1);gui_drag=1;gui_live=1;gui_tick=time_precise();
   // A mode change must not clear this new gesture at the next audio block.
@@ -2171,20 +2270,13 @@ function fx_page(p) (p==1?0:p==2||p==6?3:5;);
 function fx_first(pg) (pg==0?1:pg==3?2:pg==5?13:-1;);
 function fx_points(pg) (pg==3?2:fx_first(pg)>=0?1:0;);
 function fx_section_point(pg,k) (pg==3 && k==1?6:fx_first(pg););
-function fx_section_has(pg) local(j,n,yes,p) (
-  yes=0;j=0;n=fx_points(pg)*3;
-  loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;fx_cfg[p]>0?yes=1;j+=1;);yes;
-);
-function fx_section_active(pg) local(j,n,yes,p) (
-  yes=0;j=0;n=fx_points(pg)*3;
-  loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;
-    fx_cfg[p]>0 && fx_cfg[p+5]>=.5 && fx_cfg[p+1]>0?yes=1;j+=1;);yes;
-);
-function fx_section_toggle(pg) local(j,n,on,p) (
-  fx_section_has(pg) ? (
-    on=!fx_section_active(pg);push_undo();j=0;n=fx_points(pg)*3;
-    loop(n,p=(fx_section_point(pg,floor(j/3))*3+j%3)*6;fx_cfg[p]>0?fx_cfg[p+5]=on;j+=1;);fx_touch();
-  );
+// OUT also owns the historical routes reachable through its compatibility selector.
+function fx_section_active(pg) local(slot,p,yes) (
+  yes=0;slot=0;
+  loop(42,p=slot*6;
+    fx_page(floor(slot/3))==pg && fx_cfg[p]>0 && fx_cfg[p+5]>=.5 && fx_cfg[p+1]>0?yes=1;
+    slot+=1;
+  );yes;
 );
 function tab_cell(pg,w) (max(w,tab_rnd(pg)?(fx_points(pg)>0?50:30):20););
 g_tab_count=8;
@@ -2211,7 +2303,7 @@ gi=0; loop(g_tab_count,
   tab_rnd(g_pg) ? (
     g_tc=floor(g_tx+g_tw/2-(fx_points(g_pg)>0?25:15)+.5);
     lock_btn(g_pg,g_tc,g_ticon);
-    dice_s(g_tc+16,g_ticon) ? (dice_roll(g_pg);page=g_pg;g_fx_view=0;g_cv_s=0;);
+    dice_s(g_tc+16,g_ticon) ? (dice_roll(g_pg););
   );
   fx_points(g_pg)>0 ? (
     g_fx_x=g_tx+g_tw/2+(tab_rnd(g_pg)?17:0);
@@ -2219,21 +2311,14 @@ gi=0; loop(g_tab_count,
     fx_section_active(g_pg)?col_warm():col_mark();
     gfx_measurestr("FX",g_tw2,g_th);gfx_x=g_fx_x*g_s-g_tw2/2;gfx_y=(g_ticon-13)*g_s;gtext("FX");
     g_ov?hover_id=-3000-g_pg;
-    press && g_ov?fx_section_toggle(g_pg);
+    press && g_ov ? (
+      page!=g_pg || !g_fx_view ? (g_fx_point=fx_first(g_pg);g_fx_slot=0;g_cv_s=0;);
+      page=g_pg;g_fx_view=1;g_fx_drag=0;g_link_edit=0;
+    );
   );
   gi+=1;
 );
 gfont(1,13);
-// Internal FX button changes view; tab FX indicators only bypass the section's chain.
-// Stop the first heading rule eight units before the FX border.
-g_fx_heading_gap=fx_points(page)>0?48:0;
-fx_points(page)>0 ? (
-  g_ov=hit(c1x+g_cw-40,125,40,21);
-  g_fx_view?col_warm():g_ov?col_text():col_dim();grectf(c1x+g_cw-40,125,40,21,0);
-  gfx_measurestr("FX",g_tw,g_th);gfx_x=(c1x+g_cw-20)*g_s-g_tw/2;gfx_y=128*g_s;gtext("FX");
-  g_ov?hover_id=-3100;
-  press && g_ov?(g_fx_view=!g_fx_view;g_fx_point=fx_first(page);g_fx_slot=0;g_cv_s=0;g_fx_drag=0;g_link_edit=0;);
-);
 !g_fx_view && page==0 ? (
   heading(c1x,126,"Vocal folds");
   control(6,c1x,150,"Fold Hz","%.0f Hz",10,8000,1);   control(8,c2x,150,"Asymmetry","%.2f",.25,1,0);
@@ -2549,26 +2634,22 @@ g_fx_view && fx_points(page)>0 ? (
   fx_page(g_fx_point)!=page?g_fx_point=fx_first(page);
   sprintf(#fx_title,"%s FX",page==5?"Output":page==0?"Source":page==1?"Air":page==3?"Tract":page==4?"Cavities":"Mouth");
   heading(c1x,128,#fx_title);
-  // TRACT shares one bypass indicator across Tract and Feedback. OUT exposes only
+  // TRACT shares one activity indicator across Tract and Feedback. OUT exposes only
   // occupied historical routes, preserving access without advertising new insertion points.
   g_fx_old=0;gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?g_fx_old+=1;gi+=1;);
   // Return to Output after removing the last insert from a historical route.
   page==5 && !fx_is_main(g_fx_point) && !fx_pt_occ(g_fx_point)?(g_fx_point=13;g_fx_slot=0;g_cv_s=0;);
-  page==3 || (page==5 && g_fx_old>0) ? (
+  page==5 && g_fx_old>0 ? (
     strcpy(#fx_point_label,fx_is_main(g_fx_point)?fx_rack_name_pt(g_fx_point):fx_point_name(g_fx_point));
     menubutton(c1x,155,g_cw-52,23,#fx_point_label,0) ? (
       strcpy(#fx_menu,"");
-      page==3 ? (
-        strcat(#fx_menu,g_fx_point==2?"!Tract|Feedback":"Tract|!Feedback");
-      ) : (
-        strcat(#fx_menu,g_fx_point==13?"!Output":"Output");
-        gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?(
-          strcat(#fx_menu,"|");g_fx_point==gi?strcat(#fx_menu,"!");strcat(#fx_menu,"Previous: ");strcat(#fx_menu,fx_point_name(gi));
-        );gi+=1;);
-      );
+      strcat(#fx_menu,g_fx_point==13?"!Output":"Output");
+      gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?(
+        strcat(#fx_menu,"|");g_fx_point==gi?strcat(#fx_menu,"!");strcat(#fx_menu,"Previous: ");strcat(#fx_menu,fx_point_name(gi));
+      );gi+=1;);
       gfx_x=c1x*g_s;gfx_y=178*g_s;g_fx_choice=gfx_showmenu(#fx_menu);
       g_fx_choice>0?(
-        page==3?g_fx_point=g_fx_choice==1?2:6:g_fx_choice==1?g_fx_point=13:(
+        g_fx_choice==1?g_fx_point=13:(
           gj=2;gi=0;loop(14,!fx_is_main(gi) && fx_pt_occ(gi)?(gj==g_fx_choice?g_fx_point=gi;gj+=1;);gi+=1;);
         );
         g_fx_slot=0;g_cv_s=0;g_fx_drag=0;
@@ -2576,18 +2657,24 @@ g_fx_view && fx_points(page)>0 ? (
     );
   );
   g_fx_slot=max(0,min(2,g_fx_slot));g_fx_left=205*g_cw/475;
-  gi=0;loop(3,
-    g_fx_p=(g_fx_point*3+gi)*6;g_fx_y=200+gi*36;g_fx_t=fx_cfg[g_fx_p];
+  page==3 ? (
+    col_dim();gfont(3,11);label(c1x,158,"Tract");label(c1x,300,"Feedback");gfont(1,13);
+    col_line();gline(c1x,286,c1x+g_fx_left,286);
+  );
+  gi=0;loop(page==3?6:3,
+    g_fx_row_point=page==3?(gi<3?2:6):g_fx_point;g_fx_row_slot=gi%3;
+    g_fx_p=(g_fx_row_point*3+g_fx_row_slot)*6;
+    g_fx_y=page==3?(gi<3?184+gi*32:326+(gi-3)*32):200+gi*36;g_fx_t=fx_cfg[g_fx_p];
     // Slot bypass is separate from selecting/replacing its type.
     g_ov=hit(c1x,g_fx_y-3,18,22);
     g_fx_t>0 && fx_cfg[g_fx_p+5]>=.5?col_warm():col_mark();gcircle(c1x+7,g_fx_y+7,3.5,g_fx_t>0 && fx_cfg[g_fx_p+5]>=.5);
     press && g_ov && g_fx_t>0?(push_undo();fx_cfg[g_fx_p+5]=fx_cfg[g_fx_p+5]>=.5?0:1;fx_touch(););
     g_ov=hit(c1x+20,g_fx_y-3,g_fx_left-24,25);
-    gi==g_fx_slot?col_warm():g_ov?col_text():col_dim();
-    gfont(3,11);sprintf(#fx_item,"%d  %s",gi+1,g_fx_t?fx_name(g_fx_t):"Empty");label(c1x+22,g_fx_y,#fx_item);gfont(1,13);
+    g_fx_row_point==g_fx_point && g_fx_row_slot==g_fx_slot?col_warm():g_ov?col_text():col_dim();
+    gfont(3,11);sprintf(#fx_item,"%d  %s",g_fx_row_slot+1,g_fx_t?fx_name(g_fx_t):"Empty");label(c1x+22,g_fx_y,#fx_item);gfont(1,13);
     col_line();gline(c1x,g_fx_y+25,c1x+g_fx_left,g_fx_y+25);
     press && g_ov ? (
-      g_fx_menu_open=g_fx_slot==gi || g_fx_t==0;g_fx_slot=gi;g_cv_s=0;g_fx_drag=0;
+      g_fx_menu_open=(g_fx_point==g_fx_row_point && g_fx_slot==g_fx_row_slot) || g_fx_t==0;g_fx_point=g_fx_row_point;g_fx_slot=g_fx_row_slot;g_cv_s=0;g_fx_drag=0;
       g_fx_menu_open ? (
         gfx_x=(c1x+20)*g_s;gfx_y=(g_fx_y+24)*g_s;
         g_fx_choice=gfx_showmenu(fx_conv_fits(g_fx_p/6,g_fx_point)?"Empty|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|Convolver|Resonance Suppressor":"Empty|Ring Mod|Flanger|Chorus|Delay|Reverb|Saturation|Group Delay|Curve Volume|#Convolver|Resonance Suppressor");
@@ -2606,21 +2693,22 @@ g_fx_view && fx_points(page)>0 ? (
     gj=1;loop(4,
       (g_fx_t!=1 || gj<=2)?fx_control(g_fx_p+gj,c1x+g_fx_left+20,228+(gj-1)*59,g_cw-g_fx_left-25,fx_label(g_fx_t,gj),g_fx_t,gj);gj+=1;
     );
-    button(c1x,317,60,23,"Move",0)?g_fx_jump=fx_move_menu(g_fx_p/6,c1x,340);
-    iconbutton(c1x+68,317,28,23,0,g_fx_slot>0)?(fx_swap(g_fx_p,g_fx_p-6);g_fx_slot-=1;);
-    iconbutton(c1x+100,317,28,23,1,g_fx_slot<2)?(fx_swap(g_fx_p,g_fx_p+6);g_fx_slot+=1;);
-    iconbutton(c1x+132,317,28,23,2,1)?(push_undo();fx_cfg[g_fx_p]=0;g_cv_s=0;fx_touch(););
-    g_fx_t==9 ? button(c1x,354,g_fx_left,24,"Edit curve",g_cv_s==g_fx_p/6+1)?g_cv_s=g_cv_s?0:g_fx_p/6+1;
+    g_fx_tools=page==3?432:317;
+    button(c1x,g_fx_tools,60,23,"Move",0)?g_fx_jump=fx_move_menu(g_fx_p/6,c1x,g_fx_tools+23);
+    iconbutton(c1x+68,g_fx_tools,28,23,0,g_fx_slot>0)?(fx_swap(g_fx_p,g_fx_p-6);g_fx_slot-=1;);
+    iconbutton(c1x+100,g_fx_tools,28,23,1,g_fx_slot<2)?(fx_swap(g_fx_p,g_fx_p+6);g_fx_slot+=1;);
+    iconbutton(c1x+132,g_fx_tools,28,23,2,1)?(push_undo();fx_cfg[g_fx_p]=0;g_cv_s=0;fx_touch(););
+    g_fx_t==9 ? button(c1x,(page==3?456:g_fx_tools+37),g_fx_left,24,"Edit curve",g_cv_s==g_fx_p/6+1)?g_cv_s=g_cv_s?0:g_fx_p/6+1;
     g_fx_t==10 ? (
       g_ce=conv_entry(g_fx_p/6);g_cm=conv_tab+160+max(0,g_ce)*8;g_cn=g_ce>=0?g_cm[0]:0;
-      col_dim();label(c1x,360,"Impulse response");
-      g_cn>0?sprintf(#g_ir,"%.0f frames · %.0f Hz",g_cn,g_cm[1]):strcpy(#g_ir,"No IR: passes dry");label(c1x,381,#g_ir);
-      g_cm[4]==3?(col_warm();label(c1x,402,"Load failed; previous IR kept"));
-      col_dim();label(c1x,425,"Drop audio here");
-      g_cn>0 && conv_req==0 && button(c1x,450,75,20,"Clear IR",0)?(conv_req_e=g_ce;conv_req=2;g_cm[4]=0;);
+      col_dim();label(c1x,g_fx_tools+43,"Impulse response");
+      g_cn>0?sprintf(#g_ir,"%.0f frames · %.0f Hz",g_cn,g_cm[1]):strcpy(#g_ir,"No IR: passes dry");label(c1x,g_fx_tools+64,#g_ir);
+      g_cm[4]==3?(col_warm();label(c1x,g_fx_tools+85,"Load failed; previous IR kept"));
+      col_dim();label(c1x,g_fx_tools+108,"Drop audio here");
+      g_cn>0 && conv_req==0 && button(c1x,g_fx_tools+133,75,20,"Clear IR",0)?(conv_req_e=g_ce;conv_req=2;g_cm[4]=0;);
       gfx_getdropfile(0,#g_drop)?(g_drop_pend=1;g_drop_hit=g_fx_p/6;g_drop_first=g_fx_p/6;gfx_getdropfile(-1););
     );
-    g_fx_t==11?sup_meter(g_fx_p/6,c1x,365,g_fx_left,34);
+    g_fx_t==11?sup_meter(g_fx_p/6,c1x,page==3?458:g_fx_tools+48,g_fx_left,page==3?24:34);
     gfont(1,13);
   );
 ) : g_drop_pend=0;
@@ -2747,6 +2835,8 @@ function tab_help(n) (
   n==9 ? "Sound picked up inside the body, mixed into what the mouth radiates. Throat: a resonant lowpass of the pressure at the glottis (mix, cutoff, resonance). Flow pickup: the glottal flow derivative, silent while the folds are closed." :
   "Stereo and dynamics. Stereo width splits the branches left and right; Compression evens out the level. The trace shows the output. Output level is at the bottom of the window. Not drawn by the dice.";
 );
+// Tract Convolver uses this lower space for its IR controls.
+!(g_fx_view && page==3 && g_fx_t==10) ? (
 hx=c1x;hy=488;hw=g_cw;hh2=112;
 panel(hx,hy,hw,hh2);
 // Separate contextual help (or the curve editor) from the controls above.
@@ -2782,7 +2872,7 @@ g_link_edit>0 ? (
     g_cv_m=gfx_showmenu("Swell|Triangle|Ramp up|Ramp down|Soft square|Random");
     g_cv_m>0 ? (push_undo(); fx_curve_preset(g_cv_s-1,g_cv_m-1); fx_touch(););
   );
-  button(hx+hw-64,hy+4,56,19,"Smooth",0) ? (push_undo(); fx_curve_smooth(g_cv_s-1); fx_touch(););
+  button(hx+hw-64,hy+4,56,19,"Smooth",0) ? (push_undo(); fx_curve_smooth(g_cv_s-1,42); fx_touch(););
   g_cv_x=hx+8; g_cv_y=hy+27; g_cv_w=hw-16; g_cv_h=hh2-35;
   col_line(); grect(g_cv_x,g_cv_y,g_cv_w,g_cv_h);
   col_grid(); gline(g_cv_x,g_cv_y+g_cv_h*.5,g_cv_x+g_cv_w,g_cv_y+g_cv_h*.5);
@@ -2813,11 +2903,11 @@ g_link_edit>0 ? (
     col_ink(.5); gline(g_cv_px,g_cv_y,g_cv_px,g_cv_y+g_cv_h);
   );
 ) : hover_id<=-3000 && hover_id>=-3009 ? (
-  col_acc();label(hx+8,hy+7,"Section FX bypass");col_dim();
-  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Red: at least one insert is active with nonzero Wet. Click to bypass or enable this section's inserts together. Use the boxed FX button inside the panel to edit its chain.");
-) : hover_id==-3100 || g_fx_view ? (
+  col_acc();label(hx+8,hy+7,"Open section FX");col_dim();
+  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Opens this section's FX page, including an empty or bypassed chain. Red: at least one insert is enabled with nonzero Wet; grey: none are active. Opening the page does not change the sound. Click the tab name to return to its controls.");
+) : g_fx_view ? (
   col_acc();label(hx+8,hy+7,"Insert effects");col_dim();
-  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Select a slot on the left; click Empty or the selected name to choose an effect. The dot bypasses that insert. Edit its controls on the right. Select a section tab to return to its controls. Tract and Feedback share a selector and one section bypass. OUT also provides access to occupied previous routing.");
+  wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Select a slot on the left; click Empty or the selected name to choose an effect. The dot bypasses that insert. Edit its controls on the right. Select a section tab to return to its controls. Tract and Feedback appear together. OUT also provides access to occupied previous routing.");
 ) : hover_id>0 ? (
   (hover_id>=26 && hover_id<=35) || (hover_id>=142 && hover_id<=161) ? sprintf(hover_lbl=#hsec,hover_id<=30?"Area %d":hover_id<=35?"X morph %d":hover_id<=146?"Length %d":hover_id<=151?"Branch %d length":hover_id<=156?"Branch %d level":"Branch %d pan",hover_id<=30?hover_id-25:hover_id<=35?hover_id-30:hover_id<=146?hover_id-141:hover_id<=151?hover_id-146:hover_id<=156?hover_id-151:hover_id-156);
   col_acc();label(hx+8,hy+7,hover_id==50?"Loop wait":hover_id==73?"Loop speed":hover_id>=76 && hover_id<=85 && (hover_id-76)%3==0?"Route amount":hover_lbl);
@@ -2833,7 +2923,7 @@ g_link_edit>0 ? (
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"On: resting the pointer on a fader's bar plays the value under it, and leaving restores the previous one; click to keep it. Off: faders change only when you click or drag. Saved with the project.");
 ) : hit(px,py,pw,ph) ? (
   col_acc();label(hx+8,hy+7,tb_owned ? (slider247>=.5 ? "XY pad  ·  trackpad" : "XY pad  ·  the pen plays it") : "XY pad");
-  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tb_owned && slider247>=.5 ? "Hold Option to use the full trackpad: one finger sets X/Y, pressing sets Z. Release Option or press Escape to restore the pointer. Each gesture records its pressure. Lift all fingers before starting another gesture." : tb_owned ? "The pen is on: it plays the pad and the mouse cannot. X and Y cover the whole tablet; pen pressure sets the air drive. Each pen gesture is recorded for Play, with its pressure. Turn the pen off (pen icon) to play with the mouse again." : "Hold and move to play. The pad's X and Y (or the pen's) play every linked parameter (right-click controls to assign them; by default Y pitch and jaw, X length and tube shape) and, on the pressure axis, the air. The loon is only a landmark. Each gesture is recorded for Play. Wheel zooms at the pointer, right-drag pans, FIT resets the view.");
+  col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tb_owned && slider247>=.5 ? "Hold Option to use the full trackpad: one finger sets X/Y, pressing sets Z. Release Option or press Escape to restore the pointer. Each gesture records its pressure. Lift all fingers before starting another gesture." : tb_owned ? "The pen is on: it plays the pad and the mouse cannot. X and Y cover the whole tablet; pen pressure sets the air drive. Each pen gesture is recorded for Play, with its pressure. Turn the pen off (pen icon) to play with the mouse again." : "Hold and move to play and record a gesture. Right-click controls to assign X/Y links. Shift-left-drag crops their current ranges to the selected area, then spreads those ranges over the whole pad (Undo available; Z unchanged). Wheel zooms, right-drag pans, FIT resets the view.");
 ) : hit(g_undo_c-13.75,19.25,g_tool_pitch+27.5,27.5) ? (
   col_acc();label(hx+8,hy+7,"UNDO / REDO  (Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z)");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Steps back and forth through parameter changes made in this window (clicks, drags, double-click resets) and recorded pad gestures: up to 100 steps. Hover previews are not steps until you click.");
@@ -2863,9 +2953,9 @@ g_link_edit>0 ? (
 ) : g_dice_hover && !g_rv ? (
   col_acc();label(hx+8,hy+7,"Dice");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,"Draws new values for this tab that make sense together and with the rest, even when its padlock is closed: the air so the folds can start, the pitch from the tract length, sizes from the pitch. If the voice is playing and the folds stay still, it corrects the air a few times. One undo step.");
-) : g_rv ? (
+) : g_rv || g_ra_over ? (
   col_acc();label(hx+8,hy+7,"Random voice");
-  strcpy(#rvh,"A whole creature: a size from a small bird to a large animal sets the tract length, and every unlocked tab is drawn around it (the padlocks under the tab names). ");
+  strcpy(#rvh,"0% keeps the current sound; 100% uses Loon's original coherent recipe, with tuned ranges and relationships between size, pitch and air pressure. Click or drag the percentage to edit it. Section dice stay at full strength. ");
   g_lc=0; gi=0; loop(g_tab_count, g_pg=tab_page(gi); locked(g_pg) ? (strcat(#rvh,g_lc ? ", " : "Locked: "); strcat(#rvh,tab_name(g_pg)); g_lc+=1;); gi+=1;);
   strcat(#rvh,g_lc ? ". One undo step." : "Nothing locked. One undo step.");
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,#rvh);
@@ -2877,6 +2967,7 @@ g_link_edit>0 ? (
   col_acc();label(hx+8,hy+7,tab_name(hover_tab));
   col_dim();wraptext(hx+8,hy+25,hw-16,hy+hh2-15,tab_help(hover_tab));
   gfx_x=(hx+hw-8)*g_s;
+);
 );
 g_research_open ? (
   col_veil(.65); gfx_rect(0,0,gfx_w,gfx_h);

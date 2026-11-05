@@ -90,11 +90,30 @@
   </category>
   <category name="Loon">
     <reapack name="mtt_loon.jsfx" type="effect" desc="MTT Loon">
-      <version name="0.35" author="Mattia Persico" time="2026-11-04T16:55:08Z">
-          <source file="loon_conv.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_conv.jsfx-inc</source>
+      <version name="0.36" author="Mattia Persico" time="2026-11-05T17:16:07Z">
+          <source file="Chiaro.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/Chiaro.png</source>
+          <source file="Scuro.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/Scuro.png</source>
+          <source file="loon.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon.png</source>
+          <source file="loon_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_dark.png</source>
           <source file="loon_fx.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_fx.jsfx-inc</source>
-          <source file="loon_supp.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/loon_supp.jsfx-inc</source>
+          <source file="mtt_fx_chorus.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_chorus.jsfx-inc</source>
+          <source file="mtt_fx_convolver.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_convolver.jsfx-inc</source>
+          <source file="mtt_fx_core.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_core.jsfx-inc</source>
+          <source file="mtt_fx_curvevolume.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_curvevolume.jsfx-inc</source>
+          <source file="mtt_fx_delay.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_delay.jsfx-inc</source>
+          <source file="mtt_fx_flanger.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_flanger.jsfx-inc</source>
+          <source file="mtt_fx_groupdelay.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_groupdelay.jsfx-inc</source>
+          <source file="mtt_fx_reverb.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_reverb.jsfx-inc</source>
+          <source file="mtt_fx_ringmod.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_ringmod.jsfx-inc</source>
+          <source file="mtt_fx_saturation.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_saturation.jsfx-inc</source>
+          <source file="mtt_fx_suppressor.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_suppressor.jsfx-inc</source>
+          <source file="mtt_fx_types.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_fx_types.jsfx-inc</source>
           <source main="main" file="mtt_loon.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/mtt_loon.jsfx</source>
+          <source file="title.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/title.png</source>
+          <source file="title_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/title_dark.png</source>
+          <source file="ui_icons_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/ui_icons_2x.png</source>
+          <source file="wm.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/wm.png</source>
+          <source file="wm_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_loon/wm_dark.png</source>
       </version>
     </reapack>
   </category>
@@ -122,16 +141,43 @@
   </category>
   <category name="Breeze">
     <reapack name="mtt_wind_lab.jsfx" type="effect" desc="MTT Breeze">
-      <version name="0.5.1" author="Mattia Persico" time="2026-11-04T16:55:31Z">
+      <version name="0.5.2" author="Mattia Persico" time="2026-11-05T17:16:07Z">
+          <source file="breeze_bg_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_bg_dark.png</source>
+          <source file="breeze_bg_dark_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_bg_dark_2x.png</source>
+          <source file="breeze_bg_light.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_bg_light.png</source>
+          <source file="breeze_bg_light_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_bg_light_2x.png</source>
+          <source file="breeze_icons_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_icons_dark.png</source>
+          <source file="breeze_icons_dark_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_icons_dark_2x.png</source>
+          <source file="breeze_icons_light.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_icons_light.png</source>
+          <source file="breeze_icons_light_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_icons_light_2x.png</source>
+          <source file="breeze_windmark_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_windmark_dark.png</source>
+          <source file="breeze_windmark_dark_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_windmark_dark_2x.png</source>
+          <source file="breeze_windmark_light.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_windmark_light.png</source>
+          <source file="breeze_windmark_light_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_windmark_light_2x.png</source>
+          <source file="breeze_wordmark_dark.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_wordmark_dark.png</source>
+          <source file="breeze_wordmark_dark_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_wordmark_dark_2x.png</source>
+          <source file="breeze_wordmark_light.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_wordmark_light.png</source>
+          <source file="breeze_wordmark_light_2x.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_wordmark_light_2x.png</source>
+          <source file="breeze_wordmark_source.png">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/breeze_wordmark_source.png</source>
+          <source file="mtt_fx_chorus.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_chorus.jsfx-inc</source>
+          <source file="mtt_fx_convolver.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_convolver.jsfx-inc</source>
+          <source file="mtt_fx_core.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_core.jsfx-inc</source>
+          <source file="mtt_fx_curvevolume.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_curvevolume.jsfx-inc</source>
+          <source file="mtt_fx_delay.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_delay.jsfx-inc</source>
+          <source file="mtt_fx_flanger.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_flanger.jsfx-inc</source>
+          <source file="mtt_fx_groupdelay.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_groupdelay.jsfx-inc</source>
+          <source file="mtt_fx_reverb.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_reverb.jsfx-inc</source>
+          <source file="mtt_fx_ringmod.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_ringmod.jsfx-inc</source>
+          <source file="mtt_fx_saturation.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_saturation.jsfx-inc</source>
+          <source file="mtt_fx_suppressor.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_suppressor.jsfx-inc</source>
+          <source file="mtt_fx_types.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_fx_types.jsfx-inc</source>
           <source main="main" file="mtt_wind_lab.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/mtt_wind_lab.jsfx</source>
           <source file="wl_array.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_array.jsfx-inc</source>
-          <source file="wl_conv.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_conv.jsfx-inc</source>
           <source file="wl_core.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_core.jsfx-inc</source>
           <source file="wl_fx.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_fx.jsfx-inc</source>
           <source file="wl_models.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_models.jsfx-inc</source>
           <source file="wl_rack.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_rack.jsfx-inc</source>
           <source file="wl_routes.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_routes.jsfx-inc</source>
-          <source file="wl_supp.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_wind_lab/wl_supp.jsfx-inc</source>
       </version>
     </reapack>
   </category>

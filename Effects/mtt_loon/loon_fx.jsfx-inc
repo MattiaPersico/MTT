@@ -1,54 +1,70 @@
-// Private Loon insert rack. Config: type, mix, A, B, C, enabled (42 x 6).
-// Types: 1 Ring Mod, 2 Flanger, 3 Chorus, 4 Delay, 5 Reverb, 6 Saturation, 7 legacy dispersion
-// (migrated), 8 Group Delay, 9 Curve Volume (drawn curve per slot, fx_curve: 65 values per slot),
-// 10 Convolver (any point; at most CONV_NI engines in total, the stereo output point uses two; see loon_conv.jsfx-inc),
-// 11 Resonance Suppressor (automatic, zero latency; see loon_supp.jsfx-inc).
+// Loon's insert rack: the topology around the shared FX modules (mtt_fx_*.jsfx-inc, vendored
+// from lib/fx/; API card in lib/README.md). Config: type, mix, A, B, C, enabled (42 x 6).
+// 14 insertion points x 3 slots. Slots 0-38 are mono lanes at the internal rate (ir); the stereo
+// output slots 39-41 run as lanes 39-41 (left) and 42-44 (right) at the host rate.
+// Loon-specific here: lane rates and order (fx_run / fx_count), the Convolver's IR entries owned
+// by slots (at most CONV_NI engines in total, the stereo output point uses two), the Resonance
+// Suppressor's stereo link, Delay/Reverb damping up to 16 kHz, and the Ring Mod on the air
+// pressure (point 0) multiplying by 0..1.
 // All functions use local temporaries; @gfx only writes the configuration bank.
 @init
-// Drawn curve of a Curve Volume slot: 64 gain values over one cycle, then a marker (1).
-function fx_curve_preset(n,kind) local(cv,i,u,v) (
-  cv=fx_curve+n*65; i=0;
-  loop(64,
-    u=i/64;
-    v=kind==1 ? 1-abs(2*u-1) : kind==2 ? u : kind==3 ? 1-u :
-      kind==4 ? .5+.5*max(-1,min(1,3*sin(2*$pi*u))) :
-      kind==5 ? (i==0 ? rand(1) : cv[i-1]*.6+.4*rand(1)) :
-      .5-.5*cos(2*$pi*u);
-    cv[i]=max(0,min(1,v)); i+=1;
-  );
-  cv[64]=1;
+// Entry owned by a Convolver slot (stored in the first value of the slot's curve record as
+// (entry + 1) / 16, which the move / swap / undo / save paths already carry), or -1.
+function conv_entry(slot) local(e) (e=floor(fx_curve[slot*65]*16+.5)-1; e>=0 && e<CONV_NI ? e : -1;);
+// Gives a Convolver slot a free entry (none if all are taken). Returns the entry or -1.
+function conv_assign(slot) local(k,e,f) (
+  memset(conv_tab+400,0,CONV_NI);
+  k=0; loop(42, k!=slot && fx_cfg[k*6]==10 ? (e=conv_entry(k); e>=0 ? conv_tab[400+e]=1;); k+=1;);
+  f=-1; e=0; loop(CONV_NI, f<0 && conv_tab[400+e]==0 ? f=e; e+=1;);
+  f>=0 ? (fx_curve[slot*65]=(f+1)/16; conv_clear(f);) : fx_curve[slot*65]=0;
+  f;
 );
-// Periodic [1 2 1] / 4 smoothing of a drawn curve (scratch: 64 values after the bank).
-function fx_curve_smooth(n) local(cv,t,i) (
-  cv=fx_curve+n*65; t=fx_curve+2730;
-  i=0; loop(64, t[i]=.25*cv[(i+63)&63]+.5*cv[i]+.25*cv[(i+1)&63]; i+=1;);
-  i=0; loop(64, cv[i]=t[i]; i+=1;);
-);
-function fx_validate() local(k,p,j,n,cv,i) (
+// Every Convolver slot must own a distinct valid entry: the first claimant keeps it, the others
+// (invalid, duplicate, or an old save) get a free one, or become empty slots when none is left.
+function conv_validate() local(k,e) (
+  memset(conv_tab+400,0,CONV_NI);
   k=0; loop(42,
-    p=fx_cfg+k*6;
-    p[0]=p[0]==p[0] ? max(0,min(11,floor(p[0]))) : 0;
-    j=1; loop(5, p[j]=p[j]==p[j] ? max(0,min(1,p[j])) : 0; j+=1;);
-    // Saved 0.28 dispersion: preserve physical frequency, stage count and Q.
-    p[0]==7 ? (
-      p[0]=8; p[2]=log((40*300^p[2])/20)/log(800);
-      p[3]*=24/128; p[4]*=log(16)/log(64);
+    fx_cfg[k*6]==10 ? (
+      e=conv_entry(k);
+      e>=0 && conv_tab[400+e]==0 ? conv_tab[400+e]=1 : fx_curve[k*65]=0;
     );
     k+=1;
   );
-  n=0; loop(42,
-    cv=fx_curve+n*65;
-    cv[64]!=1 ? fx_curve_preset(n,0) : (i=0; loop(64, cv[i]=cv[i]==cv[i] ? max(0,min(1,cv[i])) : 0; i+=1;););
-    n+=1;
-  );
-  conv_validate();
+  k=0; loop(42, fx_cfg[k*6]==10 && conv_entry(k)<0 ? (conv_assign(k)<0 ? fx_cfg[k*6]=0;); k+=1;);
 );
+// Resonance Suppressor lane (FX type 11). Stereo output: lanes 39-41 (left) and 42-44 (right)
+// of the same slot share the larger cut. The right lane runs after the left one in the same
+// sample and sets the gains of both, so identical channels stay identical; an unlinked lane
+// sets its own.
+function sup_run(k,q,base,x,age,r,amt,lo,hi) local(na,p,o,pb,link,aa,ar,j,t,c) (
+  sup_step(q,base,x,age,r,amt,lo,hi) ? (
+    na=q[9]; link=0;
+    k>=39 ? (
+      p=k<42 ? k+3 : k-3; o=fx_st+p*32; pb=fx_buf+p*131072;
+      link=o[0]==11 && o[7]>0 && o[9]==na && o[1]>0;
+    );
+    !(link && k<42) ? (
+      aa=sup_attack(q,r); ar=sup_release(q,r);
+      j=0; loop(na,
+        t=base[3072+j]; link ? t=max(t,pb[3072+j]);
+        c=sup_gain(base,j,t,aa,ar); sup_set(base,j,c);
+        link ? sup_set(pb,j,c);
+        j+=1;
+      );
+    );
+  );
+  sup_bells(q,base,x);
+);
+function fx_validate() (fx_cfg_validate(42); conv_validate(););
 // Targets are copied once per block. Runtime state is owned by the audio thread.
-function fx_prepare() local(k,q,p,t,r,n,a,b,c,om,alpha) (
+function fx_prepare() local(k,q,p,t,r,n,a,b,c) (
+  fx_run=484100;fx_count=484200;memset(fx_count,0,15);
   memset(fx_on,0,14); conv_cnt=0;
   k=0; loop(45,
     n=k<42 ? k : k-3; p=fx_cfg+n*6; q=fx_st+k*32;
     t=max(0,min(11,floor(p[0]))); r=n<39 ? ir : srate;
+    // Empty lanes have no targets to decode or histories to advance.
+    (t>0 || q[0]>0 || q[1]>0 || (p[5]>=.5 && p[1]>0)) ? (
     a=max(0,min(1,p[2])); b=max(0,min(1,p[3])); c=max(0,min(1,p[4]));
     // Compatibility for old in-memory settings; audio never writes the bank.
     t==7 ? (t=8; a=log((40*300^a)/20)/log(800); b*=24/128; c*=log(16)/log(64););
@@ -58,122 +74,41 @@ function fx_prepare() local(k,q,p,t,r,n,a,b,c,om,alpha) (
     conv_tab[450+k]=-1; conv_tab[500+k]=0;
     t==10 && conv_cnt<CONV_NI ? (
       conv_tab[450+k]=conv_cnt; conv_cnt+=1;
-      conv_tab[500+k]=conv_sync(conv_tab[450+k],k,conv_entry(n),r,(p[5]>=.5 && p[1]>0) || q[1]>.000001);
+      conv_tab[500+k]=conv_sync(conv_tab[450+k],k,conv_entry(n),k>=42,r,(p[5]>=.5 && p[1]>0) || q[1]>.000001);
     );
     q[16]=t; q[17]=p[5]>=.5 ? max(0,min(1,p[1])) : 0;
-    q[18]= t==1 ? min(r*.2,1*2000^a) : t==2 ? .02*200^a : t==3 ? .05*60^a :
-      t==4 ? min(131068/r,.001*500^a) : t==5 ? .4+1.2*a : t==8 ? min(r*.4,20*800^a) : t==9 ? .05*2000^a : t==10 ? 10^((-24+48*a)/20) : t==11 ? a : 10^(36*a/20);
-    q[19]= t==2 ? b*.004 : t==3 ? .001+b*.009 : t==4 ? b*.85 : t==5 ? .1+b*.8 : t==8 ? 128*b : t==10 ? (b>=.999 ? 1 : 1-exp(-2*$pi*300*(min(18000,.45*r)/300)^b/r)) : t==11 ? 20*1000^b : b;
-    q[20]= t==2 ? c*.85 : t==3 ? c*.5 : t==4 || t==5 ? 1-exp(-2*$pi*min(r*.4,300*(16000/300)^c)/r) : t==10 ? (c<=.001 ? 0 : 1-exp(-2*$pi*20*50^c/r)) : t==11 ? 20*1000^c : c;
-    q[21]=1-exp(-1/(.015*r)); q[22]=r;
-    // Curve Volume wobble: slow (1.5 Hz) and faster (9 Hz) smoothed noise, scaled to unit deviation.
-    q[27]=1-exp(-2*$pi*1.5/r); q[28]=sqrt(3*(2-q[27])/q[27]);
-    q[29]=1-exp(-2*$pi*9/r); q[30]=sqrt(3*(2-q[29])/q[29]);
-    t==8 ? (
-      // RBJ all-pass: numerator reverses the normalized denominator.
-      // https://www.w3.org/TR/audio-eq-cookbook/#APF
-      om=2*$pi*q[18]/r; alpha=sin(om)/(2*(.5*64^c));
-      q[23]=-2*cos(om)/(1+alpha); q[24]=(1-alpha)/(1+alpha);
-    );
+    fx_lane_targets(q,t,r,a,b,c,16000);
     (t>0 && q[17]>0) || q[1]>.000001 ? fx_on[floor(n/3)]=1;
+    q[17]>0 || q[1]>0 || q[0]!=q[16] ? (
+      fx_run[floor(k/3)*3+fx_count[floor(k/3)]]=k;fx_count[floor(k/3)]+=1;
+    );
+    );
     k+=1;
   );
 );
-function fx_tap(base,pos,age,d,mask) local(ix,f) (
-  d=max(1,min(mask-2,d)); ix=floor(d); f=d-ix;
-  age>=ix+1 ? base[(pos-ix)&mask]*(1-f)+base[(pos-ix-1)&mask]*f : 0;
-);
-function fx_lane(k,x,pressure_mode) local(q,t,w,a,b,c,ph,pos,age,base,d,y,z,j,lim,fb,wet,r,sc,ap1,ap2,stages,frac,ay,limit,n,cv,u,ci,p0,p1,p2,p3) (
-  q=fx_st+k*32; t=q[0]; sc=q[21]; r=q[22];
-  // Fade through dry before a type change. Buffers reset by age, not memset.
-  w=q[16]!=t ? 0 : q[17];
-  q[1]+=sc*(w-q[1]); abs(q[1]-w)<.000001 ? q[1]=w;
-  q[16]!=t && q[1]==0 ? (
-    q[0]=t=q[16]; q[5]=q[6]=q[7]=0;
-    q[8]=q[9]=q[10]=q[11]=0;
-    q[2]=q[18]; q[3]=q[19]; q[4]=q[20];
-    q[25]=q[23]; q[26]=q[24];
+// One sample of lane k. pressure_mode: the air pressure point (Ring Mod multiplies by 0..1).
+function fx_lane(k,x,pressure_mode) local(q,t,base,n,y) (
+  q=fx_st+k*32;
+  fx_lane_begin(q) ? (
+    t=q[0]; base=fx_buf+k*131072;
+    y=t==9 ? fx_curvevol_run(q,x,fx_curve+(k<42 ? k : k-3)*65,0,1) :
+      t==10 ? (
+        // Lanes 0-38 are mono at the internal rate (first IR channel), 39-41 the left channel
+        // and 42-44 the right at the host rate. Without an impulse response in its slot the
+        // lane passes the signal (conv_sync in fx_prepare decides).
+        n=conv_tab[450+k];
+        n>=0 && conv_tab[500+k]==1 ? fx_convolver_run(q,x,n,conv_hb+n*CONV_BS) : x;
+      ) :
+      t==11 ? sup_run(k,q,base,x,q[7],q[22],q[2],q[3],q[4]) :
+      fx_type_run(q,t,base,x,pressure_mode);
+    x=fx_lane_end(q,x,y);
   );
-  // Keep the old algorithm's parameters while fading out for replacement.
-  t==q[16] ? (q[2]+=sc*(q[18]-q[2]); q[3]+=sc*(q[19]-q[3]); q[4]+=sc*(q[20]-q[4]););
-  t>0 && q[1]>0 ? (
-    a=q[2]; b=q[3]; c=q[4]; ph=q[5]; pos=q[6]; age=q[7]; base=fx_buf+k*131072;
-    t==1 ? (
-      y=x*(pressure_mode ? .5+.5*sin(ph) : sin(ph)); ph+=2*$pi*a/r;
-    ) : t==6 ? (
-      // Biased soft saturation with zero output at zero input; C is output trim.
-      d=(b-.5); z=a*x+d; y=(z/sqrt(1+z*z)-d/sqrt(1+d*d))*10^((-18+18*c)/20);
-    ) : t==8 ? (
-      // Two transposed-direct-form-II states per stage, in the existing arena.
-      // Clear only the bounded cascade history; inactive stages start at zero.
-      limit=128;
-      age==0 ? memset(base,0,2*limit);
-      t==q[16] ? (q[25]+=sc*(q[23]-q[25]); q[26]+=sc*(q[24]-q[26]););
-      ap1=q[25]; ap2=q[26]; stages=floor(b); frac=b-stages;
-      y=x; z=x; wet=x; j=0;
-      loop(limit,
-        j<ceil(b) ? (
-          ay=ap2*y+base[j*2];
-          base[j*2]=ap1*(y-ay)+base[j*2+1];
-          base[j*2+1]=y-ap2*ay;
-          y=ay; j<stages ? z=y : wet=y;
-        ) : (base[j*2]=base[j*2+1]=0;);
-        j+=1;
-      );
-      y=z+frac*(wet-z);
-    ) : t==9 ? (
-      // Drawn volume curve (Catmull-Rom through the 64 stored points, periodic). Speed wobble
-      // bends the rate by up to 2.5 octaves at full amount; curve wobble adds slow timing
-      // noise and faster level noise relative to the curve (a silent curve stays silent). Wet is the depth.
-      q[8]+=q[27]*((rand(2)-1)*q[28]-q[8]);
-      q[9]+=q[29]*((rand(2)-1)*q[30]-q[9]);
-      q[10]+=q[27]*((rand(2)-1)*q[28]-q[10]);
-      ph+=2*$pi*a*2^(b*max(-2.5,min(2.5,q[8])))/r;
-      u=ph/(2*$pi)+c*.08*max(-2.5,min(2.5,q[10])); u-=floor(u);
-      n=k<42 ? k : k-3; cv=fx_curve+n*65;
-      u*=64; ci=floor(u); u-=ci;
-      p0=cv[(ci+63)&63]; p1=cv[ci&63]; p2=cv[(ci+1)&63]; p3=cv[(ci+2)&63];
-      y=p1+.5*u*(p2-p0+u*(2*p0-5*p1+4*p2-p3+u*(3*(p1-p2)+p3-p0)));
-      y=x*max(0,min(1,y*(1+c*.5*max(-2.5,min(2.5,q[9])))));
-    ) : t==10 ? (
-      // Convolver. Lanes 0-38 are mono at the internal rate (first IR channel), 39-41 the left
-      // channel and 42-44 the right at the host rate. Without an impulse response in its slot the
-      // slot passes the signal (conv_sync in fx_prepare decides). B closes a low-pass, C opens a low cut.
-      y=x; n=conv_tab[450+k];
-      n>=0 && conv_tab[500+k]==1 ? (
-        y=conv_run(n,conv_hb+n*CONV_BS,x,64+n*8);
-        q[8]+=b*(y-q[8]); y=q[8];
-        q[9]+=c*(y-q[9]); y=(y-q[9])*a;
-      );
-    ) : t==11 ? (
-      // Resonance Suppressor: A is Amount, B and C the Low and High limits in Hz (20 and 20000: no limit).
-      y=sup_run(k,q,base,x,age,r,a,b,c);
-    ) : t==5 ? (
-      // Four damped feedback combs, mixed in parallel (a small Schroeder-style room).
-      y=0; j=0; loop(4,
-        d=min(32765,(j==0?.0297:j==1?.0371:j==2?.0411:.0437)*a*r);
-        z=fx_tap(base+j*32768,pos&32767,age,d,32767);
-        q[8+j]+=c*(z-q[8+j]);
-        wet=x*.35+b*q[8+j]; base[j*32768+(pos&32767)]=max(-32,min(32,wet));
-        y+=z*.5; j+=1;
-      );
-    ) : (
-      d=t==2 ? (.0005+b*(.5+.5*sin(ph)))*r : t==3 ? (.015+b*sin(ph))*r : a*r;
-      y=fx_tap(base,pos,age,d,131071);
-      t==3 ? y=.5*(y+fx_tap(base,pos,age,(.021+b*sin(ph+1.7))*r,131071));
-      t==4 ? (q[8]+=c*(y-q[8]); y=q[8]; fb=b;) : fb=c;
-      z=x+fb*y; base[pos]=max(-32,min(32,z));
-      t==2 || t==3 ? ph+=2*$pi*a/r;
-    );
-    ph>=2*$pi ? ph-=2*$pi;
-    q[5]=ph; q[6]=(pos+1)&131071; q[7]=min(131072,age+1);
-    x+=q[1]*(y-x);
-  ) : (q[7]=0; q[8]=q[9]=q[10]=q[11]=0;);
   x;
 );
-function fx_chain(point,x,right) local(j,k) (
-  j=0; loop(3,
-    k=point*3+j+(right ? 3 : 0); x=fx_lane(k,x,point==0); j+=1;
+function fx_chain(point,x,right) local(j,k,chain) (
+  chain=point+(right?1:0);
+  j=0; loop(fx_count[chain],
+    k=fx_run[chain*3+j]; x=fx_lane(k,x,point==0); j+=1;
   );
   // Internal waves have finite headroom; the original path is untouched when off.
   point<7 ? max(-16,min(16,x)) : x;

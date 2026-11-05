@@ -6,15 +6,29 @@ function wfx_route(slot) local(p) (
   slot<5 ? floor(max(0,min(6,slider(92+slot*7)))+.5) : (p=floor((slot-5)/3);p==5?6:p;);
 );
 function wfx_owner(slot) local(p) (p=wfx_route(slot);p==6?5:p==5?4:p;);
-// Compatibility inserts come first. Empty fixed slots fill the remaining visible rows.
-function wfx_chain_slot(owner, row) local(k,n,result) (
+// A permutation of stable physical slots: payloads and automation remain attached.
+function wfx_order_reset() local(k) (k=0;loop(23,FX_ORDER[k]=k;k+=1;););
+function wfx_order_validate() local(k,n,seen,valid) (
+  k=0;seen=0;valid=1;
+  loop(23,
+    n=FX_ORDER[k];
+    n>=0 && n<23 && n==floor(n) ? (
+      seen & (1<<n) ? valid=0;
+      seen=seen | (1<<n);
+    ) : valid=0;
+    k+=1;
+  );
+  !valid ? wfx_order_reset();
+);
+// Old projects start with compatibility inserts first, then empty/fixed slots.
+function wfx_chain_slot(owner, row) local(k,n,slot,result) (
   k=0;n=0;result=-1;
-  loop(5,
-    floor(slider(wfx_slider(k,0)))>0 && wfx_owner(k)==owner ? (
-      n==row ? result=k;n+=1;
+  while(k<23 && result<0)(
+    slot=FX_ORDER[k];
+    wfx_owner(slot)==owner && (slot>=5 || floor(slider(wfx_slider(slot,0)))>0) ? (
+      n==row ? result=slot;n+=1;
     );k+=1;
   );
-  result<0 && row>=n ? result=5+owner*3+row-n;
   result;
 );
 function wfx_slot_id(id) (id<=120?floor((id-86)/7):5+floor((id-121)/6););

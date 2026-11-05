@@ -6,18 +6,20 @@ function wfx_reset() local(i) (
 );
 function wfx_init() local(i) (
   fx_cfg=310000;fx_st=311000;FX_ROUTE=320000;FX_MOD=320100;fx_on=320500;
-  fx_curve=321000;FX_SUM=323000;FX_VISIBLE=323100;GUI_FXSEL=324000;
+  fx_curve=321000;FX_SUM=323000;FX_VISIBLE=323100;GUI_FXSEL=324000;FX_RUN=326000;FX_COUNT=326200;FX_ORDER=326300;
   // Both algorithms use the same lane's arena, never another lane's. All FFT arenas align.
   FX_STRIDE=262144;fx_buf=1048576;conv_st=fx_buf;
   conv_hb=73400320;conv_irm=79429632;
   conv_stg=85458944;conv_pre=85721088;conv_scr=85786624;GUI_IR_SCR=85983232;
-  conv_init();
+  // Convolver: conv_tab at 300000, 23 IR entries (one per slot), entry metadata at +2304, engine
+  // build records at +2560, spectra shared per entry and channel (every lane runs at srate).
+  conv_init(300000,23,2304,2560,1);
   !wfx_ready ? (
-    memset(fx_curve,0,1559);i=0;loop(23,fx_curve_preset(i,0);FX_ROUTE[i]=wfx_route(i);i+=1;);
+    wfx_order_reset();memset(fx_curve,0,1559);i=0;loop(23,fx_curve_preset(i,0);FX_ROUTE[i]=wfx_route(i);i+=1;);
     wfx_ready=1;
   );wfx_reset();
 );
-function wfx_prepare() local(i,j,p,route,quiet,owner,slot) (
+function wfx_prepare() local(i,j,p,route,quiet,owner,slot,order) (
   memset(FX_VISIBLE,0,23);owner=0;
   loop(6,j=0;loop(3,slot=wfx_chain_slot(owner,j);slot>=0?FX_VISIBLE[slot]=1;j+=1;);owner+=1;);
   i=0;loop(23,
@@ -39,17 +41,26 @@ function wfx_prepare() local(i,j,p,route,quiet,owner,slot) (
   ) : gui_conv_req==2 ? (conv_clear(gui_conv_entry);gui_conv_req=0;) :
   gui_conv_req==3 ? (conv_tab[2304+gui_conv_entry*8+4]=3;gui_conv_req=0;);
   fx_prepare();
-);
-function wfx_process(point) local(i,c) (
-  // Process in the same legacy-first/fixed-slot order used by the panel. A departing
-  // insert keeps its old point during its short fade; FX_VISIBLE controls its target Wet.
-  i=0;loop(23,
-    FX_ROUTE[i]==point && (FX_VISIBLE[i] || fx_st[i*12*32+1]>0) ? (
-      c=0;loop(arr_n,CHF[c]!=3?OUTC[c]=fx_lane(i*12+c,OUTC[c],0);c+=1;);
-    );i+=1;
+  // Compile routing once per block; sample processing visits only running slots.
+  memset(FX_COUNT,0,7);order=0;
+  loop(23,
+    i=FX_ORDER[order];p=fx_st+i*12*32;route=FX_ROUTE[i];
+    (FX_VISIBLE[i] || p[1]>0) && (p[17]>0 || p[1]>0 || p[0]!=p[16]) ? (
+      FX_RUN[route*24+FX_COUNT[route]]=i;FX_COUNT[route]+=1;
+    );order+=1;
   );
 );
-function wfx_begin(point) (fx_on[point]?(memcpy(FX_SUM,OUTC,12);memset(OUTC,0,12);););
+function wfx_process(point) local(i,c,slot) (
+  i=0;loop(FX_COUNT[point],
+    slot=FX_RUN[point*24+i];
+    c=0;loop(arr_n,CHF[c]!=3?OUTC[c]=fx_lane(slot*12+c,OUTC[c],0);c+=1;);
+    i+=1;
+  );
+);
+function wfx_begin(point) ((fx_on[point] || (point<5 && MIX_GAIN[point]!=1))?(memcpy(FX_SUM,OUTC,12);memset(OUTC,0,12);););
 function wfx_end(point) local(c) (
-  fx_on[point]?(wfx_process(point);c=0;loop(arr_n,OUTC[c]+=FX_SUM[c];c+=1;););
+  (fx_on[point] || (point<5 && MIX_GAIN[point]!=1))?(
+    fx_on[point]?wfx_process(point);
+    c=0;loop(arr_n,OUTC[c]=OUTC[c]*(point<5?MIX_GAIN[point]:1)+FX_SUM[c];c+=1;);
+  );
 );

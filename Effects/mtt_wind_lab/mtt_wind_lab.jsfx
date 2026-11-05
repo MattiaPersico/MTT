@@ -1,5 +1,5 @@
 desc:MTT Breeze
-// Version: 0.5.1 (per-engine/OUT chains; sliders 1-120 and effect path preserved)
+// Version: 0.5.2 (per-engine/OUT chains; sliders 1-120 and effect path preserved)
 // Physically informed aeroacoustic wind generator. Frequencies, bandwidths, harmonics and
 // level laws follow Selfridge et al. (Aeolian tone, JAES 2018; cavity tone, DAFx-17) where
 // they give them. Elastic wires and cavity feedback are self-oscillating documented models,
@@ -24,8 +24,19 @@ out_pin:Rtr
 options:maxmem=100663296
 
 import wl_routes.jsfx-inc
-import wl_conv.jsfx-inc
-import wl_supp.jsfx-inc
+// Shared FX modules (copies of lib/fx/ made by make sync-lib; edit them in lib/fx/).
+import mtt_fx_core.jsfx-inc
+import mtt_fx_ringmod.jsfx-inc
+import mtt_fx_flanger.jsfx-inc
+import mtt_fx_chorus.jsfx-inc
+import mtt_fx_delay.jsfx-inc
+import mtt_fx_reverb.jsfx-inc
+import mtt_fx_saturation.jsfx-inc
+import mtt_fx_groupdelay.jsfx-inc
+import mtt_fx_curvevolume.jsfx-inc
+import mtt_fx_convolver.jsfx-inc
+import mtt_fx_suppressor.jsfx-inc
+import mtt_fx_types.jsfx-inc
 import wl_fx.jsfx-inc
 import wl_core.jsfx-inc
 import wl_rack.jsfx-inc
@@ -370,8 +381,8 @@ GUI_WIN = 163840;       // Hann window
 GUI_SPEC = 180224;      // smoothed display columns
 GUI_DEF = 183000;       // default value of each slider (1..85)
 ENS_P = 182400;         // ensemble types 1..3: diameter mm, spread %, count, length m, speed spread %, shelter
-GUI_UNDO = 400000;      // interface undo: 100 snapshots x 1744 (sliders 1..234 + curves)
-GUI_REDO = 600000;      // interface redo: 100 x 1744
+GUI_UNDO = 400000;      // interface undo: 100 snapshots x 1768 (sliders 1..234 + curves + slot order)
+GUI_REDO = 600000;      // interface redo: 100 x 1768
 GUI_PSNAP = 200400;     // slider values when the last preset was chosen (1..85)
 GUI_GEVH = 230000;      // next-gust graph: 2 x 300 (time, gust) history
 scope_w = 0;
@@ -727,6 +738,8 @@ pen_speed = pen_raw = pen_active = pen_had = pen_target = pen_u = pen_in = 0;
 pen_in_to = pen_in_g = pen_in_s = pen_in_left = pen_blk = 0; pen_fi = 0.033;
 was_playing = 0;
 setup_rate();
+MIX_GAIN=325000;MIX_TARGET=325008;
+!mix_ready?(mix_ready=1;mix_i=0;loop(5,MIX_GAIN[mix_i]=MIX_TARGET[mix_i]=1;mix_i+=1;););
 reset_dsp();
 
 @slider
@@ -741,6 +754,10 @@ srate != rate_now ? ( setup_rate(); reset_dsp(); );
 dsp_fault ? ( reset_dsp(); dsp_fault = 0; dsp_faults += 1; );
 // The interface writes sliders from its own thread: read every target once per block.
 read_sliders();
+mix_i=0;loop(5,
+  MIX_TARGET[mix_i]=(gui_mix_mute & 2^mix_i)==0 && (gui_mix_solo==0 || (gui_mix_solo & 2^mix_i)!=0);
+  MIX_GAIN[mix_i]!=MIX_TARGET[mix_i]?mix_moving=1;mix_i+=1;
+);
 arr_want != arr_fmt ? ( arr_layout(arr_want); wfx_reset(); );
 wfx_prepare();
 slider18 != seed_previous ? ( wl_seed(slider18); seed_previous = slider18; );
@@ -801,6 +818,13 @@ pen_in = !tb_gate ? 0 : pen_mode == 1 ? tb_p : pen_mode == 2 ? tb_y : pen_mode =
 pen_in != pen_in_to ? ( pen_in_to = pen_in; pen_in_left = pen_fi; );
 
 @sample
+mix_moving ? (
+  mix_moving=0;mix_i=0;loop(5,
+    MIX_GAIN[mix_i]+=a_aud*(MIX_TARGET[mix_i]-MIX_GAIN[mix_i]);
+    abs(MIX_GAIN[mix_i]-MIX_TARGET[mix_i])<.000001?MIX_GAIN[mix_i]=MIX_TARGET[mix_i]:mix_moving=1;
+    mix_i+=1;
+  );
+);
 ctl_count <= 0 ? ( ctl_count = CTL_N; wl_control(); );
 ctl_count -= 1;
 
@@ -875,10 +899,10 @@ prox_run_on ? (
   prox_run();
   wfx_begin(5);
   fx_on[5] ? ( memcpy(OUTC,PUSH,12); wfx_process(5); memcpy(PUSH,OUTC,12); memcpy(OUTC,FX_SUM,12); );
-  c = 0; loop(arr_n, OUTC[c] = CHF[c] == 1 ? PUSH[c] : (OUTC[c] + PUSH[c])*PGN[c]; c += 1; );
+  c = 0; loop(arr_n, OUTC[c] += MIX_GAIN[4]*((CHF[c] == 1 ? PUSH[c] : (OUTC[c] + PUSH[c])*PGN[c])-OUTC[c]); c += 1; );
 ) : (
   prox_duck = 1;
-  c = 0; loop(arr_n, PGN[c] += prox_dr*(1 - PGN[c]); OUTC[c] *= PGN[c]; prox_duck = min(prox_duck, PGN[c]); c += 1; );
+  c = 0; loop(arr_n, PGN[c] += prox_dr*(1 - PGN[c]); OUTC[c] *= 1+MIX_GAIN[4]*(PGN[c]-1); prox_duck = min(prox_duck, PGN[c]); c += 1; );
   prox_dl = PGN[0]; prox_dr_g = PGN[arr_n > 1];
   fx_on[5] ? ( wfx_begin(5); wfx_end(5); );
 );
@@ -921,13 +945,26 @@ zc_t += 1;
 zc_t >= 0.25*srate ? ( zc_f = zc_n*2; zc_n = zc_t = 0; );
 
 @serialize
-// Version 5 stores all compatibility/fixed payloads; older records retain their order.
+// Version 5 payloads are unchanged; an optional tagged extension stores slot order.
 wl_ser_read=file_avail(0)>=0;wl_state_version=5;file_var(0,wl_state_version);
 wl_state_version>=3 && wl_state_version<=5 ? (
   wl_ser_n=wl_state_version==3?3:wl_state_version==4?5:23;
   file_mem(0,fx_curve,wl_ser_n*65);
   wl_ser_e=0;loop(wl_ser_n,conv_ser_entry(wl_ser_e);wl_ser_e+=1;);
 ) : wl_ser_n=0;
+// Older builds ignore this trailing extension; older states have no extension.
+wl_ser_read ? (
+  wfx_order_reset();
+  wl_ser_n==23 ? (
+    wl_order_tag=0;file_var(0,wl_order_tag);
+    wl_order_tag==50601 ? (
+      file_mem(0,FX_ORDER,23)!=23 ? wfx_order_reset();
+      wfx_order_validate();
+    );
+  );
+) : (
+  wl_order_tag=50601;file_var(0,wl_order_tag);file_mem(0,FX_ORDER,23);
+);
 wl_ser_read ? (
   wl_ser_i=wl_ser_n;loop(23-wl_ser_n,fx_curve_preset(wl_ser_i,0);conv_clear(wl_ser_i);wl_ser_i+=1;);
   wl_state_version<5 ? (
@@ -1016,6 +1053,8 @@ function gui_k_acc() ( gui_c(3, 1); );
 function gui_k_line() ( gui_c(4, 1); );
 function gui_k_track() ( gui_c(5, 1); );
 function gui_k_off() ( gui_c(6, 1); );
+// The lit FX key reads faint against the disabled grey; lean the accent 40% toward ink.
+function gui_k_fxon() ( gui_dark ? gfx_set(0.708, 0.799, 0.859, 1) : gfx_set(0.250, 0.343, 0.409, 1); );
 
 // ---------- text ----------
 // American Typewriter as in Loon; small labels keep at least 11 pixels at low density.
@@ -1336,11 +1375,12 @@ function gui_page_help(t) (
   t == 2 ? "ENSEMBLE: many small obstacles around the array (a fence, cables, a pine tree). Choose a type, then shape it; editing a value makes it Custom." :
   t == 3 ? "AIR BED: the background noise of the moving air, its level and colour." :
   t == 4 ? "MIC: the wind on the capsules (noise and windscreen). Where the wind hits the array comes from the map. Gust proximity is in MOTION." :
-  t == 5 ? "MIXER: the five engine levels, mirrored from their own controls. Each vertical fader is aligned with its engine title. The master Output remains in the footer. FX opens the complete mix insert chain." :
+  t == 5 ? "MIXER: five engine levels. S solos an engine (multiple solos combine); M mutes it, including its insert tails. Mute wins over Solo. S/M are temporary and are not saved in presets. Each vertical fader is aligned with its engine title. The master Output remains in the footer. FX opens the complete mix insert chain." :
   t == 10 ? "MOTION: continuous gusts, their size and turbulence, and occasional gust events. Gust proximity, pitch and reactivity below both columns shape how close either kind of gust feels." :
   "GESTURE: play the speed with the USB pen (the pencil in the header) or a Mac Force Touch trackpad through the MTT Input Bridge: what drives it, its range, attack and release times and their curves (drawn below). Trackpad: leave the pencil off, focus Breeze, point inside it and hold Option alone; one finger plays, pressing sets the pressure; release Option or press Escape.";
 );
 function gui_pname(id) (
+  id==666 ? "Move FX up" : id==667 ? "Move FX down" :
   id>=86 && id<=234 ? "FX chain" :
   id == 1 ? (slider34 >= 0.5 ? "Object speed (tip)" : "Wind speed") : id == 2 ? "Continuous gusts" : id == 3 ? "Continuous gust size" :
   id == 4 ? "Turbulence" : id == 5 ? "Diameter" : id == 6 ? "Spread / taper" : id == 7 ? "Length" : id == 8 ? "Depth / neck" :
@@ -1351,7 +1391,7 @@ function gui_pname(id) (
   id == 28 ? "Ensemble level" : id == 29 ? "Mic wind noise" : id == 30 ? "Windscreen" : id == 31 ? "Object angle" :
   id == 32 ? "Distance" : id == 33 ? "Temperature" : id == 34 ? "Motion" : id == 35 ? "Pen input" : id == 36 ? "Pen range" :
   id == 37 ? "On transport start" : id == 49 ? "Pen drives" : id == 50 ? "Pen attack" : id == 51 ? "Pen release" :
-  id == 52 ? "Pen X moves the wind" : id == 53 ? "Element diameter" : id == 54 ? "Diameter spread" : id == 55 ? "Element count" :
+  id == 52 ? "Input X moves the wind" : id == 53 ? "Element diameter" : id == 54 ? "Diameter spread" : id == 55 ? "Element count" :
   id == 56 ? "Element length" : id == 57 ? "Local speed spread" : id == 58 ? "Shelter" : id == 59 ? "Air tone" : id == 60 ? "Air low cut" :
   id == 61 ? "Pen attack curve" : id == 62 ? "Pen release curve" : id == 63 ? "Gust events" : id == 64 ? "Gust strength" :
   id == 65 ? "Gust duration" : id == 66 ? "Gust proximity" : id == 67 ? "Mic rotation" : id == 68 ? "Wind width" :
@@ -1360,11 +1400,12 @@ function gui_pname(id) (
   id >= 620 && id <= 625 ? "Dice" : id >= 630 && id <= 635 ? "Lock" : id == 700 ? "Random wind" : id == 701 ? "Pen input" :
   id == 702 ? "Undo" : id == 703 ? "Redo" : id == 704 ? "Theme" : id == 705 ? "Previous preset" : id == 706 ? "Presets" :
   id == 707 ? "Next preset" : id == 710 ? "Legacy settings" : id == 501 || id == 81 ? "Wind direction" : id == 82 ? "Max distance" :
-  id >= 650 && id <= 655 ? "FX chain bypass" : id >= 660 && id <= 665 ? "FX / controls" :
+  id >= 650 && id <= 655 ? "Open section FX" :
   id >= 640 && id <= 644 ? ( sprintf(#gui_pn, "%s on / off", gui_tab_name(id - 640)); #gui_pn; ) : "";
 );
 function gui_help(id) (
-  id>=86 && id<=234 ? "Three inserts in order for this engine, or the complete output. Click Empty to choose an effect; click a populated row to select it, and its selected name again to replace or remove it. The slot dot bypasses one insert; the FX indicator under the tab bypasses the chain. Parameters: drag, wheel, Shift for fine, double-click for default." :
+  id==666 || id==667 ? "Move the selected effect one place in its chain. Its settings, curve, impulse response and bypass stay with it. One Undo step; the order is saved with the preset." :
+  id>=86 && id<=234 ? "Three inserts in order for this engine, or the complete output. Click Empty to choose an effect; click a populated row to select it, and its selected name again to replace or remove it. The up/down arrows reorder the selected effect. The dot bypasses one insert. Click the tab name to return to its controls. Parameters: drag, wheel, Shift for fine, double-click for default." :
   id == 1 ? "Mean wind speed, or the tip speed of a moving object. It drives everything: tone pitches (f = St x speed / diameter), levels (tones ~ speed^3, air ~ speed^2), the Reynolds number and the speeds where cavity loops whistle. While the pen is in use it sets this speed instead (GESTURE)." :
   id == 2 ? "Continuous gustiness: turbulence intensity = 0.6 x this value (35 % gives 21 %, typical near the ground). The speed wanders all the time; for a calm base with occasional gusts keep this low and use Gust events. Moves the pitch and level of every source. Wind mode only." :
   id == 3 ? "Size of the continuous gusts. Their time scale is length / speed: 50 m at 12 m/s is about 4 s, at 3 m/s about 17 s (stronger wind, faster gusts). Needs Continuous gusts above 0; wind mode only." :
@@ -1440,9 +1481,8 @@ function gui_help(id) (
   id >= 630 && id <= 634 ? "Lock: Random wind leaves this section alone. Its own dice still works." :
   
   id >= 640 && id <= 644 ? "Turns this sound section on or off. Off silences it and skips its computation; its settings are kept and its controls grey out until it is on again. One undo step." :
-  id >= 650 && id <= 655 ? "Blue: this section has active inserts. Click to bypass or enable only its FX chain. Grey: no active inserts. Click to switch the configured inserts together; their parameters are kept." :
-  id >= 660 && id <= 665 ? "Switch this panel between its controls and its three FX inserts." :
-  id == 700 ? "Draws new values for every unlocked sound section (Obstacles, Cavity, Ensemble, Air Bed, Mic) in ranges chosen per model, as one undo step. It does not switch sections on or off; speed, motion, array, gesture, output and seed stay as they are." :
+  id >= 650 && id <= 655 ? "Opens this section's FX page, including an empty or bypassed chain. Blue: at least one insert is enabled with nonzero Wet; grey: none are active. Opening the page does not change the sound. Click the tab name to return to its controls." :
+  id == 700 ? "The percentage below the title sets the next global roll: click to type or drag to adjust, 0% keeps everything, 100% draws fully new settings. Section dice stay at full strength and keep the current tab. Draws new values for every unlocked sound section (Obstacles, Cavity, Ensemble, Air Bed, Mic) in ranges chosen per model, as one undo step. It does not switch sections on or off; speed, motion, array, gesture, output and seed stay as they are." :
   id == 701 ? "USB pen through the MTT Input Bridge: click to request or release the tablet. For a Mac Force Touch trackpad leave it off: focus Breeze, point inside it and hold Option alone. The GESTURE tab sets what the pen drives." :
   id == 702 ? "Undo the last change made in this window (up to 100 steps). Pen input, theme and locks are not undo steps; the engine switches are." :
   id == 703 ? "Redo the change just undone." :
@@ -1458,31 +1498,35 @@ function gui_help(id) (
 // the trackpad fields (79-80); theme (72) and locks (73) are preferences outside the stack.
 // The map's wind direction (81) and Max distance (82) are in: undoing a wind drag puts
 // everything back.
-// 100 steps each way, 1744 values per step (sliders and curves).
+// 100 steps each way, 1768 values per step (sliders, curves and slot order).
 function gui_undoable(j) ( j != 35 && (j < 38 || j > 48) && j != 72 && j != 73 && j != 79 && j != 80; );
-function gui_snap_store(buf, k) local(o, j) ( o = buf + k*1744; j = 1; loop(234, o[j] = slider(j); j += 1; ); memcpy(o + 240, fx_curve, 1495); );
+function gui_snap_store(buf, k) local(o, j) ( o = buf + k*1768; j = 1; loop(234, o[j] = slider(j); j += 1; ); memcpy(o + 240, fx_curve, 1495); memcpy(o + 1744, FX_ORDER, 23); );
 function gui_snap_same(buf, k) local(o, j, same) (
-  o = buf + k*1744; j = 1; same = 1;
+  o = buf + k*1768; j = 1; same = 1;
   loop(234, gui_undoable(j) && o[j] != slider(j) ? same = 0; j += 1; );
   j=0; loop(1495, o[240+j]!=fx_curve[j] ? same=0; j+=1; );
+  j=0; loop(23, o[1744+j]!=FX_ORDER[j] ? same=0; j+=1; );
   same;
 );
-function gui_snap_apply(buf, k) local(o, j) (
-  o = buf + k*1744; j = 1;
+function gui_snap_apply(buf, k) local(o, j, order_changed) (
+  o = buf + k*1768; j = 1;
   loop(234, gui_undoable(j) && slider(j) != o[j] ? gui_set(j, o[j]); j += 1; );
   memcpy(fx_curve, o + 240, 1495);
+  order_changed=0;j=0;loop(23,FX_ORDER[j]!=o[1744+j]?order_changed=1;j+=1;);
+  memcpy(FX_ORDER, o + 1744, 23);
+  order_changed ? sliderchange(-1);
 );
 // Called before an edit: stores the state it will change (skipped if nothing changed since).
 function gui_push() (
   !(gui_undo_n > 0 && gui_snap_same(GUI_UNDO, gui_undo_n - 1)) ? (
-    gui_undo_n >= 100 ? ( memcpy(GUI_UNDO, GUI_UNDO + 1744, 99*1744); gui_undo_n = 99; );
+    gui_undo_n >= 100 ? ( memcpy(GUI_UNDO, GUI_UNDO + 1768, 99*1768); gui_undo_n = 99; );
     gui_snap_store(GUI_UNDO, gui_undo_n); gui_undo_n += 1;
   );
   gui_redo_n = 0;
 );
 function gui_undo() (
   gui_undo_n > 0 ? (
-    gui_redo_n >= 100 ? ( memcpy(GUI_REDO, GUI_REDO + 1744, 99*1744); gui_redo_n = 99; );
+    gui_redo_n >= 100 ? ( memcpy(GUI_REDO, GUI_REDO + 1768, 99*1768); gui_redo_n = 99; );
     gui_snap_store(GUI_REDO, gui_redo_n); gui_redo_n += 1;
     gui_undo_n -= 1; gui_snap_apply(GUI_UNDO, gui_undo_n);
   );
@@ -1559,11 +1603,24 @@ function gui_preset_same() local(i, same) (
 // Ranges are chosen per model, inside the declared ranges and well away from extremes.
 function gui_rnd(lo, hi) ( lo + rand(1)*(hi - lo); );
 function gui_rlog(lo, hi) ( lo*(hi/lo)^rand(1); );
-function gui_setq(id, v) ( gui_set(id, gui_q(id, v)); );
+function gui_setq(id, v) local(u) (
+  // Partial macro rolls preserve these selectors; section dice stay at full strength.
+  !(gui_random_mix && (id==19 || id==24 || id==30)) ? (
+    gui_random_mix ? (
+      gui_rng(id);
+      id==27 ? (rand(1)>gui_random_amount/100 ? v=slider(id);) : (
+        u=gui_v2u(slider(id),gui_lo,gui_hi,gui_lg);
+        v=gui_u2v(u+(gui_v2u(v,gui_lo,gui_hi,gui_lg)-u)*gui_random_amount/100,gui_lo,gui_hi,gui_lg);
+      );
+    );
+    gui_set(id, gui_q(id, v));
+  );
+);
 function gui_locked(p) ( p < 5 && (floor(slider73 + 0.5) & (2^p)) != 0; );
 function gui_rnd_obstacles() local(r, t, d, f, n) (
   r = rand(1); t = r < 0.45 ? 0 : r < 0.7 ? 1 : 2;
   gui_setq(19, t);
+  t = slider19;
   t == 2 ? (
     // Elastic wire: thin, and a string pitch near a harmonic n of the shedding frequency
     // (St 0.2) at the current speed, so it locks in.
@@ -1584,6 +1641,7 @@ function gui_rnd_cavity() local(u, r, m, d, w, L, s, k, fr, z, a, i) (
   m = u < 3 ? 0 : r < 0.4 ? 0 : r < 0.6 ? 1 : r < 0.85 ? 2 : 3;
   k = rand(1) < 0.6 ? 0.75 : 1.75;
   gui_setq(24, m);
+  m = slider24;
   m == 0 ? (
     L = gui_rlog(0.05, 0.8); gui_setq(7, L); gui_setq(8, L/gui_rnd(0.8, 6)); gui_setq(9, gui_rlog(0.05, 0.5));
   ) : m == 1 ? (
@@ -1631,8 +1689,11 @@ function gui_rnd_page(p) (
 );
 // One section (its dice: locks do not apply, as in Loon) or every unlocked one (Random wind).
 function gui_dice(p) local(k) (
-  gui_push();
-  p >= 0 ? gui_rnd_page(p) : ( k = 0; loop(5, !gui_locked(k) ? gui_rnd_page(k); k += 1; ); );
+  (p>=0 || gui_random_amount>0) ? (
+    gui_push(); gui_random_mix=p<0 && gui_random_amount<100;
+    p >= 0 ? gui_rnd_page(p) : ( k = 0; loop(5, !gui_locked(k) ? gui_rnd_page(k); k += 1; ); );
+    gui_random_mix=0;
+  );
 );
 
 // ---------- live read-outs (tooltips) ----------
@@ -1644,6 +1705,31 @@ function gui_chname(c) (
   arr_fmt <= 4 ? (c == 4 ? "Ls" : "Rs") :
   c == 4 ? "Lss" : c == 5 ? "Rss" : c == 6 ? "Lrs" : c == 7 ? "Rrs" : c == 8 ? "Ltf" : c == 9 ? "Rtf" : c == 10 ? "Ltr" : "Rtr";
 );
+// Global dice amount is a session preference, never an automated sound parameter.
+function gui_random_control() local(over,k,v) (
+  over=gui_hit(996,59,60,23);over?gui_hover=700;
+  over && gui_press ? (
+    gui_random_edit=1;gui_random_select=1;gui_random_drag=1;
+    gui_random_x=gui_mx;gui_random_y=gui_my;gui_random_start=gui_random_amount;
+    sprintf(#gui_random_text,"%.0f",gui_random_amount);
+  );
+  gui_random_drag && gui_down && abs(gui_mx-gui_random_x)+abs(gui_my-gui_random_y)>2 ? (
+    gui_random_amount=floor(wl_clamp(gui_random_start+(gui_mx-gui_random_x)-(gui_my-gui_random_y),0,100)+.5);
+    sprintf(#gui_random_text,"%.0f",gui_random_amount);gui_random_select=1;
+  );
+  !gui_down ? gui_random_drag=0;
+  gui_random_edit ? (
+    k=gui_key;
+    k>=48 && k<=57 ? (gui_random_select?strcpy(#gui_random_text,"");gui_random_select=0;strlen(#gui_random_text)<3?strcat(#gui_random_text,sprintf(#gui_random_digit,"%c",k)););
+    k==8 ? (gui_random_select?strcpy(#gui_random_text,""):strcpy_substr(#gui_random_text,#gui_random_text,0,max(0,strlen(#gui_random_text)-1));gui_random_select=0;);
+    k==13 || (gui_press && !over) ? (match("%f",#gui_random_text,v)?gui_random_amount=wl_clamp(v,0,100);gui_random_edit=0;);
+    k==27 ? gui_random_edit=0;
+  );
+  gui_random_edit?gui_k_acc():gui_k_dim();
+  gui_random_edit?sprintf(#gui_random_label,"%s%%",#gui_random_text):sprintf(#gui_random_label,"%.0f%%",gui_random_amount);
+  gui_str(1000,76,16,#gui_random_label,0);
+);
+
 function gui_pen_state() (
   !gui_pen_on() ? "Off (trackpad: focus Breeze, hold Option)" : !tb_fresh ? "Waiting for the MTT Input Bridge" :
   tb_st == 1 ? "Acquiring the tablet" :
@@ -1714,7 +1800,7 @@ function gui_diag(id) local(n, k) (
     sprintf(gui_dl(n), "c %.1f m/s, ρ %.3f kg/m³, ν %.3f mm²/s", air_c, air_rho, 1000000*air_nu); n += 1;
   ) :
   id == 611 || id == 701 ? (
-    sprintf(#gui_d0, "Tablet: %s", gui_pen_state());
+    sprintf(#gui_d0, "Input: %s", gui_pen_state());
     sprintf(#gui_d1, "Input %.2f, target %.1f m/s, speed now %.1f m/s", pen_in, pen_target, pen_u);
     sprintf(#gui_d2, "x %.2f, y %.2f, pressure %.2f", tb_x, tb_y, tb_p); n = 3;
     gui_pen_on() ? ( strcpy(#gui_d3, "Turn the pen off, or release the trackpad, before rendering."); n = 4; );
@@ -1881,10 +1967,10 @@ function gui_header() local(over, c, row, ready, x, k, r, tw, th) (
     r > 0 ? gui_preset(r - 1);
   );
   // Random wind (every unlocked section).
-  over = gui_hit(946, 32, 194, 42); over ? gui_hover = 700;
-  gui_icon(7, over && gui_down ? 2 : over ? 1 : 0, 952, 40, 27);
+  over = gui_hit(934, 26, 54, 54) || gui_hit(996, 30, 144, 27); over ? gui_hover = 700;
+  gui_icon(7, over && gui_down ? 2 : over ? 1 : 0, 940, 32, 42);
   over ? gui_k_acc() : gui_k_ink(); gui_font(20);gfx_measurestr("Random wind",tw,th);
-  gfx_x=gui_X(990);gfx_y=gui_Y(53.5)-th/2;gfx_drawstr("Random wind");
+  gfx_x=gui_X(1000);gfx_y=gui_Y(43.5)-th/2;gfx_drawstr("Random wind");
   over && gui_press ? gui_dice(-1);
   // Pen input: accent when the bridge reports the tablet (or the lent trackpad) ready;
   // requested but not ready, ink with a small ring (the help panel and GESTURE give the status).
@@ -1893,7 +1979,10 @@ function gui_header() local(over, c, row, ready, x, k, r, tw, th) (
   row = over && gui_down ? 2 : ready ? 2 : slider35 >= 0.5 || over ? 1 : 0;
   gui_icon(0, row, 1182, 40, 29);
   slider35 >= 0.5 && !ready ? ( gui_k_acc(); gui_ring(1213, 43, 3.5, 1); );
-  over && gui_press ? gui_set(35, slider35 >= 0.5 ? 0 : 1);
+  over && gui_press ? (
+    gui_set(35, slider35 >= 0.5 ? 0 : 1);
+    gui_bridge_wait=slider35>=.5 ? time_precise()+2 : 0;
+  );
   // Undo, redo, theme.
   over = gui_hit(1234, 32, 44, 44); over ? gui_hover = 702;
   gui_icon(1, gui_undo_n == 0 ? 3 : over && gui_down ? 2 : over ? 1 : 0, 1242, 40, 29);
@@ -2188,10 +2277,7 @@ function gui_fx_active(owner) local(j,slot,yes) (
     j+=1;
   );yes;
 );
-function gui_fx_has(owner) local(j,slot,yes) (
-  yes=0;j=0;loop(3,slot=wfx_chain_slot(owner,j);slot>=0 && slider(wfx_slider(slot,0))>0?yes=1;j+=1;);yes;
-);
-function gui_tabs() local(p,x,over,lk,row,on,fxon,fxpos,j,slot) (
+function gui_tabs() local(p,x,over,lk,row,on,fxon,fxpos) (
   p=0;loop(6,
     x=gui_tab_x(p);on=p<5 && slider(74+p)>=.5;
     over=gui_hit(x-54,130,108,26);over?gui_hover=600+p;
@@ -2207,15 +2293,12 @@ function gui_tabs() local(p,x,over,lk,row,on,fxon,fxpos,j,slot) (
       over && gui_press?gui_set(73,floor(slider73+.5)+(lk?-1:1)*2^p);
       over=gui_hit(x-5,157,24,22);over?gui_hover=620+p;
       gui_icon(7,over && gui_down?2:over?1:0,x-3,157,20);
-      over && gui_press?(gui_dice(p);gui_page=p;gui_fx_view=0;gui_drag=0;);
+      over && gui_press?(gui_dice(p);gui_drag=0;);
     );
     fxpos=p==5?x:x+34;fxon=gui_fx_active(p);
     over=gui_hit(fxpos-14,157,28,23);over?gui_hover=650+p;
-    fxon?gui_k_acc():gui_k_off();gui_str(fxpos,174,17,"FX",1);
-    over && gui_press && gui_fx_has(p)?(
-      gui_push();gui_set(229+p,fxon?0:1);j=0;
-      loop(3,slot=wfx_chain_slot(p,j);slot>=0 && slider(wfx_slider(slot,0))>0?gui_set(wfx_slider(slot,5),fxon?0:1);j+=1;);
-    );
+    fxon?gui_k_fxon():gui_k_off();gui_str(fxpos,174,17,"FX",1);
+    over && gui_press ? (gui_page=p;gui_fx_view=2^p;gui_drag=0;);
     p+=1;
   );
 );
@@ -2267,9 +2350,36 @@ function gui_fx_menu(owner,slot,x,y) local(id,t,r,n,f) (
     );
   );
 );
+// Reorder references only: curves, IRs and active histories never need copying.
+function gui_fx_can_move(owner,row,step) local(a,b) (
+  a=wfx_chain_slot(owner,row);b=row+step>=0 && row+step<3 ? wfx_chain_slot(owner,row+step) : -1;
+  a>=0 && b>=0 && slider(wfx_slider(a,0))>0 && wfx_route(a)==wfx_route(b);
+);
+function gui_fx_reorder(owner,step) local(row,a,b,i,ai,bi) (
+  row=GUI_FXSEL[owner];
+  gui_fx_can_move(owner,row,step) ? (
+    a=wfx_chain_slot(owner,row);b=wfx_chain_slot(owner,row+step);
+    i=0;ai=-1;bi=-1;loop(23,FX_ORDER[i]==a?ai=i;FX_ORDER[i]==b?bi=i;i+=1;);
+    ai>=0 && bi>=0 ? (
+      gui_push();FX_ORDER[ai]=b;FX_ORDER[bi]=a;
+      GUI_FXSEL[owner]=gui_fx_slot=row+step;gui_drag=0;
+      sliderchange(-1); // Notify host undo for this serialized, non-slider edit.
+    );
+  );
+);
+function gui_fx_arrow(x,y,dir,enabled) local(over,cx,cy,h) (
+  over=gui_hit(x,y,28,35);over?gui_hover=666+dir;
+  !enabled?gui_k_off():over?gui_k_ink():gui_k_dim();
+  cx=x+14;cy=y+17;h=dir==0?3:-3;
+  gui_ln(cx-6,cy+h,cx,cy-h,1.4);gui_ln(cx,cy-h,cx+6,cy+h,1.4);
+  over && enabled ? (gui_k_line();gui_hl(x+4,x+24,y+33,.8););
+  enabled && over && gui_press;
+);
 function gui_fx_panel(owner) local(i,x,y,id,t,f,r,over,n,cv,j,u,v,a,b,meta,slot) (
   gui_fx_slot=max(0,min(2,GUI_FXSEL[owner]));slot=wfx_chain_slot(owner,gui_fx_slot);id=wfx_slider(slot,0);t=floor(slider(id));
   gui_k_ink();sprintf(#gui_t,"%s FX",owner==5?"Output":gui_tab_name(owner));gui_str(777,233,21,#gui_t,0);
+  gui_fx_arrow(984,207,0,gui_fx_can_move(owner,gui_fx_slot,-1)) ? gui_fx_reorder(owner,-1);
+  gui_fx_arrow(1024,207,1,gui_fx_can_move(owner,gui_fx_slot,1)) ? gui_fx_reorder(owner,1);
   // Compact ordered slot list at left, selected slot's controls at right.
   i=0; loop(3,
     y=276+i*46;slot=wfx_chain_slot(owner,i);id=wfx_slider(slot,0);over=gui_hit(799,y-20,253,34);over?gui_hover=id;
@@ -2283,7 +2393,7 @@ function gui_fx_panel(owner) local(i,x,y,id,t,f,r,over,n,cv,j,u,v,a,b,meta,slot)
     );
     over=gui_hit(774,y-16,22,24);
     slider(id)>0 && slider(id+5)>=.5 && slider(229+owner)>=.5 ? (gui_k_acc(); gui_circ(785,y-5,5,1);) : (gui_k_dim(); gui_ring(785,y-5,5,1););
-    over && gui_press && slider(id)>0 ? (gui_push();n=slider(id+5)>=.5?0:1;gui_set(id+5,n);n?gui_set(229+owner,1););
+    over && gui_press && slider(id)>0 ? (gui_push();n=slider(id+5)>=.5 && slider(229+owner)>=.5?0:1;gui_set(id+5,n);n?gui_set(229+owner,1););
     i+=1;
   );
   slot=wfx_chain_slot(owner,gui_fx_slot);id=wfx_slider(slot,0);t=floor(slider(id));
@@ -2321,14 +2431,6 @@ function gui_fx_panel(owner) local(i,x,y,id,t,f,r,over,n,cv,j,u,v,a,b,meta,slot)
   );
 );
 
-function gui_fx_button(p) local(over,on) (
-  on=(gui_fx_view & 2^p)!=0;over=gui_hit(1345,207,56,35);over?gui_hover=660+p;
-  on?gui_k_acc():over?gui_k_ink():gui_k_dim();
-  gui_hl(1345,1401,207,.8);gui_hl(1345,1401,242,.8);
-  gui_vl(1345,207,242,.8);gui_vl(1401,207,242,.8);
-  gui_str(1373,233,21,"FX",1);
-  over && gui_press?(gui_fx_view=gui_fx_view ~ (2^p);gui_drag=0;);
-);
 // Vertical level mirror: same range, taper, quantization, automation and undo as the
 // engine's own control. Engine titles above identify the strips; only values repeat here.
 function gui_mix_fader(id,x,top,h) local(act,v,u,over,now,i,yy) (
@@ -2357,6 +2459,15 @@ function gui_mix_fader(id,x,top,h) local(act,v,u,over,now,i,yy) (
   gui_k_line();i=0;loop(7,yy=top+h*i/6;gui_hl(x-4,x+4,yy,.65);i+=1;);
   gui_knob(x,top+(1-u)*h,6,act);
   act?gui_k_ink():gui_k_off();gui_fmt(id,gui_value(id));gui_str(x,top+h+32,18,#gui_v,1);
+);
+function gui_mix_buttons(p) local(x,bit,over) (
+  x=gui_tab_x(p);bit=2^p;
+  over=gui_hit(x-35,518,30,27);over?gui_hover=605;
+  (gui_mix_solo & bit)!=0?gui_k_acc():gui_k_dim();gui_str(x-20,538,16,"S",1);
+  over && gui_press?gui_mix_solo=gui_mix_solo ~ bit;
+  over=gui_hit(x+5,518,30,27);over?gui_hover=605;
+  (gui_mix_mute & bit)!=0?gui_k_acc():gui_k_dim();gui_str(x+20,538,16,"M",1);
+  over && gui_press?gui_mix_mute=gui_mix_mute ~ bit;
 );
 function gui_engine(p) local(cm) (
   (gui_fx_view & 2^p)!=0 ? gui_fx_panel(p) : p == 0 ? (
@@ -2392,8 +2503,8 @@ function gui_engine(p) local(cm) (
   ) : (
     gui_mix_fader(12,gui_tab_x(0),248,226);gui_mix_fader(13,gui_tab_x(1),248,226);
     gui_mix_fader(28,gui_tab_x(2),248,226);gui_mix_fader(11,gui_tab_x(3),248,226);gui_mix_fader(29,gui_tab_x(4),248,226);
+    cm=0;loop(5,gui_mix_buttons(cm);cm+=1;);
   );
-  gui_fx_button(p);
 );
 
 // ---------- wind control (right, from the middle to the footer) ----------
@@ -2472,19 +2583,20 @@ function gui_curve(id, x, y, w, h, fall, ms, on) local(i, u0, u1, act, over, now
   );
 );
 function gui_gesture() local(act, over, on) (
-  gui_selector(49, "Pen drives");
+  gui_selector(49, "Input drives");
   // Pen X moves the array (slider 52, 0.3.1).
   act = gui_why(52) < 0; on = slider52 >= 0.5;
   over = gui_hit(1096, 620, 318, 32); over ? gui_hover = 52;
   !act ? gui_k_off() : on ? gui_k_acc() : over ? gui_k_ink() : gui_k_dim();
   on ? gui_circ(1105, 635, 5.5, 1) : gui_ring(1105, 635, 5.5, 1.2);
-  act ? gui_k_ink() : gui_k_off(); gui_str(1119, 642, 19, "Pen X moves the wind", 0);
+  act ? gui_k_ink() : gui_k_off(); gui_str(1119, 642, 19, "Input X moves the wind", 0);
   act && over && gui_press ? ( gui_push(); gui_put(52, on ? 0 : 1); );
-  gui_heads2("Range and attack", "Release", 689, 1000);
+  gui_k_dim();gui_str(777,668,15,"Trackpad: pencil off, focus Breeze, hold Option; release to stop.",0);
+  gui_heads2("Range and attack", "Release", 702, 1000);
   gui_slider(36, "Range", 777, 728, 275); gui_slider(50, "Attack", 777, 792, 275);
   gui_slider(51, "Release", 1100, 728, 301);
   gui_curve(61, 777, 832, 275, 150, 0, slider50, gui_pen_on()); gui_curve(62, 1100, 832, 301, 150, 1, slider51, gui_pen_on());
-  sprintf(#gui_t, "Tablet: %s", gui_pen_state());
+  sprintf(#gui_t, "Input: %s", gui_pen_state());
   gui_pen_on() && tb_fresh && tb_st == 2 ? gui_k_acc() : gui_k_dim(); gui_str(777, 1012, 16, #gui_t, 0);
 );
 
@@ -2565,7 +2677,7 @@ gui_research_open ? ( gui_press = 0; gui_down = 0; );
 gui_hover = 0;
 gui_asc <= 0 ? gui_measure_asc();
 !gui_init ? (
-  gui_init = 1; gui_page = 0; gui_wpage = 0; gui_preset_last = 1; gui_research_open = 0;
+  gui_random_amount=100; gui_init = 1; gui_page = 0; gui_wpage = 0; gui_preset_last = 1; gui_research_open = 0;
   gui_i = 1; loop(85, GUI_PSNAP[gui_i] = GUI_DEF[gui_i]; gui_i += 1; );
   // An array farther from the wind than Max distance (older projects, automation): widen the map to the
   // next of 1, 2, 5 .. 200 m that holds it (noted to the host, not an automation point).
@@ -2581,7 +2693,10 @@ gui_asc <= 0 ? gui_measure_asc();
 gfx_clear = gui_dark ? 2170911 : 15855853;
 gui_k_bg(); gfx_rect(0, 0, gfx_w, gfx_h);
 gui_img(0, 0, 0, 1440, 1080);
-gui_header();
+gui_random_edit && gui_press && !gui_hit(996,59,60,23) ? (
+  match("%f",#gui_random_text,gui_random_value)?gui_random_amount=wl_clamp(gui_random_value,0,100);gui_random_edit=0;
+);
+gui_header();gui_random_control();
 gui_k_line(); gui_hl(26, 1414, 108, 0.8); gui_vl(748, 130, 1012, 0.8); gui_hl(772, 1414, 560, 0.8);
 gui_hl(26, 734, 766, 0.8); gui_hl(26, 1414, 1028, 0.8);
 gui_speed(); gui_array_map(); gui_array_values(); gui_spectrum();
@@ -2589,6 +2704,14 @@ gui_tabs(); gui_engine(gui_page);
 gui_wind_tabs(); gui_wpage == 0 ? gui_motion() : gui_gesture();
 gui_footer();
 !gui_research_open ? gui_helppanel();
+gui_bridge_wait>0 && time_precise()>gui_bridge_wait ? (
+  gui_bridge_wait=0;
+  !tb_fresh && slider35>=.5 ? (
+    gfx_x=gui_X(940);gfx_y=gui_Y(96);
+    gfx_showmenu("#MTT Input Bridge is not responding|#Install MTT Input Bridge via ReaPack > Browse packages|#Then restart REAPER and enable the pencil again|#If already installed: check that this track is processing|Close");
+    gui_block=1;
+  );
+);
 gui_research_open ? (
   gui_c(0, 0.65); gui_rect(0, 0, 1440, 1080);
   gui_c(0, 1); gui_rect(220, 140, 1000, 700);

@@ -1,176 +1,79 @@
-// Private Breeze insert rack, adapted from Loon. Config: type, mix, A, B, C, enabled (23 x 6).
-// Types: 1 Ring Mod, 2 Flanger, 3 Chorus, 4 Delay, 5 Reverb, 6 Saturation, 7 legacy dispersion
-// (migrated), 8 Group Delay, 9 Curve Volume (drawn curve per slot, fx_curve: 65 values per slot),
-// 10 Convolver (one IR per slot, up to 276 channel lanes; see wl_conv.jsfx-inc),
-// 11 Resonance Suppressor (automatic, zero latency; see wl_supp.jsfx-inc).
+// Breeze's insert rack: the topology around the shared FX modules (mtt_fx_*.jsfx-inc, vendored
+// from lib/fx/; API card in lib/README.md). Config: type, mix, A, B, C, enabled (23 x 6).
+// Every slot runs one lane per array channel (lane = slot * 12 + channel, 276 lanes), all at
+// the host rate. Breeze-specific here: visibility and routing of the slots (wl_routes,
+// wl_rack), one IR entry per slot with spectra shared by its channels, the channels of a slot
+// sharing one Curve Volume modulation and one Resonance Suppressor cut, and Delay/Reverb
+// damping up to 48 kHz. Chain orchestration: wl_rack.jsfx-inc.
 // All functions use local temporaries; @gfx only writes the configuration bank.
 @init
-// Drawn curve of a Curve Volume slot: 64 gain values over one cycle, then a marker (1).
-function fx_curve_preset(n,kind) local(cv,i,u,v) (
-  cv=fx_curve+n*65; i=0;
-  loop(64,
-    u=i/64;
-    v=kind==1 ? 1-abs(2*u-1) : kind==2 ? u : kind==3 ? 1-u :
-      kind==4 ? .5+.5*max(-1,min(1,3*sin(2*$pi*u))) :
-      kind==5 ? (i==0 ? rand(1) : cv[i-1]*.6+.4*rand(1)) :
-      .5-.5*cos(2*$pi*u);
-    cv[i]=max(0,min(1,v)); i+=1;
-  );
-  cv[64]=1;
-);
-// Periodic [1 2 1] / 4 smoothing of a drawn curve (scratch: 64 values after the bank).
-function fx_curve_smooth(n) local(cv,t,i) (
-  cv=fx_curve+n*65; t=fx_curve+1495;
-  i=0; loop(64, t[i]=.25*cv[(i+63)&63]+.5*cv[i]+.25*cv[(i+1)&63]; i+=1;);
-  i=0; loop(64, cv[i]=t[i]; i+=1;);
-);
-function fx_validate() local(k,p,j,n,cv,i) (
-  k=0; loop(23,
-    p=fx_cfg+k*6;
-    p[0]=p[0]==p[0] ? max(0,min(11,floor(p[0]))) : 0;
-    j=1; loop(5, p[j]=p[j]==p[j] ? max(0,min(1,p[j])) : 0; j+=1;);
-    // Saved 0.28 dispersion: preserve physical frequency, stage count and Q.
-    p[0]==7 ? (
-      p[0]=8; p[2]=log((40*300^p[2])/20)/log(800);
-      p[3]*=24/128; p[4]*=log(16)/log(64);
+// Breeze assigns one stable IR entry to each rack slot.
+function conv_entry(slot) (floor(slot););
+// Resonance Suppressor lane (FX type 11). The last active capsule links the maximum cut across
+// the slot. All channels advance their filter ramps on the next sample, so identical signals
+// remain identical.
+function sup_run(k,q,base,x,age,r,amt,lo,hi) local(na,g,aa,ar,j,t,u,o,pb,c) (
+  sup_step(q,base,x,age,r,amt,lo,hi) ? (
+    na=q[9];
+    k%12==arr_n-1 ? (
+      g=floor(k/12)*12; aa=sup_attack(q,r); ar=sup_release(q,r);
+      j=0; loop(na,
+        t=0; u=0; loop(arr_n,
+          o=fx_st+(g+u)*32; pb=fx_buf+(g+u)*FX_STRIDE;
+          CHF[u]!=3 && o[0]==11 && o[7]>0 ? t=max(t,pb[3072+j]); u+=1;
+        );
+        c=sup_gain(base,j,t,aa,ar);
+        u=0; loop(arr_n, sup_set(fx_buf+(g+u)*FX_STRIDE,j,c); u+=1;);
+        j+=1;
+      );
     );
-    k+=1;
   );
-  n=0; loop(23,
-    cv=fx_curve+n*65;
-    cv[64]!=1 ? fx_curve_preset(n,0) : (i=0; loop(64, cv[i]=cv[i]==cv[i] ? max(0,min(1,cv[i])) : 0; i+=1;););
-    n+=1;
-  );
-
+  sup_bells(q,base,x);
 );
+function fx_validate() (fx_cfg_validate(23););
 // Targets are copied once per block. Runtime state is owned by the audio thread.
-function fx_prepare() local(k,q,p,t,r,n,a,b,c,om,alpha) (
+function fx_prepare() local(k,q,p,t,r,n,a,b,c) (
   memset(fx_on,0,7); conv_cnt=0;
   k=0; loop(276,
     n=floor(k/12); p=fx_cfg+n*6; q=fx_st+k*32;
     t=max(0,min(11,floor(p[0]))); r=srate;
+    // Empty lanes have no targets to decode or histories to advance.
+    (t>0 || q[0]>0 || q[1]>0) ? (
     a=max(0,min(1,p[2])); b=max(0,min(1,p[3])); c=max(0,min(1,p[4]));
     // Compatibility for old in-memory settings; audio never writes the bank.
     t==7 ? (t=8; a=log((40*300^a)/20)/log(800); b*=24/128; c*=log(16)/log(64););
     // Convolver engines are handed out in lane order; a lane without one (or whose slot has no IR
-    // yet) passes the signal. Each engine follows its slot's own impulse response.
+    // yet) passes the signal. Each engine follows its slot's own impulse response; odd channels
+    // (R, Rs, Rss, Rrs, Rtf, Rtr) play the right channel of a stereo IR.
     // (Kept in conv_tab[4800 + lane] and [5120 + lane], not in the lane's state: other types use it.)
     conv_tab[4800+k]=-1; conv_tab[5120+k]=0;
     (t==10 || q[0]==10) && (FX_VISIBLE[n] || q[0]==10) && (q[0]==10 || (q[0]==0 && q[1]==0)) && k%12<arr_n && CHF[k%12]!=3 ? (
       conv_tab[4800+k]=k;conv_cnt+=1;
-      conv_tab[5120+k]=conv_sync(k,k,conv_entry(n),r,(p[5]>=.5 && p[1]>0) || q[1]>.000001);
+      conv_tab[5120+k]=conv_sync(k,k,conv_entry(n),k%12==1 || k%12==5 || k%12==7 || k%12==9 || k%12==11,r,(p[5]>=.5 && p[1]>0) || q[1]>.000001);
     );
     q[16]=t;q[17]=t>0 && p[5]>=.5 && FX_VISIBLE[n] && slider(229+wfx_owner(n))>=.5 && FX_ROUTE[n]==wfx_route(n) ? max(0,min(1,p[1])) : 0;
-    q[18]= t==1 ? min(r*.2,1*2000^a) : t==2 ? .02*200^a : t==3 ? .05*60^a :
-      t==4 ? min(131068/r,.001*500^a) : t==5 ? .4+1.2*a : t==8 ? min(r*.4,20*800^a) : t==9 ? .05*2000^a : t==10 ? 10^((-24+48*a)/20) : t==11 ? a : 10^(36*a/20);
-    q[19]= t==2 ? b*.004 : t==3 ? .001+b*.009 : t==4 ? b*.85 : t==5 ? .1+b*.8 : t==8 ? 128*b : t==10 ? (b>=.999 ? 1 : 1-exp(-2*$pi*300*(min(18000,.45*r)/300)^b/r)) : t==11 ? 20*1000^b : b;
-    q[20]= t==2 ? c*.85 : t==3 ? c*.5 : t==4 || t==5 ? 1-exp(-2*$pi*min(r*.4,300*(48000/300)^c)/r) : t==10 ? (c<=.001 ? 0 : 1-exp(-2*$pi*20*50^c/r)) : t==11 ? 20*1000^c : c;
-    q[21]=1-exp(-1/(.015*r)); q[22]=r;
-    // Curve Volume wobble: slow (1.5 Hz) and faster (9 Hz) smoothed noise, scaled to unit deviation.
-    q[27]=1-exp(-2*$pi*1.5/r); q[28]=sqrt(3*(2-q[27])/q[27]);
-    q[29]=1-exp(-2*$pi*9/r); q[30]=sqrt(3*(2-q[29])/q[29]);
-    t==8 ? (
-      // RBJ all-pass: numerator reverses the normalized denominator.
-      // https://www.w3.org/TR/audio-eq-cookbook/#APF
-      om=2*$pi*q[18]/r; alpha=sin(om)/(2*(.5*64^c));
-      q[23]=-2*cos(om)/(1+alpha); q[24]=(1-alpha)/(1+alpha);
-    );
+    fx_lane_targets(q,t,r,a,b,c,48000);
     (t>0 && q[17]>0) || q[1]>.000001 ? fx_on[FX_ROUTE[n]]=1;
+    );
     k+=1;
   );
 );
-function fx_tap(base,pos,age,d,mask) local(ix,f) (
-  d=max(1,min(mask-2,d)); ix=floor(d); f=d-ix;
-  age>=ix+1 ? base[(pos-ix)&mask]*(1-f)+base[(pos-ix-1)&mask]*f : 0;
-);
-function fx_lane(k,x,pressure_mode) local(q,t,w,a,b,c,ph,pos,age,base,d,y,z,j,lim,fb,wet,r,sc,ap1,ap2,stages,frac,ay,limit,n,cv,u,ci,p0,p1,p2,p3) (
-  q=fx_st+k*32; t=q[0]; sc=q[21]; r=q[22];
-  // Fade through dry before a type change. Buffers reset by age, not memset.
-  w=q[16]!=t ? 0 : q[17];
-  q[1]+=sc*(w-q[1]); abs(q[1]-w)<.000001 ? q[1]=w;
-  q[16]!=t && q[1]==0 ? (
-    q[0]=t=q[16]; q[5]=q[6]=q[7]=0;
-    q[8]=q[9]=q[10]=q[11]=0;
-    q[2]=q[18]; q[3]=q[19]; q[4]=q[20];
-    q[25]=q[23]; q[26]=q[24];
+// One sample of lane k (slot k / 12, channel k % 12).
+function fx_lane(k,x,pressure_mode) local(q,t,base,s,n,y) (
+  q=fx_st+k*32;
+  fx_lane_begin(q) ? (
+    t=q[0]; base=fx_buf+k*FX_STRIDE; s=floor(k/12);
+    // Curve Volume: channel 0 of the slot leads the shared modulation (FX_MOD + slot * 4).
+    y=t==9 ? fx_curvevol_run(q,x,fx_curve+s*65,FX_MOD+s*4,k%12==0) :
+      t==10 ? (
+        // One independent convolver history per active capsule, all at host rate. IR channel
+        // assignment follows the physical left/right channel names; no IR passes dry.
+        n=conv_tab[4800+k];
+        n>=0 && conv_tab[5120+k]==1 ? fx_convolver_run(q,x,n,conv_hb+(s*2+conv_tab[2560+n*8+3])*CONV_BS) : x;
+      ) :
+      t==11 ? sup_run(k,q,base,x,q[7],q[22],q[2],q[3],q[4]) :
+      fx_type_run(q,t,base,x,pressure_mode);
+    x=fx_lane_end(q,x,y);
   );
-  // Keep the old algorithm's parameters while fading out for replacement.
-  t==q[16] ? (q[2]+=sc*(q[18]-q[2]); q[3]+=sc*(q[19]-q[3]); q[4]+=sc*(q[20]-q[4]););
-  t>0 && q[1]>0 ? (
-    a=q[2]; b=q[3]; c=q[4]; ph=q[5]; pos=q[6]; age=q[7]; base=fx_buf+k*FX_STRIDE;
-    t==1 ? (
-      y=x*(pressure_mode ? .5+.5*sin(ph) : sin(ph)); ph+=2*$pi*a/r;
-    ) : t==6 ? (
-      // Biased soft saturation with zero output at zero input; C is output trim.
-      d=(b-.5); z=a*x+d; y=(z/sqrt(1+z*z)-d/sqrt(1+d*d))*10^((-18+18*c)/20);
-    ) : t==8 ? (
-      // Two transposed-direct-form-II states per stage, in the existing arena.
-      // Clear only the bounded cascade history; inactive stages start at zero.
-      limit=128;
-      age==0 ? memset(base,0,2*limit);
-      t==q[16] ? (q[25]+=sc*(q[23]-q[25]); q[26]+=sc*(q[24]-q[26]););
-      ap1=q[25]; ap2=q[26]; stages=floor(b); frac=b-stages;
-      y=x; z=x; wet=x; j=0;
-      loop(limit,
-        j<ceil(b) ? (
-          ay=ap2*y+base[j*2];
-          base[j*2]=ap1*(y-ay)+base[j*2+1];
-          base[j*2+1]=y-ap2*ay;
-          y=ay; j<stages ? z=y : wet=y;
-        ) : (base[j*2]=base[j*2+1]=0;);
-        j+=1;
-      );
-      y=z+frac*(wet-z);
-    ) : t==9 ? (
-      // Drawn volume curve (Catmull-Rom through the 64 stored points, periodic). Speed wobble
-      // bends the rate by up to 2.5 octaves at full amount; curve wobble adds slow timing
-      // noise and faster level noise relative to the curve (a silent curve stays silent). Wet is the depth.
-      n=floor(k/12); cv=FX_MOD+n*4;
-      k%12==0 ? (
-        q[8]+=q[27]*((rand(2)-1)*q[28]-q[8]);
-        q[9]+=q[29]*((rand(2)-1)*q[30]-q[9]);
-        q[10]+=q[27]*((rand(2)-1)*q[28]-q[10]);
-        ph+=2*$pi*a*2^(b*max(-2.5,min(2.5,q[8])))/r;
-        cv[0]=ph; cv[1]=q[9]; cv[2]=q[10];
-      ) : ph=cv[0];
-      u=ph/(2*$pi)+c*.08*max(-2.5,min(2.5,cv[2])); u-=floor(u);
-      q[9]=cv[1]; cv=fx_curve+n*65;
-      u*=64; ci=floor(u); u-=ci;
-      p0=cv[(ci+63)&63]; p1=cv[ci&63]; p2=cv[(ci+1)&63]; p3=cv[(ci+2)&63];
-      y=p1+.5*u*(p2-p0+u*(2*p0-5*p1+4*p2-p3+u*(3*(p1-p2)+p3-p0)));
-      y=x*max(0,min(1,y*(1+c*.5*max(-2.5,min(2.5,q[9])))));
-    ) : t==10 ? (
-      // One independent convolver history per active capsule, all at host rate. IR channel
-      // assignment follows the physical left/right channel names; no IR passes dry.
-      y=x; n=conv_tab[4800+k];
-      n>=0 && conv_tab[5120+k]==1 ? (
-        y=conv_run(n,conv_hb+(floor(k/12)*2+conv_tab[2560+n*8+3])*CONV_BS,x,64+n*8);
-        q[8]+=b*(y-q[8]); y=q[8];
-        q[9]+=c*(y-q[9]); y=(y-q[9])*a;
-      );
-    ) : t==11 ? (
-      // Resonance Suppressor: A is Amount, B and C the Low and High limits in Hz (20 and 20000: no limit).
-      y=sup_run(k,q,base,x,age,r,a,b,c);
-    ) : t==5 ? (
-      // Four damped feedback combs, mixed in parallel (a small Schroeder-style room).
-      y=0; j=0; loop(4,
-        d=min(32765,(j==0?.0297:j==1?.0371:j==2?.0411:.0437)*a*r);
-        z=fx_tap(base+j*32768,pos&32767,age,d,32767);
-        q[8+j]+=c*(z-q[8+j]);
-        wet=x*.35+b*q[8+j]; base[j*32768+(pos&32767)]=max(-32,min(32,wet));
-        y+=z*.5; j+=1;
-      );
-    ) : (
-      d=t==2 ? (.0005+b*(.5+.5*sin(ph)))*r : t==3 ? (.015+b*sin(ph))*r : a*r;
-      y=fx_tap(base,pos,age,d,131071);
-      t==3 ? y=.5*(y+fx_tap(base,pos,age,(.021+b*sin(ph+1.7))*r,131071));
-      t==4 ? (q[8]+=c*(y-q[8]); y=q[8]; fb=b;) : fb=c;
-      z=x+fb*y; base[pos]=max(-32,min(32,z));
-      t==2 || t==3 ? ph+=2*$pi*a/r;
-    );
-    ph>=2*$pi ? ph-=2*$pi;
-    q[5]=ph; q[6]=(pos+1)&131071; q[7]=min(131072,age+1);
-    x+=q[1]*(y-x);
-  ) : (q[7]=0; q[8]=q[9]=q[10]=q[11]=0;);
   x;
 );
