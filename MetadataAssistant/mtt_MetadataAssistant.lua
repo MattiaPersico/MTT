@@ -95,8 +95,18 @@
 -- 0.24: Overview: the # and Status columns are gone; the one fixed column holds the play icon and
 -- the file name, coloured by the item's status. A click on a cell selects the item in REAPER, a
 -- double click edits it. The horizontal scrollbar sits under the scrolling columns only.
+-- 0.25: Paste all (a clipboard icon) next to the Copy icon for one item too, and it also works on items with no
+-- metadata yet (they get the copied fields, the file names follow and are numbered 01, 02...).
+-- The light on the phase dots lights one, two, three, two, one dot instead of moving along them.
+-- 0.26: a paste never leaves two items with the same file name: a name already used by another
+-- item of the project (or by another pasted item) gets " 02", " 03"... at the end of its FXName.
+-- 0.27: the items a paste gave metadata to are saved and tagged at once, so the Overview lists them
+-- right away.
+-- 0.28: a paste renumbers an FXName that already ends in a take number ("Whir 02" -> "Whir 01",
+-- "Whir 02", ...) instead of adding a second number ("Whir 02 02"); a name already taken moves on to the
+-- next free number.
 local major_version = 0
-local minor_version = 24
+local minor_version = 28
 
 local name = 'Metadata Assistant ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -477,29 +487,31 @@ function icons.stop(dl, x, y, h, col)
   ImGui.DrawList_AddRectFilled(dl, x0, y0, x0 + 8, y0 + 8, col, 1)
 end
 
--- The dots between two phases while the model works on the step that leads from one
--- to the other: a light sweeps back and forth over them, with a short trail, slow at
--- both ends. Its colour moves through the colours of the timeline outline (orange, amber,
--- warm white, blue), one step per sweep. Time based, so the redraw rate does not matter.
--- (cx, cy): the middle of the three dots; t: seconds.
+-- The three dots between two phases while the model works on the step that leads from one
+-- to the other: they light one, two, three, two, one dot, and so on (smoothly, over the grey
+-- dots that stay underneath). The colour moves through the colours of the timeline outline
+-- (orange, amber, warm white, blue), one step per round trip. Time based, so the redraw rate
+-- does not matter. (cx, cy): the middle of the three dots; t: seconds.
 icons.SCAN_PALETTE = { 0xFF6A00FF, 0xFFA53CFF, 0xFFF3DEFF, 0x33ADFFFF }
-icons.SCAN_SWEEP = 0.9   -- seconds for one way
-icons.SCAN_SPAN = 20     -- pixels from the middle to each end
-icons.SCAN_TRAIL = 6     -- circles behind the head
+icons.SCAN_WAY = 0.6     -- seconds from one dot lit to three lit (and back)
+icons.SCAN_SPACING = 8   -- pixels between the dots
 icons.STATE_GAP = { measuring = 1, listening = 1, drafting = 1, finalizing = 2 } -- state -> gap between phases
 function icons.scan(dl, cx, cy, t)
-  local u = (t % (2 * icons.SCAN_SWEEP)) / (2 * icons.SCAN_SWEEP)
-  local pos = -math.cos(2 * math.pi * u)                    -- -1 .. 1 .. -1
-  local dir = math.sin(2 * math.pi * u) >= 0 and 1 or -1    -- the way the head moves
+  local period = 2 * icons.SCAN_WAY
+  local u = (t % period) / period
+  local tri = u < 0.5 and u * 2 or 2 - u * 2               -- 0 .. 1 .. 0
+  local v = 1 + 2 * tri                                    -- dots lit: 1 .. 3 .. 1
   local pal = icons.SCAN_PALETTE
-  local c = (t / icons.SCAN_SWEEP) % #pal
+  local c = (t / period) % #pal
   local i0 = math.floor(c)
-  local head = mix_color(pal[i0 + 1], pal[(i0 + 1) % #pal + 1], c - i0)
-  for k = icons.SCAN_TRAIL, 0, -1 do                       -- the trail first, the head on top
-    local p = math.max(-1, math.min(1, pos - dir * k * 0.09))
-    local a = 1 - k / (icons.SCAN_TRAIL + 1)
-    ImGui.DrawList_AddCircleFilled(dl, cx + p * icons.SCAN_SPAN, cy, 1.2 + 1.5 * a,
-      (head & 0xFFFFFF00) | math.floor(255 * a * a))
+  local col = mix_color(pal[i0 + 1], pal[(i0 + 1) % #pal + 1], c - i0)
+  for k = 0, 2 do
+    local a = math.max(0, math.min(1, v - k))              -- how lit dot k is
+    a = a * a * (3 - 2 * a)
+    if a > 0 then
+      ImGui.DrawList_AddCircleFilled(dl, cx + (k - 1) * icons.SCAN_SPACING, cy, 1.5 + 1.2 * a,
+        (col & 0xFFFFFF00) | math.floor(255 * a))
+    end
   end
 end
 
@@ -512,6 +524,15 @@ function icons.copy(dl, x, y, h, col)
   ImGui.DrawList_AddLine(dl, x0 + 12, y0, x0 + 12, y0 + 10, col, 1)        -- right
   ImGui.DrawList_AddLine(dl, x0 + 3, y0, x0 + 3, y0 + 3, col, 1)           -- left, above the front
   ImGui.DrawList_AddLine(dl, x0 + 10, y0 + 10, x0 + 12, y0 + 10, col, 1)   -- bottom, right of the front
+end
+
+-- Paste: a clipboard (board in 1 px lines, a filled clip on top, two lines of text).
+function icons.paste(dl, x, y, h, col)
+  local x0, y0 = x + math.floor((h - 13) / 2), y + math.floor((h - 14) / 2)
+  ImGui.DrawList_AddRect(dl, x0, y0 + 2, x0 + 12, y0 + 14, col, 0, 0, 1)   -- board
+  ImGui.DrawList_AddRectFilled(dl, x0 + 3, y0, x0 + 9, y0 + 4, col)        -- clip
+  ImGui.DrawList_AddLine(dl, x0 + 3, y0 + 8, x0 + 9, y0 + 8, col, 1)       -- text
+  ImGui.DrawList_AddLine(dl, x0 + 3, y0 + 11, x0 + 9, y0 + 11, col, 1)
 end
 
 -- Multiline text box whose lines wrap to the window width on screen only: the
@@ -779,6 +800,20 @@ local function page_for(s)
   return 'Describe'
 end
 
+-- Sorts the selected items (multi.items, in timeline order): with metadata, without, not
+-- taggable. seedable: without metadata and free to take a paste (nothing running on them).
+local function classify_multi()
+  multi.with_values, multi.no_values, multi.unsupported, multi.seedable = {}, 0, 0, 0
+  for _, sess in ipairs(multi.items) do
+    if sess.facts.error then multi.unsupported = multi.unsupported + 1
+    elseif sess.values then multi.with_values[#multi.with_values + 1] = sess
+    else
+      multi.no_values = multi.no_values + 1
+      if not flow.busy(sess) then multi.seedable = multi.seedable + 1 end
+    end
+  end
+end
+
 local function track_selection()
   local count = reaper.CountSelectedMediaItems(0)
   -- Library identity filled in after an item was finalized reaches its empty fields (flow.refresh_session).
@@ -803,12 +838,8 @@ local function track_selection()
       multi = { sig = sig, overrides = {} }
       confirm_overwrite, render_msg, overwrite_targets = false, nil, nil
     end
-    multi.items, multi.with_values, multi.no_values, multi.unsupported = sessions_in_order, {}, 0, 0
-    for _, sess in ipairs(sessions_in_order) do
-      if sess.facts.error then multi.unsupported = multi.unsupported + 1
-      elseif sess.values then multi.with_values[#multi.with_values + 1] = sess
-      else multi.no_values = multi.no_values + 1 end
-    end
+    multi.items = sessions_in_order
+    classify_multi()
     current, current_item, item_reason = nil, nil, nil
     return
   end
@@ -1409,6 +1440,9 @@ end
 local function multi_paste(key)
   local v = copied and copied.values[key]
   if v == nil then return end
+  -- A copied FXName that ends in a take number ("Whir 02", two digits or more) is numbered from its
+  -- base, or it would read "Whir 02 01", "Whir 02 02"...
+  if key == 'FXName' and #multi.with_values > 1 then v = v:gsub(' %d%d+$', '') end
   multi_set(key, v)
   -- A field that makes up the file name drops the names typed by hand (set_value does it).
   if flow.NAME_KEYS[key] then multi.overrides[FILENAME_KEY] = nil end
@@ -1428,8 +1462,31 @@ end
 -- name last, and only when it was typed by hand on the copied item: an automatic
 -- one already follows from the pasted fields (FXName numbered as the name would be).
 local function multi_paste_all()
+  if not copied then return end
+  -- Items with no metadata yet get an empty card first (library identity, dates), so the paste
+  -- reaches them too; they join the numbering in timeline order.
+  local identity = settings_mod.session_values(settings)
+  for _, sess in ipairs(multi.items) do
+    if not sess.facts.error then flow.seed_values(sess, identity) end
+  end
+  classify_multi()
   for _, def in ipairs(fields.FIELDS) do multi_paste(def.key) end
-  if copied and copied.name_typed then multi_set_filename(copied.name) end
+  if copied.name_typed then multi_set_filename(copied.name) end
+  overview.unique_names(multi.with_values)
+  view_page = 'Metadata'
+end
+
+-- One item selected: Paste all gives it every copied field (an item with no metadata yet gets
+-- its card first) and, when the copied name was typed by hand, that name.
+local function paste_all_single(sess)
+  if not copied or flow.busy(sess) then return end
+  flow.seed_values(sess, settings_mod.session_values(settings))
+  for _, def in ipairs(fields.FIELDS) do
+    local v = copied.values[def.key]
+    if v ~= nil then flow.set_value(sess, def.key, v) end
+  end
+  if copied.name_typed then flow.set_filename(sess, copied.name) end
+  overview.unique_names({ sess })
 end
 
 local function draw_multi_result()
@@ -1437,7 +1494,7 @@ local function draw_multi_result()
   ImGui.SeparatorText(ctx, 'Output files')
   local n = #multi.with_values
   if multi.no_values > 0 then
-    wrapped(string.format('%d of the selected items have no metadata yet and are left out: describe and finalize each of them first.',
+    wrapped(string.format('%d of the selected items have no metadata yet and are left out: describe and finalize each of them first, or Paste all a copied item into them.',
       multi.no_values), COL_WARN)
   end
   if multi.unsupported > 0 then
@@ -1693,6 +1750,40 @@ local function overview_select(item, add)
     reaper.SetMediaItemSelected(item, true)
   end
   reaper.UpdateArrange()
+end
+
+-- After a paste: the pasted items (sessions) must not share a file name with each other nor with
+-- any other item of the project that has a card. A name already taken gets " 02", " 03"... at
+-- the end of its FXName (a name typed by hand: at the end of its FXName block), the first
+-- number that is free (from 01, or after the take number it already ends in).
+function overview.unique_names(targets)
+  save_dirty(true) -- the cards a paste just made are saved and their items tagged: the Overview lists them
+  overview_refresh(true)
+  local is_target, used = {}, {}
+  for _, t in ipairs(targets) do is_target[t] = true end
+  for _, row in ipairs(overview.rows) do
+    local s = row.session
+    if not is_target[s] and s.values then used[flow.result(s).filename] = true end
+  end
+  for _, t in ipairs(targets) do
+    local name = flow.result(t).filename
+    if name ~= '' and used[name] then
+      -- An FXName already ending in a take number ("Whir 02") goes on from it ("Whir 03"), not "Whir 02 02".
+      local fx, typed = t.values.FXName or '', t.filename_edit
+      local base, taken = fx:match('^(.-) (%d%d+)$')
+      if not base then base = fx end
+      for n = (tonumber(taken) or 0) + 1, 999 do
+        if typed then flow.set_filename(t, filename.number_name(typed, n, n))
+        else flow.set_value(t, 'FXName', (base ~= '' and (base .. ' ') or '') .. string.format('%02d', n)) end
+        local candidate = flow.result(t).filename
+        if not used[candidate] then name = candidate; break end
+      end
+    end
+    used[name] = true
+  end
+  save_dirty(true)
+  overview_refresh(true)
+  overview.names_at = 0
 end
 
 -- What the status says, for the tooltip of a row's file name cell.
@@ -2280,26 +2371,37 @@ local function draw_tabs(locked, attention, working)
   ImGui.SameLine(ctx)
 end
 
--- Next to the tabs. One item: Copy takes its metadata. Several: Paste all puts every
--- copied field in all the selected items that have metadata.
+-- Next to the tabs. One item: Copy takes its metadata (icon, in Review), Paste all gives it the
+-- copied ones. Several: Paste all puts every copied field in all the selected items, those
+-- with no metadata yet included.
 local function draw_copy_buttons()
   if multi then
-    local can = copied ~= nil and #multi.with_values > 0
+    local can = copied ~= nil and (#multi.with_values + multi.seedable) > 0
     ImGui.BeginDisabled(ctx, not can)
-    if ImGui.Button(ctx, 'Paste all') then multi_paste_all() end
+    if icons.button('##paste', false, icons.paste) then multi_paste_all() end
     ImGui.EndDisabled(ctx)
-    if can then tip(string.format('Puts every field copied from %s, and its file name, in all the selected items that have metadata. Hover a field or the file name to do it for that one only.', copied.name))
+    if can then tip(string.format('Puts every field copied from %s, and its file name, in all the selected items. An item with no metadata yet gets them too, and the file names are numbered 01, 02, 03... in timeline order. Hover a field or the file name of the items that have metadata to do it for that one only.', copied.name))
     elseif not copied then tip('Nothing copied yet: select one item with metadata and use the copy icon in Review.')
-    else tip('None of the selected items has metadata yet.') end
+    else tip('None of the selected items can take a paste right now.') end
   else
     -- The copy icon shows only on the Review phase, where the metadata is.
-    if view_page ~= 'Metadata' then return end
-    local can = current.values ~= nil and not flow.busy(current)
+    if view_page == 'Metadata' then
+      local can = current.values ~= nil and not flow.busy(current)
+      ImGui.BeginDisabled(ctx, not can)
+      if icons.button('##copy', false, icons.copy) then copy_item(current) end
+      ImGui.EndDisabled(ctx)
+      tip(can and 'Copy: takes the file name and every metadata field of this item. Then Paste all gives them to this or another item, also one that was never described; with several items selected, Review lets you hover a field or the file name to preview the copied value and click it to put it in all of them.'
+        or 'Nothing to copy yet: this item has no metadata.')
+      ImGui.SameLine(ctx)
+    end
+    -- Always shown (greyed until something is copied), on every page, also for an item never described.
+    local can = copied ~= nil and not flow.busy(current)
     ImGui.BeginDisabled(ctx, not can)
-    if icons.button('##copy', false, icons.copy) then copy_item(current) end
+    if icons.button('##paste', false, icons.paste) then paste_all_single(current) end
     ImGui.EndDisabled(ctx)
-    tip(can and 'Copy: takes the file name and every metadata field of this item. Select several items, open Review and hover a field or the file name to preview the copied value; click it to put it in all of them, or use Paste all.'
-      or 'Nothing to copy yet: this item has no metadata.')
+    if can then tip(string.format('Puts every field copied from %s in this item, and its file name when it was typed by hand. An item with no metadata yet gets it as its metadata.', copied.name))
+    elseif not copied then tip('Nothing copied yet: select an item with metadata, open Review and click the copy icon; then select this item. (What is copied is forgotten when the script is closed.)')
+    else tip('The model is working on this item.') end
   end
   ImGui.SameLine(ctx)
 end
@@ -2340,7 +2442,7 @@ local function draw_multi_workspace()
   draw_tabs({
     Review = 'Describing and clarifying work on one item at a time: select a single item.',
     Metadata = #multi.with_values == 0
-      and 'None of the selected items has metadata yet: describe and finalize each of them first.' or nil,
+      and 'None of the selected items has metadata yet: describe and finalize each of them first, or copy an item and Paste all.' or nil,
   })
   draw_copy_buttons()
   draw_render_button(targets, nil)

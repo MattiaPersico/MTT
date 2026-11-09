@@ -357,6 +357,23 @@ function M.refresh_session(s, session)
   return false
 end
 
+-- An item that was never described takes metadata pasted from another: its card gets empty
+-- values (library identity from the settings, dates) and counts as reviewed; the file name
+-- then follows from the fields pasted next. Returns true when it did. Items that have values or
+-- are being worked on are left alone.
+function M.seed_values(s, session)
+  if s.values or M.busy(s) then return false end
+  local d = s.deps
+  s.values = {}
+  d.fields.apply_session(s.values, session or {})
+  d.fields.apply_auto(s.values, s.facts.recorded_on, d.today(), d.ucs.version)
+  s.error, s.cancelled, s.retry = nil, nil, nil
+  s.rendered, s.filename_edit = nil, nil
+  s.state = "done"
+  s.dirty = true
+  return true
+end
+
 -- Fields that make up the file name: editing one of them drops a name typed by hand.
 local NAME_KEYS = { CatID = true, UserCategory = true, VendorCategory = true, FXName = true,
                     ShortID = true, SourceID = true }
