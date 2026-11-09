@@ -48,7 +48,6 @@ end
 local function llm_opts(settings)
   return {
     model = settings.model,
-    json_mode = settings.json_mode,
     question_language = settings.question_language,
     name_blocks = settings.name_blocks,
   }
@@ -95,7 +94,8 @@ function M.send(s, messages, on_result)
   local function post_chat(stream)
     opts.stream = stream
     local body = d.llm.request_body(d.json, messages, opts)
-    local id, err = d.post(s.url, headers(s.settings), body, s.settings.stall_timeout_s, function(res)
+    -- No silence limit: a request runs until it ends or Stop (http: unreachable fails after 15 s).
+    local id, err = d.post(s.url, headers(s.settings), body, 0, function(res)
       if (s.gen or 0) ~= gen then return end -- stopped by the user: the answer is dropped
       s.job = nil
       if stream and (res.status == 400 or res.status == 422) then
@@ -114,24 +114,8 @@ function M.send(s, messages, on_result)
   post_chat(not s.settings.model_audio)
 end
 
--- Microphone and recorder from the settings, as facts for the model: only for a
--- sound recorded today (the same rule as build_values).
-local function device_defaults(s)
-  local d = s.deps
-  local out = {}
-  local recorded_on = s.facts and s.facts.recorded_on
-  if recorded_on ~= nil and recorded_on == d.today() then
-    for _, k in ipairs(d.fields.DEVICE_KEYS) do
-      local v = s.session and s.session[k]
-      if v and v ~= "" then out[k] = v end
-    end
-  end
-  return out
-end
-
 local function context(s)
   return {
-    devices = device_defaults(s),
     description = s.description,
     heard = s.heard,
     candidates = s.candidates,
@@ -168,32 +152,17 @@ local function start_draft(s, extra_terms)
   end)
 end
 
--- Starts the analysis: measures, then pass 0 (if the model hears audio) and
--- pass 1; the card moves to "questions" or "error" when the answers arrive.
--- Starting again drops the previous draft, answers and values.
-function M.analyze(s, description, session_values)
+local function measured(s, measures, clip, merr)
   local d = s.deps
-  s.description = tostring(description or "")
-  s.session = session_values or {}
-  s.error, s.draft, s.values, s.problems, s.raw_text, s.answers = nil, nil, nil, nil, nil, nil
-  s.heard, s.listen_error, s.rendered, s.filename_edit = nil, nil, nil, nil
-  s.cancelled = nil
-  s.dirty = true
-  if not s.url then fail(s, "Set a valid endpoint (http://...) in Settings."); return end
-  if not s.settings.model or s.settings.model == "" then fail(s, "Set the model name in Settings."); return end
-  local hears = s.settings.model_audio
-  if not hears and not s.description:match("%S") then
-    fail(s, "Describe the sound, or tick 'Model hears audio' in Settings if the model can listen.")
+  s.measures_text = measures
+  s.model_facts = s.model_facts or {}
+  s.model_facts.Measured = measures
+  if merr and not measures then fail(s, tostring(merr)); return end
+  if not s.settings.model_audio then
+    if clip and clip.path then os.remove(clip.path) end
+    start_draft(s, nil)
     return
   end
-
-  local clip, merr = nil, nil
-  if d.measure then
-    s.measures_text, clip, merr = d.measure(s)
-    s.model_facts = s.model_facts or {}
-    s.model_facts.Measured = s.measures_text
-  end
-  if not hears then start_draft(s, nil); return end
   if not clip then
     if s.description:match("%S") then
       s.listen_error = "no audio clip: " .. tostring(merr)
@@ -206,8 +175,8 @@ function M.analyze(s, description, session_values)
 
   s.state = "listening"
   s.clip_path = clip.path
-  local part = d.llm.audio_part(s.settings.audio_mode == 1 and "base64" or "path", clip.path, clip.b64)
-  M.send(s, d.llm.listen_messages(d.fields, { description = s.description }, part), function(res)
+  local part = d.llm.audio_part(clip.b64 and "base64" or "path", clip.path, clip.b64)
+  M.send(s, d.llm.listen_messages(d.fields, { description = s.description, mapping = clip.mapping }, part), function(res)
     if clip.path then os.remove(clip.path) end
     s.clip_path = nil
     local obj, err = nil, nil
@@ -246,8 +215,64 @@ function M.analyze(s, description, session_values)
   if s.state == "error" and clip.path then os.remove(clip.path) end
 end
 
+-- Resume one audio job per UI frame. Closing a suspended thread also releases
+-- its take accessor through the resource guard in survey_take.
+local pending = {}
+function M.measure_count() return #pending end
+
+function M.poll_measurements()
+  local s = table.remove(pending,1)
+  if not s then return end
+  local thread = s.measure_thread
+  local ok, measures, clip, err = coroutine.resume(thread)
+  if ok and coroutine.status(thread) == "suspended" then
+    pending[#pending+1] = s
+    return
+  end
+  coroutine.close(thread)
+  s.measure_thread, s.measure_start = nil, nil
+  if not ok then fail(s,tostring(measures)); return end
+  measured(s,measures,clip,err)
+end
+
+function M.stop_measurements()
+  while #pending > 0 do M.cancel(pending[#pending]) end
+end
+
+-- Starts the analysis: measures, then pass 0 (if the model hears audio) and
+-- pass 1; the card moves to "questions" or "error" when the answers arrive.
+-- Starting again drops the previous draft, answers and values.
+function M.analyze(s, description, session_values)
+  if M.busy(s) then return end
+  local d = s.deps
+  s.description = tostring(description or "")
+  s.session = session_values or {}
+  s.error, s.draft, s.values, s.problems, s.raw_text, s.answers = nil, nil, nil, nil, nil, nil
+  s.heard, s.listen_error, s.rendered, s.filename_edit = nil, nil, nil, nil
+  s.measures_text, s.model_facts.Measured = nil, nil
+  s.cancelled = nil
+  s.dirty = true
+  if not s.url then fail(s, "Set a valid endpoint (http://...) in Settings."); return end
+  if not s.settings.model or s.settings.model == "" then fail(s, "Set the model name in Settings."); return end
+  local hears = s.settings.model_audio
+  if not hears and not s.description:match("%S") then
+    fail(s, "Describe the sound, or tick 'Model hears audio' in Settings if the model can listen.")
+    return
+  end
+
+  if d.defer_measure and d.measure then
+    s.state = "measuring"
+    s.measure_thread = coroutine.create(function() return d.measure(s) end)
+    pending[#pending+1] = s
+  elseif d.measure then
+    measured(s,d.measure(s))
+  else
+    measured(s)
+  end
+end
+
 -- Values from a checked answer: UCS fields, the model's fields, library
--- identity, device defaults only for a sound recorded today, recording date.
+-- identity, recording date.
 function M.build_values(s, answer)
   local d = s.deps
   local values = {}
@@ -259,8 +284,7 @@ function M.build_values(s, answer)
     values.VendorCategory = d.filename.trim_vendor(values.VendorCategory, values.FXName,
       answer.entry.cat, answer.entry.sub)
   end
-  local recorded_today = s.facts.recorded_on ~= nil and s.facts.recorded_on == d.today()
-  d.fields.apply_session(values, s.session or {}, recorded_today)
+  d.fields.apply_session(values, s.session or {})
   d.fields.apply_auto(values, s.facts.recorded_on, d.today(), d.ucs.version)
   return values
 end
@@ -379,7 +403,14 @@ end
 -- Analysis goes back to "idle" (the description is kept); finalizing goes back to
 -- where it started from, the questions or the finished card.
 function M.cancel(s)
-  if not (s.state == "listening" or s.state == "drafting" or s.state == "finalizing") then return end
+  if not M.busy(s) then return end
+  if s.measure_thread then
+    for i,queued in ipairs(pending) do
+      if queued == s then table.remove(pending,i); break end
+    end
+    coroutine.close(s.measure_thread)
+    s.measure_thread, s.measure_start = nil,nil
+  end
   s.gen = (s.gen or 0) + 1
   if s.job and s.deps.cancel then s.deps.cancel(s.job) end
   s.job = nil
@@ -395,7 +426,7 @@ function M.cancel(s)
   s.dirty = true
 end
 
-function M.busy(s) return s.state == "listening" or s.state == "drafting" or s.state == "finalizing" end
+function M.busy(s) return s.state == "measuring" or s.state == "listening" or s.state == "drafting" or s.state == "finalizing" end
 
 -- The card saved in the project: plain data only.
 function M.to_card(s)

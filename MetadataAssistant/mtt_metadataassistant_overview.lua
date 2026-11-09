@@ -13,6 +13,7 @@ local STATUS = {
   error      = { label = 'Error',        kind = 'err',  rank = 0 },
   idle       = { label = 'Not analyzed', kind = 'dim',  rank = 1 },
   listening  = { label = 'Listening',    kind = 'busy', rank = 2 },
+  measuring  = { label = 'Measuring',    kind = 'busy', rank = 2 },
   drafting   = { label = 'Analyzing',    kind = 'busy', rank = 2 },
   questions  = { label = 'To review',    kind = 'warn', rank = 3 },
   finalizing = { label = 'Finalizing',   kind = 'busy', rank = 4 },

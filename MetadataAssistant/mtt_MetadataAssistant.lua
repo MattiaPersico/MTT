@@ -8,7 +8,7 @@
 -- selecting the item again brings it back for editing or a fresh analysis, also
 -- after a cut and paste (a copy gets its own copy of the card). Final fields are
 -- editable; Render writes a 24-bit WAV at the item's sample rate and channel
--- count with the metadata embedded.
+-- count with the metadata (and the item's artwork, when set) embedded.
 -- 0.4: fields aligned with BOOM Library's Soundminer exports (Recordist,
 -- ChannelLayout, ShootDate, URL, copyright in the BWF originator, TrackYear as
 -- the year, Microphone from the answers).
@@ -62,8 +62,33 @@
 -- 0.19: blue runs around the analyzed items with the orange and the warm white.
 -- 0.20: renamed from UCS Tagger to Metadata Assistant (files, modules, window
 -- titles, ExtState section and item tag) and moved from Testing/ to MetadataAssistant/.
+-- 0.21: full screen icon in the title bar of the main window and of the Overview,
+-- left of the close button: the window fills the work area of the display it is
+-- on; the icon again puts it back. No collapse arrow in the title bars. Two icons
+-- at the right of the top row: a table (opens the Overview, which no longer has a
+-- button next to Render) and a gear (the settings, shown inside the main window,
+-- no separate Settings window); a double click on a title bar toggles full screen.
+-- The Overview shows the table and the curator side by side, with a draggable
+-- border; at its right edge an arrow hides the curator, or "< Curator" brings it
+-- back. Artwork per item (Metadata page, last group; Browse...): a JPEG
+-- or PNG embedded as the front cover in the rendered file. Settings: Library,
+-- SourceID and Show are saved in the project, the rest stays global; labels on the
+-- left, grouped (Server, Models, Audio / Library identity, This project, Files /
+-- Diagnostics, Timeline); Render folder moved to Library and defaults to Render;
+-- JSON mode, Give up after silence and the default microphone / recorder removed
+-- (Microphone and RecMedium are per item only).
+-- 0.22: full-item survey, representative listening excerpts and time-resolved
+-- event, timbre and stereo measurements. Stop also cancels local audio analysis.
+-- Settings save themselves on every change (no Save settings button). The library
+-- identity has its own view (books icon, next to the Overview's); the gear shows
+-- every other setting on one page (no tabs), Render folder included. The item's
+-- phases read Describe . . . Clarify . . . Review (text only, the current one in the
+-- accent and underlined; Clarify pulses while it waits for the user); Play and Copy
+-- are icons, Copy only in Review. Settings > Diagnostics and its Technical details
+-- panel (measures, UCS candidates, raw answers, Delete this card) are gone. The measurements cover the whole item in
+-- segments of up to 30 s; "Seconds sent to the model" only limits the audio clip.
 local major_version = 0
-local minor_version = 20
+local minor_version = 22
 
 local name = 'Metadata Assistant ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -135,7 +160,7 @@ local COL_SELECTED_ACTIVE = 0x84541AFF
 local COL_BUTTON = 0x303435FF
 -- Pulse of a tab that asks for attention: from COL_BUTTON towards COL_ACCENT and back.
 local BLINK_PERIOD = 1.2 -- seconds per cycle
-local BLINK_DEPTH = 0.75 -- 1 = full accent at the peak; less keeps the light label readable
+local BLINK_DEPTH = 1 -- 1 = full accent at the peak of the pulse
 local palette = {
   { ImGui.Col_WindowBg, 0x191A1BFF }, { ImGui.Col_TitleBg, 0x202223FF },
   { ImGui.Col_TitleBgActive, 0x292B2CFF }, { ImGui.Col_Text, 0xECEEEBFF },
@@ -187,22 +212,23 @@ local function pop_style()
   if font then ImGui.PopFont(ctx) end
 end
 
-local function accent_button(label)
+-- width: optional; -1 fills the row.
+local function accent_button(label, width)
   ImGui.PushStyleColor(ctx, ImGui.Col_Button, COL_SELECTED)
   ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, COL_SELECTED_HOVER)
   ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, COL_SELECTED_ACTIVE)
-  local clicked = ImGui.Button(ctx, label)
+  local clicked = ImGui.Button(ctx, label, width or 0)
   ImGui.PopStyleColor(ctx, 3)
   return clicked
 end
 
 local mix_color = outline.mix_color -- colour between a and b (0xRRGGBBAA), k from 0 to 1
 
--- Background of a blinking button at time t (seconds): a smooth pulse, so the
--- defer loop's redraw rate does not matter.
+-- Text colour of a pulsing phase label at time t (seconds): a smooth pulse from
+-- dim to the accent, so the defer loop's redraw rate does not matter.
 local function blink_color(t)
   local phase = (t % BLINK_PERIOD) / BLINK_PERIOD
-  return mix_color(COL_BUTTON, COL_ACCENT, BLINK_DEPTH * (0.5 - 0.5 * math.cos(2 * math.pi * phase)))
+  return mix_color(COL_DIM, COL_ACCENT, BLINK_DEPTH * (0.5 - 0.5 * math.cos(2 * math.pi * phase)))
 end
 
 -- Width of a button with this label.
@@ -224,6 +250,72 @@ local function window_rect()
   return { x, y, x + w, y + h }
 end
 
+-- Full screen: the window covers the work area (no menu bar, Dock or taskbar)
+-- of the screen that holds most of it, and cannot be moved, resized or
+-- collapsed. The icon left of the title bar's close button enters and leaves
+-- it; leaving puts the window back where and as large as it was. Per run only.
+local fullscreen = {}      -- key -> { back = {x, y, w, h}, screen = {x, y, w, h} }
+local fullscreen_back = {} -- key -> the geometry to put back on the next frame
+
+-- Work area of the screen holding most of the current window (call between
+-- Begin and End), in ReaImGui coordinates; nil when REAPER gives nothing usable.
+-- my_getViewport takes and returns native coordinates (macOS: origin at the
+-- bottom left, y up; Windows: physical pixels): each corner is converted on its
+-- own and the results sorted, so the orientation does not matter.
+local function window_screen()
+  local x, y = ImGui.GetWindowPos(ctx)
+  local w, h = ImGui.GetWindowSize(ctx)
+  local ax, ay = ImGui.PointConvertNative(ctx, x, y, true)
+  local bx, by = ImGui.PointConvertNative(ctx, x + w, y + h, true)
+  local l, t, r, b = reaper.my_getViewport(0, 0, 0, 0,
+    math.floor(math.min(ax, bx)), math.floor(math.min(ay, by)),
+    math.floor(math.max(ax, bx)), math.floor(math.max(ay, by)), true)
+  if not (l and t and r and b) then return nil end
+  local x1, y1 = ImGui.PointConvertNative(ctx, l, t)
+  local x2, y2 = ImGui.PointConvertNative(ctx, r, b)
+  local sw, sh = math.abs(x2 - x1), math.abs(y2 - y1)
+  if sw < 100 or sh < 100 then return nil end
+  return { math.min(x1, x2), math.min(y1, y2), sw, sh }
+end
+
+-- Before Begin (after prepare_window): returns the window flags full screen adds.
+local function prepare_fullscreen(key)
+  local fs = fullscreen[key]
+  if fs then
+    local sc = fs.screen
+    ImGui.SetNextWindowCollapsed(ctx, false, ImGui.Cond_Always)
+    ImGui.SetNextWindowPos(ctx, sc[1], sc[2], ImGui.Cond_Always)
+    ImGui.SetNextWindowSize(ctx, sc[3], sc[4], ImGui.Cond_Always)
+    return ImGui.WindowFlags_NoMove | ImGui.WindowFlags_NoResize
+  end
+  local back = fullscreen_back[key]
+  if back then
+    ImGui.SetNextWindowPos(ctx, back[1], back[2], ImGui.Cond_Always)
+    ImGui.SetNextWindowSize(ctx, back[3], back[4], ImGui.Cond_Always)
+    fullscreen_back[key] = nil
+  end
+  return 0
+end
+
+-- Between Begin and End. The screen is read once, on entering.
+local function toggle_fullscreen(key)
+  if fullscreen[key] then
+    fullscreen_back[key], fullscreen[key] = fullscreen[key].back, nil
+    return
+  end
+  local x, y = ImGui.GetWindowPos(ctx)
+  local w, h = ImGui.GetWindowSize(ctx)
+  local screen = window_screen()
+  if not screen then -- REAPER's main window instead
+    local viewport = ImGui.GetMainViewport(ctx)
+    local vx, vy = ImGui.Viewport_GetWorkPos(viewport)
+    local vw, vh = ImGui.Viewport_GetWorkSize(viewport)
+    if vw <= 0 or vh <= 0 then return end
+    screen = { vx, vy, vw, vh }
+  end
+  fullscreen[key] = { back = { x, y, w, h }, screen = screen }
+end
+
 -- Tooltip for the item just drawn (a label, a button). Also while it is disabled.
 local function tip(text)
   if text and text ~= '' and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
@@ -234,6 +326,158 @@ local function tip(text)
       ImGui.EndTooltip(ctx)
     end
   end
+end
+
+-- Right after Begin (window visible): the full screen icon in the title bar, left
+-- of the close button. Placed and sized as ReaImGui's Dear ImGui (cfillion/imgui,
+-- RenderWindowTitleBarContents + CloseButton) does its close button: FramePadding
+-- from the right edge, a square one font size wide, ItemInnerSpacing between the
+-- two, lowered by half of (line height - font size), drawn around the square's
+-- centre minus half a pixel, as far out as the cross's arms.
+local function fullscreen_title_button(key)
+  local wx, wy = ImGui.GetWindowPos(ctx)
+  local ww = ImGui.GetWindowSize(ctx)
+  local pad_x, pad_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+  local inner_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemInnerSpacing)
+  local sz = ImGui.GetFontSize(ctx)
+  local line_h = ImGui.GetTextLineHeight(ctx)
+  local bx = wx + ww - pad_x - sz - inner_x - sz
+  local by = wy + pad_y + (line_h - sz) * 0.5
+  local cur_x, cur_y = ImGui.GetCursorPos(ctx)
+  -- The title bar lies outside the content's clip rectangle: open it for this button only.
+  ImGui.PushClipRect(ctx, wx, wy, wx + ww, wy + line_h + 2 * pad_y, false) -- the title bar
+  ImGui.SetCursorScreenPos(ctx, bx, by)
+  local clicked = ImGui.InvisibleButton(ctx, '##fullscreen', sz, sz)
+  local hovered, held = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  if hovered then
+    ImGui.DrawList_AddRectFilled(dl, bx, by, bx + sz, by + sz,
+      ImGui.GetColor(ctx, held and ImGui.Col_ButtonActive or ImGui.Col_ButtonHovered))
+  end
+  -- Four corner brackets: corners outside = enter full screen, corners near the centre = leave.
+  local col = ImGui.GetColor(ctx, ImGui.Col_Text)
+  local cx, cy = bx + sz / 2 - 0.5, by + sz / 2 - 0.5
+  local outer = sz * 0.5 * 0.7071 - 1 -- the close button's cross_extent
+  local near = outer * 0.3
+  local on = fullscreen[key] ~= nil
+  for _, sign in ipairs({ { -1, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 } }) do
+    local sx, sy = sign[1], sign[2]
+    local corner, tip_end = on and near or outer, on and outer or near
+    local px, py = cx + sx * corner, cy + sy * corner
+    ImGui.DrawList_AddLine(dl, px, py, cx + sx * tip_end, py, col, 1)
+    ImGui.DrawList_AddLine(dl, px, py, px, cy + sy * tip_end, col, 1)
+  end
+  ImGui.PopClipRect(ctx)
+  tip(on and 'Leave full screen: the window goes back where and as large as it was.'
+    or 'Full screen on the display this window is on.')
+  ImGui.SetCursorPos(ctx, cur_x, cur_y) -- the content starts where it would have
+  if clicked then toggle_fullscreen(key) end
+end
+
+-- Right after Begin: a double click on the title bar (not on its icons) enters or
+-- leaves full screen, as on macOS.
+local function title_double_click(key)
+  if not ImGui.IsMouseDoubleClicked(ctx, 0) or not ImGui.IsWindowHovered(ctx) then return end
+  local mx, my = ImGui.GetMousePos(ctx)
+  local wx, wy = ImGui.GetWindowPos(ctx)
+  local ww = ImGui.GetWindowSize(ctx)
+  local pad_x, pad_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_FramePadding)
+  local inner_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemInnerSpacing)
+  local sz = ImGui.GetFontSize(ctx)
+  local icons_x = wx + ww - pad_x - 2 * sz - inner_x -- the full screen icon and the close cross
+  local title_h = ImGui.GetTextLineHeight(ctx) + 2 * pad_y
+  if my >= wy and my < wy + title_h and mx >= wx and mx < icons_x then toggle_fullscreen(key) end
+end
+
+-- A square button, one frame tall, drawn by paint(dl, x, y, h, col, under): col is
+-- the text colour (the accent while active), under the colour beneath the icon
+-- (hover colour or the opaque window background), for holes.
+local icons = {} -- icons.button and its painters (one local: the main chunk is near Lua's 200-local limit)
+function icons.button(id, active, paint)
+  local h = ImGui.GetFrameHeight(ctx)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local clicked = ImGui.InvisibleButton(ctx, id, h, h)
+  local hovered, held = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local under = ImGui.GetColor(ctx, ImGui.Col_WindowBg)
+  if hovered then
+    under = ImGui.GetColor(ctx, held and ImGui.Col_ButtonActive or ImGui.Col_ButtonHovered)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + h, y + h, under, 5)
+  end
+  paint(dl, math.floor(x), math.floor(y), h, active and COL_ACCENT or ImGui.GetColor(ctx, ImGui.Col_Text), under)
+  return clicked
+end
+
+-- Six-tooth gear in a 1 px outline, with a 1 px round hole: a line icon, light
+-- at 1x. Centred on a pixel centre so the strokes stay sharp (PathStroke does not
+-- shift by half a pixel the way AddLine does).
+function icons.gear(dl, x, y, h, col)
+  local GEAR_TEETH = 6
+  local cx, cy = math.floor(x + h / 2) + 0.5, math.floor(y + h / 2) + 0.5
+  local r_out, r_in, r_hole = h * 0.27, h * 0.20, h * 0.093
+  local pitch = 2 * math.pi / GEAR_TEETH
+  ImGui.DrawList_PathClear(dl)
+  for i = 0, GEAR_TEETH - 1 do
+    local a = i * pitch - math.pi / 2
+    -- Each tooth: base on the body circle, narrower top on the outer circle.
+    for _, p in ipairs({ { a - pitch * 0.21, r_in }, { a - pitch * 0.11, r_out },
+                         { a + pitch * 0.11, r_out }, { a + pitch * 0.21, r_in } }) do
+      ImGui.DrawList_PathLineTo(dl, cx + math.cos(p[1]) * p[2], cy + math.sin(p[1]) * p[2])
+    end
+  end
+  ImGui.DrawList_PathStroke(dl, col, ImGui.DrawFlags_Closed, 1)
+  ImGui.DrawList_AddCircle(dl, cx, cy, r_hole, col, 0, 1)
+end
+
+-- A small table in 1 px lines on whole pixels: frame, header line, one row line,
+-- one column line. AddRect and AddLine both add the half pixel themselves
+-- (imgui_draw.cpp), so every coordinate here is a whole number.
+function icons.table(dl, x, y, h, col)
+  local w, th = 16, 13                       -- frame, in pixels
+  local head, col_x = 4, 6                   -- header line row, column line, from the frame's corner
+  local x0, y0 = x + math.floor((h - w) / 2), y + math.floor((h - th) / 2)
+  ImGui.DrawList_AddRect(dl, x0, y0, x0 + w, y0 + th, col, 0, 0, 1)
+  local row = head + math.floor((th - 1 - head) / 2) -- halfway between header and bottom
+  ImGui.DrawList_AddLine(dl, x0, y0 + head, x0 + w - 1, y0 + head, col, 1)
+  ImGui.DrawList_AddLine(dl, x0, y0 + row, x0 + w - 1, y0 + row, col, 1)
+  ImGui.DrawList_AddLine(dl, x0 + col_x, y0 + head, x0 + col_x, y0 + th - 1, col, 1)
+end
+
+-- Three upright books in 1 px lines on whole pixels, different heights, each with
+-- a band near its top. AddRect and AddLine add the half pixel themselves.
+local LIBRARY_BOOKS = { { 0, 5, 2 }, { 6, 5, 0 }, { 12, 4, 3 } } -- x offset, width, top offset
+function icons.library(dl, x, y, h, col)
+  local x0 = x + math.floor((h - 16) / 2)
+  local top = y + math.floor((h - 14) / 2)
+  local bottom = top + 13 -- last pixel row
+  for _, b in ipairs(LIBRARY_BOOKS) do
+    local bx, by = x0 + b[1], top + b[3]
+    ImGui.DrawList_AddRect(dl, bx, by, bx + b[2], bottom + 1, col, 0, 0, 1)
+    ImGui.DrawList_AddLine(dl, bx, by + 3, bx + b[2] - 1, by + 3, col, 1)
+  end
+end
+
+-- Play: a small filled triangle pointing right.
+function icons.play(dl, x, y, h, col)
+  local x0, y0 = x + math.floor((h - 8) / 2) + 1, y + math.floor((h - 10) / 2)
+  ImGui.DrawList_AddTriangleFilled(dl, x0, y0, x0, y0 + 10, x0 + 8, y0 + 5, col)
+end
+
+-- Stop: a small filled square.
+function icons.stop(dl, x, y, h, col)
+  local x0, y0 = x + math.floor((h - 8) / 2), y + math.floor((h - 8) / 2)
+  ImGui.DrawList_AddRectFilled(dl, x0, y0, x0 + 8, y0 + 8, col, 1)
+end
+
+-- Copy: two overlapping sheets in 1 px lines on whole pixels; only the visible
+-- edges of the back sheet are drawn.
+function icons.copy(dl, x, y, h, col)
+  local x0, y0 = x + math.floor((h - 13) / 2), y + math.floor((h - 14) / 2)
+  ImGui.DrawList_AddRect(dl, x0, y0 + 4, x0 + 10, y0 + 14, col, 0, 0, 1)   -- front sheet
+  ImGui.DrawList_AddLine(dl, x0 + 3, y0, x0 + 12, y0, col, 1)              -- back sheet: top
+  ImGui.DrawList_AddLine(dl, x0 + 12, y0, x0 + 12, y0 + 10, col, 1)        -- right
+  ImGui.DrawList_AddLine(dl, x0 + 3, y0, x0 + 3, y0 + 3, col, 1)           -- left, above the front
+  ImGui.DrawList_AddLine(dl, x0 + 10, y0 + 10, x0 + 12, y0 + 10, col, 1)   -- bottom, right of the front
 end
 
 -- Multiline text box whose lines wrap to the window width on screen only: the
@@ -292,19 +536,24 @@ local function lines_for(value, width, min_lines)
   return math.max(min_lines or 1, n)
 end
 
-local SOURCE_HINT = { ucs = 'from the UCS category', ai = 'written by the model', session = 'from Settings',
-                      file = 'from the source file', auto = 'automatic', manual = 'multichannel only, e.g. L/R/C/Ls/Rs' }
+local SOURCE_HINT = { ucs = 'from the UCS category', ai = 'written by the model', session = 'from Library (the books icon)',
+                      file = 'from the source file', auto = 'automatic', manual = 'multichannel only, e.g. L/R/C/Ls/Rs',
+                      item = 'chosen for this item' }
 
 local settings = settings_mod.load()
-local saved_at = nil
-local settings_open = false
-local settings_page = 'Connection'
+-- What is stored right now (settings_mod.encoded): a change made in the settings
+-- (or by picking a model) is saved as soon as no input box is being edited.
+local settings_saved = settings_mod.encoded(settings)
+local main_view = nil -- what the main window shows below the top row: nil = the item, 'settings' or 'library'
 
 -- Overview window (draw_overview). rows: { key, n, item, session } in timeline order;
 -- order: the rows as the table shows them; specs: its sort columns; counts: file
 -- name -> rows using it; tally: status label -> rows.
 local overview = { open = false, rows = {}, by_key = {}, order = nil, sig = nil, specs = nil, need_sort = true,
-  proj = nil, count = nil, at = 0, counts = {}, tally = {}, names_at = 0, search = '' }
+  proj = nil, count = nil, at = 0, counts = {}, tally = {}, names_at = 0, search = '',
+  -- Curator panel at the right of the table: shown or not, and its width (kept in ExtState).
+  show_curator = reaper.GetExtState(settings_mod.EXT, 'overview_curator_hidden') ~= '1',
+  curator_w = tonumber(reaper.GetExtState(settings_mod.EXT, 'overview_curator_width')) or 400 }
 local clipper = ImGui.CreateListClipper(ctx) -- the Overview table draws only the rows on screen
 ImGui.Attach(ctx, clipper)
 
@@ -362,26 +611,41 @@ local playing = nil        -- { item, stop_at, cursor } while the Play button's 
 -- The item's audio: measures for the model, and a mono clip when the model
 -- hears audio (a temporary WAV the request deletes, or base64 data).
 local function measure(s)
-  if not s.item or not reaper.ValidatePtr2(s.proj or 0, s.item, 'MediaItem*') then
+  if not s.item or (s.proj and not reaper.ValidatePtr(s.proj, 'ReaProject*'))
+      or not reaper.ValidatePtr2(s.proj or 0, s.item, 'MediaItem*') then
     return nil, nil, 'the item no longer exists'
   end
   local take = reaper.GetActiveTake(s.item)
   if not take then return nil, nil, 'no active take' end
-  local channels = (s.facts.source_channels or 2) == 1 and 1 or 2
-  local sig = audio.read_take(take, channels, math.max(1, settings.listen_max_s or 30))
-  local text = audio.describe(audio.analyze(sig))
-  if not settings.model_audio then return text end
-  local bytes = audio.wav_bytes(audio.mono(sig), sig.rate)
-  if settings.audio_mode == 1 then return text, { b64 = audio.base64(bytes) } end
+  s.facts = item_mod.facts(s.item)
+  if s.facts.error then return nil, nil, s.facts.error end
+  s.model_facts = item_mod.facts_for_model(s.facts)
+  local channels = (s.facts.channels or s.facts.source_channels or 2) == 1 and 1 or 2
+  s.measure_start = reaper.time_precise()
+  local deadline = s.measure_start + 0.008
+  local function pause()
+    if reaper.time_precise() < deadline then return false end
+    coroutine.yield()
+    if (s.proj and not reaper.ValidatePtr(s.proj, 'ReaProject*'))
+        or not reaper.ValidatePtr2(s.proj or 0, s.item, 'MediaItem*') or reaper.GetActiveTake(s.item) ~= take then
+      error('The active take changed during analysis. Analyze again.', 0)
+    end
+    deadline = reaper.time_precise() + 0.008
+    return true
+  end
+  local text, bytes, mapping = audio.survey_take(take, channels, s.facts.samplerate,
+    math.max(1, settings.listen_max_s or 30), settings.model_audio, pause)
+  if not bytes then return text end
+  if settings.audio_mode == 1 then return text, { b64 = audio.base64(bytes, pause), mapping = mapping } end
   local path = http.temp_dir() .. '/mtt_metadataassistant_clip_' .. tostring(os.time()) .. '_' .. tostring(math.random(1, 999999)) .. '.wav'
   if not audio.write_file(path, bytes) then return text, nil, 'cannot write ' .. path end
-  return text, { path = path }
+  return text, { path = path, mapping = mapping }
 end
 
 local function deps()
   return {
     ucs = ucs, match = match, index = index, fields = fields, filename = filename,
-    llm = llm, json = json, post = http.post, cancel = http.cancel, measure = measure,
+    llm = llm, json = json, post = http.post, cancel = http.cancel, measure = measure, defer_measure = true,
     today = function() return os.date('%Y-%m-%d') end,
   }
 end
@@ -555,6 +819,7 @@ local function do_pending_render()
         samplerate = f.samplerate,
         channels = f.channels,
         metadata = r.metadata,
+        artwork = (sess.values or {}).Artwork,
       }, batch.overwrite)
       if path then
         sess.rendered = { path = path, at = os.date('%Y-%m-%d %H:%M') }
@@ -587,119 +852,158 @@ local function wrapped(text, color)
   if color then ImGui.PopStyleColor(ctx) end
 end
 
-local function draw_settings()
-  prepare_window('settings', 540, 610)
-  local visible, open = ImGui.Begin(ctx, 'Metadata Assistant Settings', true, ImGui.WindowFlags_NoDocking)
-  settings_open = open
-  if not visible then return end
-  for i, page in ipairs({ 'Connection', 'Library', 'Interface' }) do
-    if i > 1 then ImGui.SameLine(ctx) end
-    if settings_page == page then accent_button(page)
-    elseif ImGui.Button(ctx, page) then settings_page = page end
+-- File dialog for the artwork; returns the picked path or nil. REAPER's own
+-- dialog (without js_ReaScriptAPI) filters on one extension only: every file
+-- shows and render.artwork_problem rejects the wrong ones.
+local function pick_image(current_path)
+  local start = render.artwork_path(current_path):match('^(.*)[/\\][^/\\]*$') or render.project_dir()
+  if reaper.APIExists('JS_Dialog_BrowseForOpenFiles') then
+    local rv, path = reaper.JS_Dialog_BrowseForOpenFiles('Artwork', start, '',
+      'Images (JPEG, PNG)\0*.jpg;*.jpeg;*.png\0\0', false)
+    if rv == 1 and path and path ~= '' then return path end
+    return nil
   end
-  local section = 'Connection'
+  local ok, path = reaper.GetUserFileNameForRead('', 'Artwork', 'jpg')
+  if ok and path ~= '' then return path end
+  return nil
+end
+
+-- Settings label column: as wide as the longest label of the page on screen plus
+-- a gap. Measured from where the row starts (SameLine's offset counts from the
+-- window edge, so draw_setting adds the row's start).
+local function settings_label_width(page)
+  local w = 0
   for _, def in ipairs(settings_mod.KEYS) do
-    if def.key == 'Designer' then section = 'Library' end
-    if def.key == 'show_technical' then section = 'Interface' end
-    if section ~= settings_page then goto next_setting end
-    ImGui.PushID(ctx, def.key)
-    if def.key == 'endpoint' then ImGui.SeparatorText(ctx, 'Model server') end
-    if def.key == 'Designer' then ImGui.SeparatorText(ctx, 'Library identity') end
-    if def.key == 'Microphone' then ImGui.SeparatorText(ctx, 'Recording defaults') end
-    if def.key == 'name_blocks' then ImGui.SeparatorText(ctx, 'File names') end
-    if def.key == 'show_technical' then ImGui.SeparatorText(ctx, 'Diagnostics') end
-    if def.key == 'outline_items' then ImGui.SeparatorText(ctx, 'Timeline') end
-    local width = ImGui.GetContentRegionAvail(ctx)
-    if def.kind == 'combo' then
-      ImGui.SetNextItemWidth(ctx, width * 0.56)
-      local _, v = ImGui.Combo(ctx, def.label, settings[def.key], table.concat(def.items, '\0') .. '\0')
-      settings[def.key] = v
-    elseif def.kind == 'bool' then
-      local _, v = ImGui.Checkbox(ctx, def.label, settings[def.key])
-      settings[def.key] = v
-    elseif def.kind == 'int' then
-      ImGui.SetNextItemWidth(ctx, 120)
-      local _, v = ImGui.InputInt(ctx, def.label, settings[def.key])
-      settings[def.key] = v
-    elseif (def.key == 'model' or def.key == 'curator_model') and models.ids and #models.ids > 0 and not models.manual then
-      local ids, labels, selected = {}, {}, settings[def.key]
-      if def.key == 'curator_model' then ids[1], labels[1] = '', 'Use main model' end
-      local listed = false
-      for _, id in ipairs(models.ids) do
-        ids[#ids + 1], labels[#labels + 1] = id, id
-        if selected == id then listed = true end
-      end
-      if selected ~= '' and not listed then ids[#ids + 1], labels[#labels + 1] = selected, selected end
-      local idx = -1
-      for i, id in ipairs(ids) do if id == selected then idx = i - 1 end end
-      ImGui.SetNextItemWidth(ctx, width * 0.56)
-      local changed, v = ImGui.Combo(ctx, def.label, idx, table.concat(labels, '\0') .. '\0')
-      if changed then
-        if def.key == 'model' then choose_model(ids[v + 1])
-        else settings.curator_model = ids[v + 1] end
-      end
-    else
-      ImGui.SetNextItemWidth(ctx, width * 0.56)
-      local _, v = ImGui.InputTextWithHint(ctx, def.label, def.hint or '', settings[def.key],
-        def.kind == 'secret' and ImGui.InputTextFlags_Password or 0)
-      settings[def.key] = v
+    if def.page == page then
+      local tw = ImGui.CalcTextSize(ctx, def.label)
+      if tw and tw > w then w = tw end
     end
-    tip(def.tip)
-    if def.browse then
-      if reaper.APIExists('JS_Dialog_BrowseForFolder') then
-        ImGui.SameLine(ctx)
-        if ImGui.Button(ctx, 'Browse...') then
-          local ok, folder = reaper.JS_Dialog_BrowseForFolder('Render folder', render.output_dir(settings.render_dir))
-          if ok == 1 and folder and folder ~= '' then
-            settings.render_dir = render.relative_setting(folder, render.project_dir())
-          end
-        end
-        tip('Pick the folder; it is stored relative to the project folder when it is inside or next to it.')
-      end
-      wrapped('Files go to: ' .. render.output_dir(settings.render_dir) .. '  (for the current project)', COL_DIM)
-    end
-    if def.key == 'outline_items' and not outline.available() then
-      ImGui.TextColored(ctx, COL_WARN, 'Needs js_ReaScriptAPI (ReaPack: ReaTeam Extensions): no outlines without it.')
-    end
-    if def.key == 'show_technical' then
-      ImGui.TextDisabled(ctx, 'Text wrapping: emulated (this ReaImGui has no word-wrap flag)')
-    end
+  end
+  return w + 3 * ITEM_SPACING_X
+end
+
+-- The model list row under Model: pick from the list or type, refresh, count.
+local function draw_model_list_row(label_w)
+  ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + label_w)
+  if models.ids and #models.ids > 0 then
+    if ImGui.SmallButton(ctx, models.manual and 'Pick from list' or 'Type an ID') then models.manual = not models.manual end
+    ImGui.SameLine(ctx)
+  end
+  ImGui.BeginDisabled(ctx, models.loading)
+  if ImGui.SmallButton(ctx, 'Refresh') then fetch_models() end
+  ImGui.EndDisabled(ctx)
+  tip('Asks the server again for its model list.')
+  ImGui.SameLine(ctx)
+  if models.loading then
+    ImGui.TextDisabled(ctx, 'loading...')
+  elseif models.error then
+    ImGui.TextColored(ctx, COL_WARN, 'models: ' .. models.error)
+  else
+    local n = #(models.ids or {})
+    ImGui.TextDisabled(ctx, n == 1 and '1 model on the server' or string.format('%d models on the server', n))
+  end
+end
+
+-- One setting: label on the left, its control filling the rest of the row.
+local function draw_setting(def, label_w)
+  local row_x = ImGui.GetCursorPosX(ctx) -- the window padding
+  ImGui.AlignTextToFramePadding(ctx)
+  ImGui.Text(ctx, def.label)
+  tip(def.tip)
+  ImGui.SameLine(ctx, row_x + label_w)
+  local id = '##' .. def.key
+  local width = ImGui.GetContentRegionAvail(ctx)
+  if def.browse and reaper.APIExists('JS_Dialog_BrowseForFolder') then
+    width = width - button_width('Browse...') - ITEM_SPACING_X
+  end
+  if def.kind == 'combo' then
+    ImGui.SetNextItemWidth(ctx, width)
+    local _, v = ImGui.Combo(ctx, id, settings[def.key], table.concat(def.items, '\0') .. '\0')
+    settings[def.key] = v
+  elseif def.kind == 'bool' then
+    local _, v = ImGui.Checkbox(ctx, id, settings[def.key])
+    settings[def.key] = v
     if def.key == 'model_audio' then
       local hears = server_hears(settings.model)
       if hears ~= nil then
         ImGui.SameLine(ctx)
-        ImGui.TextDisabled(ctx, hears and '(server: takes audio)' or '(server: text only)')
-      end
-      if models.ids and #models.ids > 0 then
-        if ImGui.SmallButton(ctx, models.manual and 'Pick from list' or 'Type an ID') then models.manual = not models.manual end
-        ImGui.SameLine(ctx)
-      end
-      ImGui.BeginDisabled(ctx, models.loading)
-      if ImGui.Button(ctx, 'Refresh models') then fetch_models() end
-      ImGui.EndDisabled(ctx)
-      ImGui.SameLine(ctx)
-      if models.loading then
-        ImGui.TextDisabled(ctx, 'loading...')
-      elseif models.error then
-        ImGui.TextColored(ctx, COL_WARN, 'models: ' .. models.error)
-      else
-        ImGui.TextDisabled(ctx, string.format('%d on the server', #(models.ids or {})))
+        ImGui.TextDisabled(ctx, hears and 'the server says this model takes audio' or 'the server says this model is text only')
       end
     end
-    ImGui.PopID(ctx)
-    ::next_setting::
+  elseif def.kind == 'int' then
+    ImGui.SetNextItemWidth(ctx, 120)
+    local _, v = ImGui.InputInt(ctx, id, settings[def.key])
+    settings[def.key] = v
+  elseif (def.key == 'model' or def.key == 'curator_model') and models.ids and #models.ids > 0 and not models.manual then
+    local ids, labels, selected = {}, {}, settings[def.key]
+    if def.key == 'curator_model' then ids[1], labels[1] = '', 'Use main model' end
+    local listed = false
+    for _, mid in ipairs(models.ids) do
+      ids[#ids + 1], labels[#labels + 1] = mid, mid
+      if selected == mid then listed = true end
+    end
+    if selected ~= '' and not listed then ids[#ids + 1], labels[#labels + 1] = selected, selected end
+    local idx = -1
+    for i, mid in ipairs(ids) do if mid == selected then idx = i - 1 end end
+    ImGui.SetNextItemWidth(ctx, width)
+    local changed, v = ImGui.Combo(ctx, id, idx, table.concat(labels, '\0') .. '\0')
+    if changed then
+      if def.key == 'model' then choose_model(ids[v + 1])
+      else settings.curator_model = ids[v + 1] end
+    end
+  else
+    ImGui.SetNextItemWidth(ctx, width)
+    local _, v = ImGui.InputTextWithHint(ctx, id, def.hint or '', settings[def.key],
+      def.kind == 'secret' and ImGui.InputTextFlags_Password or 0)
+    settings[def.key] = v
   end
-  if accent_button('Save settings') then
-    settings_mod.save(settings)
-    saved_at = reaper.time_precise()
-  end
-  if saved_at and reaper.time_precise() - saved_at < 2 then
+  if def.browse and reaper.APIExists('JS_Dialog_BrowseForFolder') then
     ImGui.SameLine(ctx)
-    ImGui.TextColored(ctx, COL_OK, 'Saved')
+    if ImGui.Button(ctx, 'Browse...') then
+      local ok, folder = reaper.JS_Dialog_BrowseForFolder('Render folder', render.output_dir(settings.render_dir))
+      if ok == 1 and folder and folder ~= '' then
+        settings.render_dir = render.relative_setting(folder, render.project_dir())
+      end
+    end
+    tip('Pick the folder; it is stored relative to the project folder when it is inside or next to it.')
   end
-  ImGui.Spacing(ctx)
-  own_windows[#own_windows + 1] = window_rect()
-  ImGui.End(ctx)
+  if def.browse then
+    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + label_w)
+    ImGui.TextDisabled(ctx, 'Files go to: ' .. render.output_dir(settings.render_dir))
+    tip('For the current project.')
+  end
+  if def.key == 'model' then draw_model_list_row(label_w) end
+  if def.key == 'outline_items' and not outline.available() then
+    ImGui.TextColored(ctx, COL_WARN, 'Needs js_ReaScriptAPI (ReaPack: ReaTeam Extensions): no outlines without it.')
+  end
+end
+
+-- One settings page: its groups under headings, one row per setting.
+local function draw_settings_page(page)
+  local label_w = settings_label_width(page)
+  local group = nil
+  for _, def in ipairs(settings_mod.KEYS) do
+    if def.page == page then
+      if def.group ~= group then
+        group = def.group
+        ImGui.Spacing(ctx)
+        -- Disable the heading when all rows in the group are disabled.
+        local all_off = true
+        for _, other in ipairs(settings_mod.KEYS) do
+          if other.page == page and other.group == group
+              and (other.needs == nil or settings[other.needs]) then all_off = false end
+        end
+        ImGui.BeginDisabled(ctx, all_off)
+        ImGui.SeparatorText(ctx, group)
+        ImGui.EndDisabled(ctx)
+      end
+      ImGui.PushID(ctx, def.key)
+      ImGui.BeginDisabled(ctx, def.needs ~= nil and not settings[def.needs])
+      draw_setting(def, label_w)
+      ImGui.EndDisabled(ctx)
+      ImGui.PopID(ctx)
+    end
+  end
 end
 
 -- Playback of the selected item from its start to its end, started by the Play
@@ -735,30 +1039,21 @@ local function watch_playing()
   end
 end
 
--- Opens or closes the Overview window. It sits left of Render; with no item to show
--- (nothing selected, a MIDI item) it goes at the right of the message instead.
-local function overview_button()
-  if ImGui.Button(ctx, 'Overview') then overview.open = not overview.open end
-  tip('Opens a table of every item of this project that has a card: status, file name and all the metadata, editable in place and sortable by any column.')
-end
-
 local function draw_item()
   if not current or current.facts.error then
     ImGui.AlignTextToFramePadding(ctx)
     if current then ImGui.TextColored(ctx, COL_ERR, current.facts.error)
     else ImGui.TextColored(ctx, COL_WARN, item_reason or 'Select one item.') end
-    ImGui.SameLine(ctx)
-    align_right(button_width('Overview'))
-    overview_button()
     return false
   end
   local f = current.facts
   local is_playing = playing ~= nil and playing.item == current_item
-  if ImGui.Button(ctx, is_playing and 'Stop' or 'Play') then
+  if icons.button('##play', is_playing, is_playing and icons.stop or icons.play) then
     if is_playing then stop_item() else play_item(current_item) end
   end
-  tip('Plays the selected item from its start to its end; click again to stop. The edit cursor goes back to where it was.')
+  tip(is_playing and 'Stop.' or 'Plays the selected item from its start to its end; click again to stop. The edit cursor goes back to where it was.')
   ImGui.SameLine(ctx)
+  ImGui.AlignTextToFramePadding(ctx)
   ImGui.TextDisabled(ctx, string.format('%d Hz  -  %d ch  -  %.2f s  -  recorded %s',
     f.samplerate or 0, f.channels or 0, f.length or 0, f.recorded_on or 'date unknown'))
   tip('Sample rate, channel count and length of the item, and the recording date when the file carries one. The render keeps the sample rate and channel count.')
@@ -767,9 +1062,9 @@ end
 
 -- Header when several items are selected.
 local function draw_multi_header()
-  ImGui.TextDisabled(ctx, string.format('%d items selected: a field typed in Metadata goes to all of them', #multi.items))
+  ImGui.TextDisabled(ctx, string.format('%d items selected: a field typed in Review goes to all of them', #multi.items))
   tip('Multi-edit. Items are taken in timeline order. A value typed once replaces that field in every selected item that already has metadata; file names are numbered 01, 02, 03... '
-    .. 'Copy an item first (Copy, next to the tabs) to preview its values by hovering the fields.')
+    .. 'Copy an item first (the copy icon in its Review) to preview its values by hovering the fields.')
 end
 
 local function draw_description()
@@ -783,8 +1078,11 @@ local function draw_description()
     or 'Describe what you recorded and how it sounds, in Italian or English.', COL_DIM)
   -- While the model works the text cannot be changed but it can still be selected
   -- and copied (read-only, not disabled); a darker background shows the difference.
+  -- The box fills the window down to the button row under it (one frame tall,
+  -- one item spacing above it).
   local _, available = ImGui.GetContentRegionAvail(ctx)
-  local height = math.max(ImGui.GetTextLineHeight(ctx) * 6, available - 72)
+  local _, spacing_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+  local height = math.max(ImGui.GetTextLineHeight(ctx) * 6, available - ImGui.GetFrameHeight(ctx) - spacing_y)
   if busy then ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x232526FF) end
   ImGui.PushID(ctx, current.guid)
   local changed, v = wrapped_editor('##description', current.description, height,
@@ -795,8 +1093,14 @@ local function draw_description()
     current.description = v
     current.dirty = true
   end
-  ImGui.BeginDisabled(ctx, not configured or busy or (not settings.model_audio and current.description:match('^%s*$') ~= nil))
-  if accent_button(current.draft and 'Analyze again (new draft)' or 'Analyze') then
+  -- One full-width button: Analyze, or Stop while the model works.
+  if busy then
+    if ImGui.Button(ctx, 'Stop', -1) then flow.cancel(current) end
+    tip('Interrupts the request: the model server is told to stop generating and the description becomes editable again.')
+    return
+  end
+  ImGui.BeginDisabled(ctx, not configured or (not settings.model_audio and current.description:match('^%s*$') ~= nil))
+  if accent_button(current.draft and 'Analyze again (new draft)' or 'Analyze', -1) then
     current.settings = settings
     current.url = settings_mod.chat_url(settings.endpoint)
     confirm_overwrite, render_msg = false, nil
@@ -804,11 +1108,6 @@ local function draw_description()
   end
   ImGui.EndDisabled(ctx)
   tip('Sends the description to the model: it picks the UCS category and drafts the fields, then may ask a few questions. Only what you wrote, the audio measurements and the metadata inside the file are sent; the item and file names are not.')
-  if busy then
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, 'Stop') then flow.cancel(current) end
-    tip('Interrupts the request: the model server is told to stop generating and the description becomes editable again.')
-  end
 end
 
 -- Errors of the selected item, under the tabs (what the model is doing goes on the
@@ -900,7 +1199,7 @@ local FILENAME_TIP_MULTI = 'Type a name to give it to every selected item, numbe
   .. '(the number goes at the end of the FXName block). Empty goes back to each item\'s automatic name.'
 
 local GROUPS = { CatID = 'Classification', FXName = 'Sound metadata', MicPerspective = 'Recording',
-  Designer = 'Library credits', TrackYear = 'Dates and notes' }
+  Designer = 'Library credits', TrackYear = 'Dates and notes', Artwork = 'Artwork' }
 
 -- The metadata fields, grouped. get(key) -> text; set(key, text); mixed(key) ->
 -- true when the selected items hold different values (multi-edit);
@@ -933,6 +1232,8 @@ local function draw_fields(scope, get, set, mixed, extra_tip, paste)
         .. (extra_tip and extra_tip(def.key) or ''))
       ImGui.SameLine(ctx, label_width())
       local width = ImGui.GetContentRegionAvail(ctx)
+      local browse_image = def.key == 'Artwork' and not previewing
+      if browse_image then width = width - button_width('Browse...') - ITEM_SPACING_X end
       local min_lines = def.key == 'Description' and 5 or (multiline and 3 or 1)
       local lines = lines_for(value, width, min_lines)
       -- The box keeps its height while previewing, or it would move away from the mouse.
@@ -954,6 +1255,19 @@ local function draw_fields(scope, get, set, mixed, extra_tip, paste)
         if not multiline then v = v:gsub('[\r\n]+', ' ') end
         set(def.key, v)
       end
+      if browse_image then
+        ImGui.SameLine(ctx)
+        if ImGui.Button(ctx, 'Browse...') then
+          local picked = pick_image(value)
+          if picked then set(def.key, picked) end
+        end
+        tip('Pick a JPEG or PNG file. With several items selected it goes to all of them.')
+        local problem = render.artwork_problem(value)
+        if problem then
+          ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + label_width())
+          wrapped(problem .. ' (Render stops for this item until it is fixed or cleared)', COL_WARN)
+        end
+      end
       if pasted ~= nil then
         -- Hover is known after the box is drawn: it takes effect on the next frame.
         if ImGui.IsItemHovered(ctx) then paste_hover_seen = def.key end
@@ -974,7 +1288,7 @@ local function draw_name_status(problems, missing)
   end
   for _, p in ipairs(problems) do wrapped(p, COL_WARN) end
   if #missing > 0 then
-    wrapped('Missing: ' .. table.concat(missing, ', ') .. ' (library identity: Settings)', COL_WARN)
+    wrapped('Missing: ' .. table.concat(missing, ', ') .. ' (set in Library, the books icon)', COL_WARN)
   end
 end
 
@@ -1364,7 +1678,7 @@ local function overview_row(row, row_h)
     if s.state == 'error' then tip(tostring(s.error))
     elseif s.state == 'done' and s.rendered then
       tip('Rendered ' .. tostring(s.rendered.at) .. ': ' .. tostring(s.rendered.path))
-    elseif s.state == 'questions' then tip('Select the item, check the category, answer the questions and finalize on Review.')
+    elseif s.state == 'questions' then tip('Select the item, check the category, answer the questions and finalize in Clarify.')
     elseif s.state == 'idle' then tip('Select the item and analyze its description on Describe.') end
   end
   -- A card the model is writing cannot be edited: its answer would replace the edit.
@@ -1375,7 +1689,7 @@ local function overview_row(row, row_h)
       local dup = (overview.counts[r.filename] or 0) > 1
       local notes = {}
       for _, p in ipairs(r.problems) do notes[#notes + 1] = p end
-      if #r.missing > 0 then notes[#notes + 1] = 'Missing: ' .. table.concat(r.missing, ', ') .. ' (library identity: Settings)' end
+      if #r.missing > 0 then notes[#notes + 1] = 'Missing: ' .. table.concat(r.missing, ', ') .. ' (set in Library, the books icon)' end
       if #notes > 0 then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, COL_CELL_ERR)
       elseif dup then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, COL_CELL_DUP) end
       if dup then notes[#notes + 1] = string.format('%d items have this file name.', overview.counts[r.filename]) end
@@ -1473,14 +1787,13 @@ local function send_curator()
   local question = chat.input:match('^%s*(.-)%s*$')
   local url, model = settings_mod.chat_url(settings.endpoint), curator.model(settings)
   if not url or model == '' then
-    chat.error = 'Choose an endpoint and model in Settings > Connection.'
+    chat.error = 'Choose an endpoint and model in Settings (the gear).'
     return
   end
   overview_refresh(true)
   local messages, cards = curator.messages(curator_deps, overview.rows, chat.history, question, settings)
   local request = {deps = curator_deps, url = url, settings = {
-    model = model, api_key = settings.api_key, json_mode = settings.json_mode,
-    stall_timeout_s = settings.stall_timeout_s,
+    model = model, api_key = settings.api_key,
   }}
   local conversation = chat
   conversation.request, conversation.error = request, nil
@@ -1584,84 +1897,155 @@ local function draw_curator()
   if chat.error then wrapped(chat.error, COL_WARN) end
 end
 
+-- The table side of the Overview: search, counts, column paste, the table.
+local function draw_overview_table(n)
+  if n == 0 then
+    ImGui.TextDisabled(ctx, 'No item in this project has a card yet: select an item and describe it.')
+    return
+  end
+  ImGui.SetNextItemWidth(ctx, 320)
+  local _, search = ImGui.InputText(ctx, 'Search all columns', overview.search)
+  overview.search = search
+  tip('Shows only rows containing this text in any column, including hidden columns. Ignores letter case. Clear the text to show all rows.')
+  ImGui.SameLine(ctx)
+  ImGui.TextDisabled(ctx, 'Right-click a cell to copy or paste a column.')
+  local parts = {}
+  for _, label in ipairs(TALLY_ORDER) do
+    local c = overview.tally[label]
+    if c then parts[#parts + 1] = string.format('%d %s', c, label:lower()) end
+  end
+  ImGui.TextDisabled(ctx, string.format('%s: %s', n == 1 and '1 item' or (n .. ' items'), table.concat(parts, ', ')))
+  tip('Every item of this project that has a card. Click a cell to edit it; click a header to sort, Shift-click another to sort by it too; '
+    .. 'right-click a header to show or hide columns; drag a header to move its column. Click a number to select that item.')
+  local shared = 0
+  for _, c in pairs(overview.counts) do if c > 1 then shared = shared + c end end
+  if shared > 0 then
+    ImGui.SameLine(ctx)
+    ImGui.TextColored(ctx, COL_WARN, string.format('%d items share their file name with another one.', shared))
+  end
+  local field = overview.copied_field
+  if field then
+    if ImGui.Button(ctx, 'Paste ' .. field.key .. ' to entire column') then paste_column(field.key, field.value) end
+    tip('Pastes the field copied in Overview into every editable row, including rows hidden by the search.')
+  end
+  if overview.paste_status then ImGui.TextDisabled(ctx, overview.paste_status) end
+  overview_table()
+end
+
+-- The Overview's curator panel: sizes and helpers in one table (the main chunk is
+-- near Lua's limit of 200 locals). SPLIT_W: the draggable border between the
+-- table and the curator; ARROW_W: the column at the right edge holding the arrow.
+local curator_panel = { SPLIT_W = 12, ARROW_W = 16, MIN_W = 260, TABLE_MIN_W = 320, TAB_LABEL = 'Curator' }
+do
+local P = curator_panel
+
+function P.save_layout()
+  reaper.SetExtState(settings_mod.EXT, 'overview_curator_width', tostring(math.floor(overview.curator_w)), true)
+  reaper.SetExtState(settings_mod.EXT, 'overview_curator_hidden', overview.show_curator and '0' or '1', true)
+end
+
+-- The border between the table and the curator: dragging it moves it; the width
+-- is saved when the drag ends.
+function P.splitter(height)
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  ImGui.InvisibleButton(ctx, '##curator-split', P.SPLIT_W, height)
+  local hovered, held = ImGui.IsItemHovered(ctx), ImGui.IsItemActive(ctx)
+  if hovered or held then ImGui.SetMouseCursor(ctx, ImGui.MouseCursor_ResizeEW) end
+  if held then
+    local dx = ImGui.GetMouseDelta(ctx)
+    overview.curator_w = overview.curator_w - dx -- the curator is on the right: dragging left widens it
+  end
+  if ImGui.IsItemDeactivated(ctx) then P.save_layout() end
+  local line = ImGui.GetColor(ctx, held and ImGui.Col_SeparatorActive
+    or (hovered and ImGui.Col_SeparatorHovered or ImGui.Col_Separator))
+  ImGui.DrawList_AddLine(ImGui.GetWindowDrawList(ctx), x + P.SPLIT_W / 2, y, x + P.SPLIT_W / 2, y + height,
+    line, (held or hovered) and 2 or 1)
+end
+
+-- A small filled triangle, always the same size and on whole pixels: 6 px long,
+-- 8 px tall, from x (left edge of its box), centred on cy. dir 1 = right, -1 = left.
+local function paint_arrow(dl, x, cy, dir, col)
+  x, cy = math.floor(x), math.floor(cy)
+  if dir > 0 then ImGui.DrawList_AddTriangleFilled(dl, x, cy - 4, x, cy + 4, x + 6, cy, col)
+  else ImGui.DrawList_AddTriangleFilled(dl, x + 6, cy - 4, x + 6, cy + 4, x, cy, col) end
+end
+
+-- The curator toggle at the right edge of the Overview, top row. Shown: a lone
+-- arrow pointing right (hide). Hidden: an arrow pointing left followed by the word
+-- "Curator", so it reads as what it opens. Its width: P.tab_width.
+function P.tab_width()
+  if overview.show_curator then return P.ARROW_W end
+  return P.ARROW_W + ImGui.CalcTextSize(ctx, P.TAB_LABEL) + 6
+end
+
+function P.arrow()
+  local x, y = ImGui.GetCursorScreenPos(ctx)
+  local h = ImGui.GetFrameHeight(ctx)
+  local w = P.tab_width()
+  if ImGui.InvisibleButton(ctx, '##curator-toggle', w, h) then
+    overview.show_curator = not overview.show_curator
+    P.save_layout()
+  end
+  local hovered = ImGui.IsItemHovered(ctx)
+  local col = ImGui.GetColor(ctx, hovered and ImGui.Col_Text or ImGui.Col_TextDisabled)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  local cy = y + h / 2
+  if overview.show_curator then
+    paint_arrow(dl, x + (P.ARROW_W - 6) / 2, cy, 1, col)
+    tip('Hide the curator: the table takes the whole width.')
+  else
+    paint_arrow(dl, x + 4, cy, -1, col)
+    ImGui.DrawList_AddText(dl, x + P.ARROW_W, math.floor(y + (h - ImGui.GetTextLineHeight(ctx)) / 2), col, P.TAB_LABEL)
+    tip('Show the curator next to the table: talk about the collection while you look at it.')
+  end
+end
+end
+
 local function draw_overview()
-  prepare_window('overview', 1100, 560)
-  local visible, open = ImGui.Begin(ctx, 'Metadata Assistant Overview', true, ImGui.WindowFlags_NoDocking)
+  prepare_window('overview', 1320, 600)
+  local fs_flags = prepare_fullscreen('overview')
+  local visible, open = ImGui.Begin(ctx, 'Metadata Assistant Overview', true,
+    ImGui.WindowFlags_NoDocking | ImGui.WindowFlags_NoCollapse | fs_flags)
   overview.open = open
   if not visible then return end
+  fullscreen_title_button('overview')
+  title_double_click('overview')
   overview_refresh()
   overview_count()
   local n = #overview.rows
-  if ImGui.Button(ctx, chat.open and 'Back to table' or 'Curator') then chat.open = not chat.open end
-  if chat.open then
-    draw_curator()
-  elseif n == 0 then
-    ImGui.TextDisabled(ctx, 'No item in this project has a card yet: select an item and describe it.')
-  else
-    ImGui.SetNextItemWidth(ctx, 320)
-    local _, search = ImGui.InputText(ctx, 'Search all columns', overview.search)
-    overview.search = search
-    tip('Shows only rows containing this text in any column, including hidden columns. Ignores letter case. Clear the text to show all rows.')
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, 'Right-click a cell to copy or paste a column.')
-    local parts = {}
-    for _, label in ipairs(TALLY_ORDER) do
-      local c = overview.tally[label]
-      if c then parts[#parts + 1] = string.format('%d %s', c, label:lower()) end
-    end
-    ImGui.TextDisabled(ctx, string.format('%s: %s', n == 1 and '1 item' or (n .. ' items'), table.concat(parts, ', ')))
-    tip('Every item of this project that has a card. Click a cell to edit it; click a header to sort, Shift-click another to sort by it too; '
-      .. 'right-click a header to show or hide columns; drag a header to move its column. Click a number to select that item.')
-    local shared = 0
-    for _, c in pairs(overview.counts) do if c > 1 then shared = shared + c end end
-    if shared > 0 then
-      ImGui.SameLine(ctx)
-      ImGui.TextColored(ctx, COL_WARN, string.format('%d items share their file name with another one.', shared))
-    end
-    local field = overview.copied_field
-    if field then
-      if ImGui.Button(ctx, 'Paste ' .. field.key .. ' to entire column') then paste_column(field.key, field.value) end
-      tip('Pastes the field copied in Overview into every editable row, including rows hidden by the search.')
-    end
-    if overview.paste_status then ImGui.TextDisabled(ctx, overview.paste_status) end
-    overview_table()
+  -- Table and curator side by side, filling the window:
+  -- table | draggable border | curator | arrow column at the right edge.
+  local avail_w, avail_h = ImGui.GetContentRegionAvail(ctx)
+  local P = curator_panel
+  local free = avail_w - P.tab_width()
+  local cw, split = 0, 0
+  if overview.show_curator then
+    split = P.SPLIT_W
+    cw = math.max(P.MIN_W, math.min(overview.curator_w, free - P.TABLE_MIN_W - P.SPLIT_W))
+    overview.curator_w = cw
   end
+  if ImGui.BeginChild(ctx, 'overview-table-pane', math.max(1, free - cw - split), avail_h) then
+    draw_overview_table(n)
+    ImGui.EndChild(ctx)
+  end
+  if overview.show_curator then
+    ImGui.SameLine(ctx, 0, 0)
+    P.splitter(avail_h)
+    ImGui.SameLine(ctx, 0, 0)
+    if ImGui.BeginChild(ctx, 'overview-curator-pane', cw, avail_h) then
+      ImGui.SeparatorText(ctx, 'Curator')
+      draw_curator()
+      ImGui.EndChild(ctx)
+    end
+  end
+  ImGui.SameLine(ctx, 0, 0)
+  P.arrow()
   own_windows[#own_windows + 1] = window_rect()
   ImGui.End(ctx)
 end
 
-local function draw_details()
-  ImGui.SeparatorText(ctx, 'Technical details')
-  local meta, left_out = item_mod.useful_metadata(current.facts.meta or {}, 300, current.facts.names)
-  if meta ~= '' then wrapped('Sent from the file: ' .. meta, COL_DIM) end
-  if #left_out > 0 then wrapped('Not sent (names): ' .. table.concat(left_out, ', '), COL_DIM) end
-  if current.measures_text then wrapped('Measured: ' .. current.measures_text, COL_DIM) end
-  if current.candidates and #current.candidates > 0 and ImGui.CollapsingHeader(ctx, 'UCS candidates') then
-    for _, c in ipairs(current.candidates) do
-      ImGui.Text(ctx, string.format('%-10s %5.1f  %s / %s', c.entry.id, c.score, c.entry.cat, c.entry.sub))
-    end
-  end
-  if (current.raw_text or current.raw_listen) and ImGui.CollapsingHeader(ctx, 'Raw model answer') then
-    if current.raw_listen then wrapped('Listening: ' .. current.raw_listen, COL_DIM) end
-    if current.raw_text then wrapped(current.raw_text) end
-  end
-  if (current.draft or current.values) and ImGui.CollapsingHeader(ctx, 'Card') then
-    ImGui.BeginDisabled(ctx, flow.busy(current))
-    if ImGui.Button(ctx, 'Delete this card') then
-      store.delete(current.guid, current.proj)
-      outline.forget(current.guid)
-      overview.at = 0 -- the Overview lists the items again
-      if current.item and reaper.ValidatePtr2(0, current.item, 'MediaItem*') then
-        reaper.GetSetMediaItemInfo_String(current.item, store.TAG, '', true)
-      end
-      sessions[current.guid] = nil
-      current = nil
-    end
-    ImGui.EndDisabled(ctx)
-  end
-end
-
-local PAGES = { 'Describe', 'Review', 'Metadata' }
+-- The three phases of an item: internal page name, label on screen.
+local PAGES = { { 'Describe', 'Describe' }, { 'Review', 'Clarify' }, { 'Metadata', 'Review' } }
 
 -- Render button, next to the tabs. targets: the cards that would be rendered
 -- (renderable ones only); r: the file's result when one item is selected.
@@ -1669,27 +2053,28 @@ local function draw_render_button(targets, r)
   local can = #targets > 0 and not (current and flow.busy(current)) and not confirm_overwrite and not batch
   local again = current and current.rendered
   local label = multi and 'Render all' or (again and 'Render again' or 'Render')
-  -- Overview, then Render, at the right end of the tab row (which has just ended with a SameLine).
-  align_right(button_width('Overview') + ITEM_SPACING_X + button_width(label))
-  overview_button()
-  ImGui.SameLine(ctx)
+  -- Render at the right end of the tab row (which has just ended with a SameLine).
+  align_right(button_width(label))
   ImGui.BeginDisabled(ctx, not can)
   if accent_button(label) then
     pending_render = { overwrite = false, targets = targets }
   end
   ImGui.EndDisabled(ctx)
   local dir = render.output_dir(settings.render_dir)
+  local embedded = multi and 'the metadata (and each item\'s artwork, where set)'
+    or (current and current.values and render.artwork_path(current.values.Artwork) ~= '' and 'the metadata and the artwork')
+    or 'the metadata'
   if #targets == 0 then
     if multi then tip('Nothing to render yet: the selected items need finalized metadata.')
     elseif not r then tip('Nothing to render yet: finalize the metadata first.')
     else tip('Fill the missing fields first' .. (#r.missing > 0 and (': ' .. table.concat(r.missing, ', ')) or '') .. '.') end
   elseif multi then
-    tip(string.format('Renders %d items into %s\n24 bit, each at its own sample rate and channel count, with the metadata embedded. The project\'s render settings are restored afterwards.',
-      #targets, dir))
+    tip(string.format('Renders %d items into %s\n24 bit, each at its own sample rate and channel count, with %s embedded. The project\'s render settings are restored afterwards.',
+      #targets, dir, embedded))
   else
     local f = current.facts
-    tip(string.format('Renders this item to %s\n%d Hz, 24 bit, %d ch, with the metadata embedded. The project\'s render settings are restored afterwards.',
-      render.target_path(dir, r.filename), f.samplerate or 0, f.channels or 0))
+    tip(string.format('Renders this item to %s\n%d Hz, 24 bit, %d ch, with %s embedded. The project\'s render settings are restored afterwards.',
+      render.target_path(dir, r.filename), f.samplerate or 0, f.channels or 0, embedded))
   end
 end
 
@@ -1714,8 +2099,8 @@ end
 
 local PAGE_TIPS = {
   Describe = 'Describe the sound and analyze it.',
-  Review = 'The suggested category and the model\'s questions.',
-  Metadata = 'The final file name and every metadata field, all editable. With several items selected it edits them all.',
+  Review = 'Clarify: the suggested category and the model\'s questions.',
+  Metadata = 'Review: the final file name and every metadata field, all editable. With several items selected it edits them all.',
 }
 
 -- locked[page] = why the page cannot be opened yet (nil: it can). The page on
@@ -1724,18 +2109,41 @@ local PAGE_TIPS = {
 -- blinks while another page is on screen; hovering it shows the plain hover colour.
 local function draw_tabs(locked, attention)
   attention = attention or {}
-  for i, page in ipairs(PAGES) do
-    if i > 1 then ImGui.SameLine(ctx) end
-    local blink = false
-    if view_page == page then accent_button(page)
-    else
-      blink = attention[page] ~= nil and locked[page] == nil
-      ImGui.BeginDisabled(ctx, locked[page] ~= nil)
-      if blink then ImGui.PushStyleColor(ctx, ImGui.Col_Button, blink_color(reaper.time_precise())) end
-      if ImGui.Button(ctx, page) then view_page = page end
-      if blink then ImGui.PopStyleColor(ctx) end
-      ImGui.EndDisabled(ctx)
+  local h = ImGui.GetFrameHeight(ctx)
+  local line_h = ImGui.GetTextLineHeight(ctx)
+  local dl = ImGui.GetWindowDrawList(ctx)
+  for i, p in ipairs(PAGES) do
+    local page, label = p[1], p[2]
+    if i > 1 then
+      -- Three spaced dots between two phases.
+      ImGui.SameLine(ctx, 0, 0)
+      local dx, dy = ImGui.GetCursorScreenPos(ctx)
+      ImGui.Dummy(ctx, 48, h)
+      for k = -1, 1 do
+        ImGui.DrawList_AddCircleFilled(dl, math.floor(dx + 24 + k * 8) + 0.5, math.floor(dy + h / 2) + 0.5, 1, ImGui.GetColor(ctx, ImGui.Col_TextDisabled))
+      end
+      ImGui.SameLine(ctx, 0, 0)
     end
+    -- A phase: text only, no background. Current: accent and underlined; open:
+    -- dim, bright on hover; locked: disabled; waiting for the user: pulsing.
+    local x, y = ImGui.GetCursorScreenPos(ctx)
+    local w = ImGui.CalcTextSize(ctx, label) + 8
+    local clicked = ImGui.InvisibleButton(ctx, '##phase-' .. page, w, h)
+    local hovered = ImGui.IsItemHovered(ctx)
+    local current_page, is_locked = view_page == page, locked[page] ~= nil
+    local blink = not current_page and not is_locked and attention[page] ~= nil
+    local col
+    if current_page then col = COL_ACCENT
+    elseif is_locked then col = ImGui.GetColor(ctx, ImGui.Col_TextDisabled)
+    elseif hovered then col = ImGui.GetColor(ctx, ImGui.Col_Text)
+    elseif blink then col = blink_color(reaper.time_precise())
+    else col = COL_DIM end
+    local ty = math.floor(y + (h - line_h) / 2)
+    ImGui.DrawList_AddText(dl, x + 4, ty, col, label)
+    if current_page then
+      ImGui.DrawList_AddLine(dl, x + 4, ty + line_h + 1, x + w - 4, ty + line_h + 1, col, 1)
+    end
+    if clicked and not is_locked then view_page = page end
     tip(locked[page] or (blink and attention[page]) or PAGE_TIPS[page])
   end
   ImGui.SameLine(ctx)
@@ -1750,14 +2158,16 @@ local function draw_copy_buttons()
     if ImGui.Button(ctx, 'Paste all') then multi_paste_all() end
     ImGui.EndDisabled(ctx)
     if can then tip(string.format('Puts every field copied from %s, and its file name, in all the selected items that have metadata. Hover a field or the file name to do it for that one only.', copied.name))
-    elseif not copied then tip('Nothing copied yet: select one item with metadata and press Copy.')
+    elseif not copied then tip('Nothing copied yet: select one item with metadata and use the copy icon in Review.')
     else tip('None of the selected items has metadata yet.') end
   else
+    -- The copy icon shows only on the Review phase, where the metadata is.
+    if view_page ~= 'Metadata' then return end
     local can = current.values ~= nil and not flow.busy(current)
     ImGui.BeginDisabled(ctx, not can)
-    if ImGui.Button(ctx, 'Copy') then copy_item(current) end
+    if icons.button('##copy', false, icons.copy) then copy_item(current) end
     ImGui.EndDisabled(ctx)
-    tip(can and 'Copies the file name and every metadata field of this item. Select several items, open Metadata and hover a field or the file name to preview the copied value; click it to put it in all of them, or use Paste all.'
+    tip(can and 'Copy: takes the file name and every metadata field of this item. Select several items, open Review and hover a field or the file name to preview the copied value; click it to put it in all of them, or use Paste all.'
       or 'Nothing to copy yet: this item has no metadata.')
   end
   ImGui.SameLine(ctx)
@@ -1774,11 +2184,11 @@ local function draw_workspace()
   end
   local r = current.values and flow.result(current) or nil
   draw_tabs({
-    Review = not current.draft and 'Analyze the description first: there is nothing to review yet.' or nil,
-    Metadata = not current.values and 'Finalize the review first: there is no metadata yet.' or nil,
+    Review = not current.draft and 'Analyze the description first: there is nothing to clarify yet.' or nil,
+    Metadata = not current.values and 'Finalize in Clarify first: there is no metadata to review yet.' or nil,
   }, {
     Review = current.state == 'questions'
-      and 'This item waits for review: check the suggested category, answer the questions and finalize.' or nil,
+      and 'This item waits for you in Clarify: check the suggested category, answer the questions and finalize.' or nil,
   })
   draw_copy_buttons()
   draw_render_button((r and r.renderable) and { current } or {}, r)
@@ -1787,9 +2197,8 @@ local function draw_workspace()
   if view_page == 'Describe' then draw_description()
   elseif view_page == 'Review' then
     if current.draft then draw_draft(); draw_questions()
-    else ImGui.TextDisabled(ctx, 'Nothing to review for this item yet: analyze its description first.') end
+    else ImGui.TextDisabled(ctx, 'Nothing to clarify for this item yet: analyze its description first.') end
   else draw_result() end
-  if settings.show_technical then draw_details() end
 end
 
 local function draw_multi_workspace()
@@ -1798,7 +2207,7 @@ local function draw_multi_workspace()
     if flow.result(sess).renderable then targets[#targets + 1] = sess end
   end
   draw_tabs({
-    Review = 'Describing and reviewing work on one item at a time: select a single item.',
+    Review = 'Describing and clarifying work on one item at a time: select a single item.',
     Metadata = #multi.with_values == 0
       and 'None of the selected items has metadata yet: describe and finalize each of them first.' or nil,
   })
@@ -1808,9 +2217,9 @@ local function draw_multi_workspace()
   if view_page == 'Metadata' then
     draw_multi_result()
   else
-    wrapped('Describing and reviewing work on one item at a time. Select a single item for that, or edit the metadata of all the selected ones.', COL_DIM)
+    wrapped('Describing and clarifying work on one item at a time. Select a single item for that, or review the metadata of all the selected ones.', COL_DIM)
     ImGui.BeginDisabled(ctx, #multi.with_values == 0)
-    if accent_button('Edit metadata of all') then view_page = 'Metadata' end
+    if accent_button('Review all') then view_page = 'Metadata' end
     ImGui.EndDisabled(ctx)
   end
 end
@@ -1818,16 +2227,17 @@ end
 -- What the model is doing, for the top row next to its name: text, true when the
 -- selected item's request runs (then the Stop button goes next to it); nil when
 -- nothing runs. Requests of other items (several analyzed at once) are counted.
-local DOING = { listening = 'Listening', drafting = 'Analyzing', finalizing = 'Finalizing' }
+local DOING = { measuring = 'Measuring audio', listening = 'Listening', drafting = 'Analyzing', finalizing = 'Finalizing' }
 local function status_line()
   local parts, own = {}, false
   if current and flow.busy(current) then
     own = true
-    parts[1] = string.format('%s... %d s', DOING[current.state] or 'Working', math.floor(http.elapsed(current.job) or 0))
+    local elapsed = current.measure_start and (reaper.time_precise()-current.measure_start) or http.elapsed(current.job)
+    parts[1] = string.format('%s... %d s', DOING[current.state] or 'Working', math.floor(elapsed or 0))
   elseif current and current.cancelled then
     parts[1] = 'Stopped'
   end
-  local others = http.pending() - (own and current.job and 1 or 0)
+  local others = http.pending() + flow.measure_count() - (own and (current.job or current.measure_thread) and 1 or 0)
   if others > 0 then
     parts[#parts + 1] = #parts > 0 and string.format('%d more running', others)
       or (others == 1 and '1 request running' or string.format('%d requests running', others))
@@ -1836,6 +2246,7 @@ local function status_line()
   return table.concat(parts, ', '), own
 end
 
+local safe_loop -- loop wrapped in xpcall, defined after loop
 local function loop()
   own_windows = {}
   local project = reaper.EnumProjects(-1)
@@ -1848,19 +2259,27 @@ local function loop()
     chat = project_chats[project] or {history = {}, input = ''}
     project_chats[project] = chat
     current, multi, active_project = nil, nil, project
+    settings_mod.load_project(settings) -- Library, SourceID and Show belong to the project
+    settings_saved = settings_mod.encoded(settings) -- just read: nothing to write back
     sessions = project_sessions[project] or {}
     project_sessions[project] = sessions
     pending_render, batch, confirm_overwrite, overwrite_targets = nil, nil, false, nil
   end
+  flow.poll_measurements()
   http.poll()
   track_selection()
   do_pending_render()
   watch_playing()
   push_style()
   prepare_window('main', 800, 680)
+  local fs_flags = prepare_fullscreen('main')
   -- The windows are floating only: they cannot be docked into each other.
-  local visible, open = ImGui.Begin(ctx, name, true, ImGui.WindowFlags_NoDocking)
+  -- No collapse arrow in the title bar.
+  local visible, open = ImGui.Begin(ctx, name, true,
+    ImGui.WindowFlags_NoDocking | ImGui.WindowFlags_NoCollapse | fs_flags)
   if visible then
+    fullscreen_title_button('main')
+    title_double_click('main')
     local model_text = settings.model ~= '' and ('Model: ' .. settings.model) or 'No model selected'
     ImGui.AlignTextToFramePadding(ctx)
     ImGui.TextDisabled(ctx, model_text)
@@ -1877,26 +2296,56 @@ local function loop()
       end
     end
     ImGui.SameLine(ctx)
-    align_right(button_width('Settings'))
-    if ImGui.Button(ctx, 'Settings') then settings_open = not settings_open end
-    ImGui.SeparatorText(ctx, multi and 'Selected items' or 'Selected item')
-    if multi then
-      draw_multi_header()
-      draw_multi_workspace()
-    elseif draw_item() then
-      draw_workspace()
+    align_right(3 * ImGui.GetFrameHeight(ctx) + 2 * ITEM_SPACING_X)
+    if icons.button('##overview', overview.open, icons.table) then overview.open = not overview.open end
+    tip(overview.open and 'Close the Overview.' or 'Overview: a table of every item of this project that has a card: status, file name and all the metadata, editable in place and sortable by any column.')
+    ImGui.SameLine(ctx)
+    if icons.button('##library', main_view == 'library', icons.library) then
+      main_view = main_view ~= 'library' and 'library' or nil
+    end
+    tip(main_view == 'library' and 'Close the library and go back to the item.'
+      or 'Library: designer, manufacturer, CreatorID, website, copyright, and this project\'s Library, SourceID and Show.')
+    ImGui.SameLine(ctx)
+    if icons.button('##settings', main_view == 'settings', icons.gear) then
+      main_view = main_view ~= 'settings' and 'settings' or nil
+    end
+    tip(main_view == 'settings' and 'Close the settings and go back to the item.' or 'Settings')
+    if main_view then -- settings or library in the item's place; changes save themselves
+      ImGui.Spacing(ctx)
+      draw_settings_page(main_view == 'settings' and 'Settings' or 'Library')
+    else
+      ImGui.SeparatorText(ctx, multi and 'Selected items' or 'Selected item')
+      if multi then
+        draw_multi_header()
+        draw_multi_workspace()
+      elseif draw_item() then
+        draw_workspace()
+      end
     end
     own_windows[#own_windows + 1] = window_rect()
     ImGui.End(ctx)
   end
-  if open and settings_open then draw_settings() end
   if open and overview.open then draw_overview() end
   pop_style()
   if open and settings.outline_items and outline.available() then
     outline.draw(ctx, ImGui, outline.items(sessions, store, json), reaper.time_precise(), own_windows)
   end
+  -- A text box saves when it is left (Enter, Tab or a click elsewhere); checkboxes,
+  -- menus and numbers right away.
+  if not ImGui.IsAnyItemActive(ctx) then settings_saved = settings_mod.save_changed(settings, settings_saved) end
   save_dirty(false)
-  if open then reaper.defer(loop) end
+  if open then reaper.defer(safe_loop) end
+end
+
+-- An error still stops the script, but its line and call chain go to the console
+-- first: REAPER's dialog shows only the message when it comes from inside a C
+-- function (math.max, table.sort...), which says nothing about where it happened.
+safe_loop = function()
+  local ok, err = xpcall(loop, debug.traceback)
+  if not ok then
+    reaper.ShowConsoleMsg('Metadata Assistant ' .. major_version .. '.' .. minor_version .. ' error:\n' .. tostring(err) .. '\n')
+    error(err, 0)
+  end
 end
 
 fetch_models()
@@ -1904,6 +2353,8 @@ fetch_models()
 -- On close: every changed card goes to the project; pending requests and their
 -- temporary files are dropped; an item playback started here is stopped.
 reaper.atexit(function()
+  settings_saved = settings_mod.save_changed(settings, settings_saved) -- a box still being typed in
+  flow.stop_measurements()
   save_dirty(true)
   http.abandon_all()
   if playing then
@@ -1911,4 +2362,4 @@ reaper.atexit(function()
     reaper.SetEditCurPos(playing.cursor, false, false)
   end
 end)
-reaper.defer(loop)
+reaper.defer(safe_loop)

@@ -1,75 +1,78 @@
 -- mtt_metadataassistant_settings.lua
--- Script settings, kept in REAPER's persistent ExtState (section EXT): the LLM
--- server and the library identity written into every file.
+-- Script settings: the LLM server, the library identity written into every file
+-- and the interface. Global ones live in REAPER's persistent ExtState (section
+-- EXT); the ones marked project = true (Library, SourceID, Show) in the current
+-- project's ProjExtState (same section), so each project keeps its own.
 
 local M = {}
 
 M.EXT = "mtt_MetadataAssistant"
 
--- Order = order in the Settings panel. kind: "text" | "secret" | "bool" | "int" | "combo"
--- (combo: items, value = 0-based index). same_line: drawn next to the previous one.
--- tip: tooltip on the label (what the setting is for).
+-- Order = order on screen. page: "Settings" (the gear: global preferences) or
+-- "Library" (the books icon: the library identity, used more often);
+-- group: the heading it sits under (a new heading where the group changes).
+-- kind: "text" | "secret" | "bool" | "int" | "combo" (combo: items, value = 0-based
+-- index). tip: tooltip on the label (what the setting is for). project: saved in
+-- the project instead of globally. needs: key of a bool setting; off = this one is
+-- greyed out, its group heading too when the whole group needs it.
+-- Gone in 0.21 (values saved under these keys are ignored): json_mode (response_format
+-- is never sent; it was off by default), stall_timeout_s (requests now run until
+-- they end or Stop; an unreachable server still fails after 15 s), Microphone and
+-- RecMedium (per item now), show_technical (0.22: the Technical details panel is gone),
+-- and before them timeout_s.
 M.KEYS = {
-  { key = "endpoint",          label = "Endpoint",          kind = "text",   default = "",
+  -- Settings (gear)
+  { key = "endpoint",          page = "Settings", group = "Server", label = "Endpoint", kind = "text", default = "",
     hint = "http://localhost:1234/v1",
     tip = "Base URL of an OpenAI-compatible server (LM Studio, oMLX, OpenAI...). The script calls <endpoint>/chat/completions and <endpoint>/models." },
-  { key = "model",             label = "Model",             kind = "text",   default = "",
-    hint = "model name",
-    tip = "Model ID sent in every request. Pick it from the server's list, or type an ID the server does not list." },
-  { key = "model_audio",       label = "Model hears audio", kind = "bool",   default = false, same_line = true,
-    tip = "Tick when the model accepts audio input. It then listens to a clip of the item before the description is analysed." },
-  { key = "curator_model",     label = "Curator model",    kind = "text", default = "",
-    hint = "Use main model",
-    tip = "Model for Overview conversations on this server. Leave empty to follow the main model." },
-  { key = "audio_mode",        label = "Audio sent as",     kind = "combo",  default = 0,
-    items = { "file path (mlx-vlm server)", "base64 (OpenAI style)" },
-    tip = "How the audio clip reaches the model: a local file path (mlx-vlm style servers) or base64 data inside the request (OpenAI style)." },
-  { key = "listen_max_s",      label = "Seconds to listen/analyze", kind = "int", default = 30,
-    tip = "Only the first N seconds of the item are measured and sent to the model." },
-  { key = "api_key",           label = "API key",           kind = "secret", default = "",
+  { key = "api_key",           page = "Settings", group = "Server", label = "API key", kind = "secret", default = "",
     hint = "optional, local servers usually need none",
     tip = "Sent as 'Authorization: Bearer <key>'. Leave empty for servers without authentication." },
-  { key = "question_language", label = "Question language", kind = "text",   default = "English",
+  { key = "model",             page = "Settings", group = "Models", label = "Model", kind = "text", default = "",
+    hint = "model name",
+    tip = "Model that describes and tags the items. Pick it from the server's list, or type an ID the server does not list." },
+  { key = "curator_model",     page = "Settings", group = "Models", label = "Curator model", kind = "text", default = "",
+    hint = "Use main model",
+    tip = "Model for the Overview curator. Empty: the main model." },
+  { key = "question_language", page = "Settings", group = "Models", label = "Questions in", kind = "text", default = "English",
     tip = "Language of the questions the model asks you. Metadata is always written in English." },
-  { key = "json_mode",         label = "JSON mode (response_format)", kind = "bool", default = false,
-    tip = "Adds response_format = json_object to the request. Turn on only if the server supports it." },
-  -- Replaces "timeout_s" (a limit on the total time, which cut slow answers that were
-  -- still arriving); a value saved under that key is ignored.
-  { key = "stall_timeout_s",   label = "Give up after silence (s)", kind = "int", default = 0,
-    tip = "Gives up on a model request when the server has sent nothing for this many seconds. 0 = never: a request runs as long as the answer keeps coming, however long it takes (several items analyzed at once wait for each other on a local server); Stop ends it. A server that cannot be reached fails after 15 s either way." },
-  { key = "render_dir",        label = "Render folder",     kind = "text",   default = "UCS",
-    hint = "UCS", browse = true,
-    tip = "Where Render writes the file, relative to the project folder (default: UCS). An absolute path is also accepted." },
+  { key = "model_audio",       page = "Settings", group = "Models", label = "Model hears audio", kind = "bool", default = false,
+    tip = "Tick when the model accepts audio input. It then listens to a clip of the item before the description is analysed." },
+  { key = "audio_mode",        page = "Settings", group = "Audio", label = "Audio sent as", kind = "combo", default = 0,
+    items = { "file path (mlx-vlm server)", "base64 (OpenAI style)" }, needs = "model_audio",
+    tip = "How the audio clip reaches the model: a local file path (mlx-vlm style servers) or base64 data inside the request (OpenAI style)." },
+  -- The measurements always cover the whole item; this only limits the audio clip.
+  { key = "listen_max_s",      page = "Settings", group = "Audio", label = "Seconds sent to the model", kind = "int", default = 30,
+    needs = "model_audio",
+    tip = "Length of the audio clip the model listens to. A longer item sends up to three excerpts where it is active, this many seconds in all. The measurements always cover the whole item." },
   -- Library identity (session values in mtt_metadataassistant_fields.SESSION_KEYS).
-  { key = "Designer",          label = "Designer / recordist", kind = "text", default = "",
+  { key = "Designer",          page = "Library", group = "Library identity", label = "Designer / recordist", kind = "text", default = "",
     tip = "Your name: written to Designer, Recordist and Artist in every file." },
-  { key = "Manufacturer",      label = "Manufacturer",      kind = "text",   default = "",
+  { key = "Manufacturer",      page = "Library", group = "Library identity", label = "Manufacturer", kind = "text", default = "",
     tip = "Company or label that publishes the library (Soundminer Manufacturer column)." },
-  { key = "Library",           label = "Library",           kind = "text",   default = "",
-    tip = "Name of the sound library the files belong to." },
-  { key = "ShortID",           label = "CreatorID (ShortID)", kind = "text", default = "",
-    tip = "Short code for the creator: the CreatorID block of the UCS filename (e.g. B00M)." },
-  { key = "SourceID",          label = "SourceID",          kind = "text",   default = "",
-    tip = "Short code for the project, library or recording source: the SourceID block of the UCS filename." },
-  { key = "Show",              label = "Show",              kind = "text",   default = "",
-    tip = "Production or show the sounds were made for, when there is one." },
-  { key = "URL",               label = "Website",           kind = "text",   default = "",
+  { key = "ShortID",           page = "Library", group = "Library identity", label = "CreatorID", kind = "text", default = "",
+    tip = "Short code for the creator (ShortID): the CreatorID block of the UCS filename (e.g. B00M)." },
+  { key = "URL",               page = "Library", group = "Library identity", label = "Website", kind = "text", default = "",
     hint = "www.example.com (also BWF originator reference)",
     tip = "Website written to the URL field and to the BWF originator reference (32 bytes)." },
-  { key = "Copyright",         label = "Copyright",         kind = "text",   default = "",
+  { key = "Copyright",         page = "Library", group = "Library identity", label = "Copyright", kind = "text", default = "",
     hint = "(c) 2026 Your Name (BWF originator, 32 bytes)",
     tip = "Copyright notice written to the BWF originator field (32 bytes)." },
-  -- Applied only to sounds whose file says they were recorded today.
-  { key = "Microphone",        label = "Default microphone", kind = "text",  default = "",
-    tip = "Microphone and technique used when the file says it was recorded today. Older files get no default, because it would most likely be wrong." },
-  { key = "RecMedium",         label = "Default recorder",  kind = "text",   default = "",
-    tip = "Recorder used when the file says it was recorded today." },
-  -- File names.
-  { key = "name_blocks",       label = "VendorCategory / UserCategory", kind = "bool", default = true,
+  -- This project's identity (saved in the project, not global).
+  { key = "Library",           page = "Library", group = "This project", label = "Library", kind = "text", default = "", project = true,
+    tip = "Name of the sound library the files belong to. Saved in this project." },
+  { key = "SourceID",          page = "Library", group = "This project", label = "SourceID", kind = "text", default = "", project = true,
+    tip = "Short code for the project, library or recording source: the SourceID block of the UCS filename. Saved in this project." },
+  { key = "Show",              page = "Library", group = "This project", label = "Show", kind = "text", default = "", project = true,
+    tip = "Production or show the sounds were made for, when there is one. Saved in this project." },
+  -- Files.
+  { key = "render_dir",        page = "Settings", group = "Files", label = "Render folder", kind = "text", default = "Render",
+    hint = "Render", browse = true,
+    tip = "Where Render writes the files, relative to the project folder (default: Render). An absolute path is also accepted." },
+  { key = "name_blocks",       page = "Library", group = "File names", label = "Vendor/UserCategory", kind = "bool", default = true,
     tip = "On: the model may fill UCS's optional name blocks, each joined with a dash: the object family before the FXName (VEHMech_Seatbelt Button-Press And Release) and a UserCategory after the CatID. Off: it leaves both empty and the object goes in the FXName (VEHMech_Seatbelt Button Press And Release). A value typed by hand counts either way. Applies from the next analysis or finalize." },
-  { key = "show_technical", label = "Show technical details", kind = "bool", default = false,
-    tip = "Shows source measurements, UCS candidates, the raw model answers and card management." },
-  { key = "outline_items",     label = "Outline tagged items on the timeline", kind = "bool", default = true,
+  -- Timeline.
+  { key = "outline_items",     page = "Settings", group = "Timeline", label = "Outline tagged items", kind = "bool", default = true,
     tip = "Outlines on the timeline the items that have a card. Green: reviewed (final metadata). Yellow, blinking: waiting for review. Orange and warm white running around the item: being analyzed or finalized. Needs js_ReaScriptAPI (ReaPack: ReaTeam Extensions)." },
 }
 
@@ -85,22 +88,61 @@ local function encode(def, value)
   return tostring(value == nil and "" or value)
 end
 
--- Every setting, read fresh from ExtState.
+local function read(def)
+  if def.project then
+    local _, raw = reaper.GetProjExtState(0, M.EXT, def.key)
+    return decode(def, raw)
+  end
+  local raw = reaper.GetExtState(M.EXT, def.key)
+  -- "UCS" was the default render folder up to 0.20, saved with every other setting:
+  -- it reads as the new default.
+  if def.key == "render_dir" and raw == "UCS" then raw = "" end
+  return decode(def, raw)
+end
+
+-- Every setting, read fresh: global ones from ExtState, project ones from the current project.
 function M.load()
   local s = {}
-  for _, def in ipairs(M.KEYS) do
-    s[def.key] = decode(def, reaper.GetExtState(M.EXT, def.key))
-  end
+  for _, def in ipairs(M.KEYS) do s[def.key] = read(def) end
   -- A mode saved by an older version (2 = the removed MTT Relay format) falls back to the first one.
   if s.audio_mode ~= 0 and s.audio_mode ~= 1 then s.audio_mode = 0 end
   return s
 end
 
--- Writes every setting, persistent across REAPER restarts.
-function M.save(s)
+-- The project settings again, from the project now current (after a project switch).
+function M.load_project(s)
   for _, def in ipairs(M.KEYS) do
-    reaper.SetExtState(M.EXT, def.key, encode(def, s[def.key]), true)
+    if def.project then s[def.key] = read(def) end
   end
+end
+
+-- One setting's stored text: global ones persistent across REAPER restarts,
+-- project ones into the current project (saved with it).
+local function write(def, text)
+  if def.project then
+    reaper.SetProjExtState(0, M.EXT, def.key, text)
+  else
+    reaper.SetExtState(M.EXT, def.key, text, true)
+  end
+end
+
+-- Every setting as the text it is stored as (key -> text): two of these compared
+-- tell what changed.
+function M.encoded(s)
+  local out = {}
+  for _, def in ipairs(M.KEYS) do out[def.key] = encode(def, s[def.key]) end
+  return out
+end
+
+-- Settings save themselves: writes only the settings whose text differs from
+-- `before` (a table from M.encoded), so an unchanged project is not marked as
+-- modified. Returns the new table to compare against next time.
+function M.save_changed(s, before)
+  local now = M.encoded(s)
+  for _, def in ipairs(M.KEYS) do
+    if now[def.key] ~= before[def.key] then write(def, now[def.key]) end
+  end
+  return now
 end
 
 -- "http://host:1234/v1", ".../v1/", ".../v1/chat/completions" -> the

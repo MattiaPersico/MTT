@@ -11,6 +11,10 @@
 --   RENDER_TAILFLAG 0, RENDER_ADDTOPROJ 0, RENDER_NORMALIZE 0 (no post-processing)
 --   RENDER_FILE / RENDER_PATTERN = output folder / UCS name (REAPER adds .wav)
 --   RENDER_FORMAT  WAV24 below, RENDER_FORMAT2 "" (no secondary format)
+-- Artwork (optional, the item's Artwork field): a JPEG or PNG written as the front cover into the WAV's
+-- ID3 chunk (ID3:APIC_FILE + ID3:APIC_TYPE 3). The same keys and WAV24 string
+-- were checked with exiftool on REAPER 7.80 by Amorfx/reaper-release-exporter
+-- (docs/reaper-api-notes.md): the WAV carries an ID3v2.4 chunk with the cover.
 
 local M = {}
 
@@ -26,7 +30,7 @@ local STR_KEYS = { "RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FOR
 
 M.SEP = reaper.GetOS():find("Win") and "\\" or "/"
 
-M.DEFAULT_SUBDIR = "UCS"
+M.DEFAULT_SUBDIR = "Render"
 
 -- The project's folder (the recording path when the project was never saved).
 function M.project_dir()
@@ -49,7 +53,7 @@ local function components(path)
   return out
 end
 
--- Folder to write to. setting is relative to the project folder ("UCS",
+-- Folder to write to. setting is relative to the project folder ("Render",
 -- "renders/ucs", "../shared"); empty = DEFAULT_SUBDIR. An absolute setting
 -- (what older versions saved) is used as it is. project_dir: for tests;
 -- default = the current project's folder. Pure when project_dir is given.
@@ -93,6 +97,33 @@ function M.relative_setting(picked, project_dir)
   return table.concat(out, "/")
 end
 
+-- The artwork setting as a path: spaces and surrounding quotes dropped (a
+-- pasted "/path/cover.jpg"). Pure.
+function M.artwork_path(setting)
+  local s = tostring(setting or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  return (s:gsub('^"(.*)"$', "%1"):gsub("^'(.*)'$", "%1"))
+end
+
+-- Why this artwork cannot be embedded, or nil (also nil when there is none).
+function M.artwork_problem(setting)
+  local path = M.artwork_path(setting)
+  if path == "" then return nil end
+  local ext = (path:match("%.([^./\\]+)$") or ""):lower()
+  if ext ~= "jpg" and ext ~= "jpeg" and ext ~= "png" then
+    return "Artwork must be a JPEG or PNG file: " .. path
+  end
+  if not reaper.file_exists(path) then return "Artwork not found: " .. path end
+  return nil
+end
+
+-- {identifier, value} pairs that embed the artwork as the front cover; empty
+-- when there is no artwork. Pure.
+function M.artwork_metadata(setting)
+  local path = M.artwork_path(setting)
+  if path == "" then return {} end
+  return { { "ID3:APIC_TYPE", "3" }, { "ID3:APIC_FILE", path } } -- 3 = front cover
+end
+
 function M.target_path(dir, name)
   return dir .. M.SEP .. name .. ".wav"
 end
@@ -133,10 +164,13 @@ local function restore(s, written_ids)
   reaper.UpdateArrange()
 end
 
--- plan: dir, name (no extension), samplerate, channels, metadata ({id, value} pairs).
+-- plan: dir, name (no extension), samplerate, channels, metadata ({id, value} pairs),
+-- artwork (the item's Artwork field: image path or "").
 -- overwrite: delete an existing file at the target path first (only that path).
 -- Returns path, or nil, err.
 function M.render_item(item, plan, overwrite)
+  local art_err = M.artwork_problem(plan.artwork)
+  if art_err then return nil, art_err end -- checked first: no file is touched
   local path = M.target_path(plan.dir, plan.name)
   if reaper.file_exists(path) then
     if not overwrite then return nil, "exists" end
@@ -161,7 +195,10 @@ function M.render_item(item, plan, overwrite)
     reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT", M.WAV24, true)
     reaper.GetSetProjectInfo_String(0, "RENDER_FORMAT2", "", true)
     for _, id in ipairs(s.meta_ids) do set_metadata(id, "") end
-    for _, pair in ipairs(plan.metadata) do
+    local pairs_out = {}
+    for _, pair in ipairs(plan.metadata) do pairs_out[#pairs_out + 1] = pair end
+    for _, pair in ipairs(M.artwork_metadata(plan.artwork)) do pairs_out[#pairs_out + 1] = pair end
+    for _, pair in ipairs(pairs_out) do
       set_metadata(pair[1], pair[2])
       written[#written + 1] = pair[1]
     end

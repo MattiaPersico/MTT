@@ -42,7 +42,9 @@ Keep metadata in English. Do not claim to have applied edits or rendered files.]
 
 function M.messages(d, rows, history, question, settings)
   local cards, keys = {}, {'File name'}
-  for _, def in ipairs(d.fields.FIELDS) do keys[#keys + 1] = def.key end
+  for _, def in ipairs(d.fields.FIELDS) do
+    if def.curator ~= false then keys[#keys + 1] = def.key end
+  end
   for _, row in ipairs(rows) do cards[#cards + 1] = snapshot(row, d.flow, d.overview) end
   local messages = {{role = 'system', content = instructions .. '\nFields: ' .. table.concat(keys, ', ')
     .. '\n' .. table.concat(d.fields.writing_rules(settings.name_blocks), '\n')
@@ -76,7 +78,7 @@ function M.proposal(d, obj, cards)
   local order, allowed = {}, {}
   for _, def in ipairs(d.fields.FIELDS) do
     order[#order + 1] = def.key
-    allowed[def.key] = true
+    allowed[def.key] = def.curator ~= false
   end
   order[#order + 1], allowed['File name'] = 'File name', true
   local groups, changes = {}, {}

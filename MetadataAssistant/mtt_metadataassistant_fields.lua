@@ -20,6 +20,7 @@ local M = {}
 --   file    = read from the item's source file
 --   auto    = filled by the script
 --   manual  = typed by the user in the result
+--   item    = chosen per item in the result (Artwork: an image file, not a tag)
 -- ixml: field inside the iXML <USER> block ("IXML:USER:<ixml>" in REAPER's
 -- render metadata). bwf: also written to that BWF (bext) field, cut to
 -- bwf_max bytes. Neither = filename only.
@@ -38,7 +39,7 @@ M.FIELDS = {
   { key = "MicPerspective", ixml = "MICPERSPECTIVE", source = "ai" },
   { key = "Location",       ixml = "LOCATION",       source = "ai" },
   { key = "RecType",        ixml = "RECTYPE",        source = "ai" },
-  { key = "Microphone",     ixml = "MICROPHONE",     source = "ai" },      -- model + technique; Settings default for sounds recorded today
+  { key = "Microphone",     ixml = "MICROPHONE",     source = "ai" },      -- model + technique; per item (description or typed)
   { key = "ChannelLayout",  ixml = "CHANNELLAYOUT",  source = "manual" },  -- multichannel only, e.g. L/R/C/Ls/Rs
   { key = "RecMedium",      ixml = "RECMEDIUM",      source = "file" },
   { key = "Designer",       ixml = "DESIGNER",       source = "session", required = true },
@@ -54,6 +55,9 @@ M.FIELDS = {
   { key = "TrackYear",      ixml = "TRACKYEAR",      source = "auto" },  -- recording year
   { key = "ShootDate",      ixml = "SHOOTDATE",      source = "file" },  -- recording date, when the file has one
   { key = "Notes",          ixml = "NOTES",          source = "auto" },
+  -- Not a tag: the image Render embeds as the front cover (render.artwork_metadata).
+  -- curator = false: the Overview curator never proposes it.
+  { key = "Artwork",                                 source = "item", curator = false },
 }
 
 -- What each field is for (tooltip on its label).
@@ -62,8 +66,8 @@ M.TIPS = {
   Category = "UCS category name, derived from the CatID.",
   SubCategory = "UCS subcategory name, derived from the CatID.",
   CategoryFull = "Category-SubCategory as Soundminer shows it, derived from the CatID.",
-  UserCategory = "Optional extra tag appended to the CatID in the filename after a dash (CatID-UserCategory). Letters and digits only. With Settings > Library > VendorCategory / UserCategory off the model leaves it empty.",
-  VendorCategory = "Library-specific grouping placed before the FXName in the filename (e.g. DRY/ROOM version, or the object family). The model's value loses the words the CatID or the FXName already say. With Settings > Library > VendorCategory / UserCategory off the model leaves it empty and the object goes in the FXName.",
+  UserCategory = "Optional extra tag appended to the CatID in the filename after a dash (CatID-UserCategory). Letters and digits only. With Library > Vendor/UserCategory off the model leaves it empty.",
+  VendorCategory = "Library-specific grouping placed before the FXName in the filename (e.g. DRY/ROOM version, or the object family). The model's value loses the words the CatID or the FXName already say. With Library > Vendor/UserCategory off the model leaves it empty and the object goes in the FXName.",
   FXName = "Short title of the sound: object, number, action, manner, in Title Case. Second block of the filename; aim for 25 characters or less.",
   TrackTitle = "Longer human title of the sound, shown in Soundminer's title column.",
   Description = "What the sound is and how it behaves: upper-case tags, then short sentences on action, character, structure and space. Also written to the BWF description (256 bytes).",
@@ -71,30 +75,28 @@ M.TIPS = {
   MicPerspective = "Microphone distance and space, e.g. CU | INT. Distance: CU, MED, DST, VARI. Space: INT, EXT. Special: D/I, CONTACT, HYDRO, OB, EMF.",
   Location = "Where it was recorded: place, region or country.",
   RecType = "Recording technique or stereo format, e.g. XY, MS, ORTF, mono.",
-  Microphone = "Microphone model and technique used.",
+  Microphone = "Microphone model and technique used for this item.",
   ChannelLayout = "Channel order for multichannel files, e.g. L/R/C/Ls/Rs.",
-  RecMedium = "Recorder or medium used for the recording.",
-  Designer = "Person who designed or edited the sound. Set in Settings.",
-  Recordist = "Person who recorded the sound; mirrors Designer. Set in Settings.",
-  Artist = "Artist tag shown by macOS Finder; mirrors Designer. Set in Settings.",
-  Manufacturer = "Company or label that publishes the library. Set in Settings.",
-  Library = "Name of the sound library. Set in Settings.",
-  ShortID = "CreatorID: short code for the creator, third block of the filename. Set in Settings.",
-  SourceID = "Short code for the project or recording source, fourth block of the filename. Set in Settings.",
-  Show = "Production or show the sound was made for. Set in Settings.",
-  URL = "Website; also written to the BWF originator reference (32 bytes). Set in Settings.",
-  Copyright = "Copyright notice; written to the BWF originator (32 bytes). Set in Settings.",
+  RecMedium = "Recorder or medium used for this item's recording.",
+  Designer = "Person who designed or edited the sound. Set in Library.",
+  Recordist = "Person who recorded the sound; mirrors Designer. Set in Library.",
+  Artist = "Artist tag shown by macOS Finder; mirrors Designer. Set in Library.",
+  Manufacturer = "Company or label that publishes the library. Set in Library.",
+  Library = "Name of the sound library. Set in Library (saved in the project).",
+  ShortID = "CreatorID: short code for the creator, third block of the filename. Set in Library.",
+  SourceID = "Short code for the project or recording source, fourth block of the filename. Set in Library (saved in the project).",
+  Show = "Production or show the sound was made for. Set in Library (saved in the project).",
+  URL = "Website; also written to the BWF originator reference (32 bytes). Set in Library.",
+  Copyright = "Copyright notice; written to the BWF originator (32 bytes). Set in Library.",
   TrackYear = "Year of the recording (the file's date, or today when the file has none).",
   ShootDate = "Recording date, when the source file carries one.",
   Notes = "Free notes. The UCS version used is added automatically.",
+  Artwork = "JPEG or PNG embedded as the front cover of this item's rendered file (the WAV's ID3 chunk). Empty: no cover. Browse... picks the file; with several items selected it goes to all of them.",
 }
 
 -- Library identity from the settings (always applied).
 M.SESSION_KEYS = { "Designer", "Recordist", "Artist", "Manufacturer", "Library", "ShortID", "SourceID",
                    "Show", "URL", "Copyright" }
--- Device defaults from the settings: applied only to sounds recorded today,
--- because on an older file they would most likely be false.
-M.DEVICE_KEYS = { "Microphone", "RecMedium" }
 
 -- Fields the LLM may fill. Anything else in its answer is ignored.
 M.AI_KEYS = { "VendorCategory", "FXName", "TrackTitle", "Description", "Keywords",
@@ -178,8 +180,7 @@ M.SOUND_TYPE_ORDER = { "single", "ambience", "vehicle", "designed", "vocal" }
 
 -- Checklist topics the model must never ask the user about. Location is not
 -- something the user should have to think about; the microphone comes from the
--- Settings (sounds recorded today) or from the description, and is otherwise left
--- empty. The fields stay filled when the description or the file facts state them.
+-- description or is typed per item, and is otherwise left empty. The fields stay filled when the description or the file facts state them.
 M.NEVER_ASKED = { "microphone", "location" }
 
 -- Rules shared by both passes (from the reference sheets and the A Sound Effect
@@ -213,7 +214,7 @@ local RULES_TAIL = {
   "Location: only the place, broad to specific (country, region, place), and only when the description or the file facts state it; otherwise empty. Never 'Studio' or 'Field'. Never ask about it.",
   "RecType: medium, space, technique, comma-separated (e.g. 'Digital, Studio, Mono'; techniques: Mono, Stereo, MS, XY, ORTF, AB, Ambisonic).",
   "MicPerspective: CU, MED, DST or VARI, then | INT or | EXT (e.g. 'CU | INT').",
-  "Microphone: brand, model and technique, when the user's description names a microphone (e.g. 'Schoeps CCM 41 ORTF', 'DPA 4007 AB') or a recorder track name in the file facts is a microphone model (a track called 'QTC50' means the Earthworks QTC50); otherwise leave it empty. The script fills it from the user's Settings, so a microphone listed under 'Device defaults' is already known: never ask about the microphone and do not repeat it. Never ask about the location either.",
+  "Microphone: brand, model and technique, when the user's description names a microphone (e.g. 'Schoeps CCM 41 ORTF', 'DPA 4007 AB') or a recorder track name in the file facts is a microphone model (a track called 'QTC50' means the Earthworks QTC50); otherwise leave it empty: the user fills it per item. Never ask about the microphone or the location.",
 }
 
 -- The writing rules for the "VendorCategory / UserCategory" setting (nil = on).
@@ -312,14 +313,8 @@ function M.apply_auto(values, recorded_on, today, ucs_version)
 end
 
 -- Session values fill only what is still empty; Artist mirrors Designer.
--- with_devices: also the default microphone and recorder (sound recorded today).
-function M.apply_session(values, session, with_devices)
-  local keys = {}
-  for _, k in ipairs(M.SESSION_KEYS) do keys[#keys + 1] = k end
-  if with_devices then
-    for _, k in ipairs(M.DEVICE_KEYS) do keys[#keys + 1] = k end
-  end
-  for _, k in ipairs(keys) do
+function M.apply_session(values, session)
+  for _, k in ipairs(M.SESSION_KEYS) do
     if (values[k] == nil or values[k] == "") and session[k] and session[k] ~= "" then
       values[k] = session[k]
     end

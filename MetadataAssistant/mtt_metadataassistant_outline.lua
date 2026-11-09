@@ -51,7 +51,7 @@ function M.mix_color(a, b, k)
 end
 
 -- Kind of an open card from its flow state: "done", "waiting", "busy" or nil.
-local KIND_OF_STATE = { done = 'done', questions = 'waiting', listening = 'busy', drafting = 'busy', finalizing = 'busy' }
+local KIND_OF_STATE = { done = 'done', questions = 'waiting', measuring = 'busy', listening = 'busy', drafting = 'busy', finalizing = 'busy' }
 function M.session_kind(state)
   return KIND_OF_STATE[state]
 end
