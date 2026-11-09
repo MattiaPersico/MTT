@@ -19,7 +19,7 @@ local STATUS = {
   finalizing = { label = 'Finalizing',   kind = 'busy', rank = 4 },
   done       = { label = 'Reviewed',     kind = 'ok',   rank = 5 },
 }
-local RENDERED = { label = 'Rendered', kind = 'ok', rank = 6 }
+local RENDERED = { label = 'Rendered', kind = 'rendered', rank = 6 }
 
 -- s: a card session (mtt_metadataassistant_flow). A reviewed card rendered since its last
 -- edit (flow.set_value clears s.rendered) shows as Rendered.

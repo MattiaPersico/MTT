@@ -87,8 +87,16 @@
 -- are icons, Copy only in Review. Settings > Diagnostics and its Technical details
 -- panel (measures, UCS candidates, raw answers, Delete this card) are gone. The measurements cover the whole item in
 -- segments of up to 30 s; "Seconds sent to the model" only limits the audio clip.
+-- 0.23: Overview: Play is an icon; the fixed columns (#, Status, File name) have a tinted
+-- header and cells and a line after the last one, so they read apart from the columns that
+-- scroll. While an item is analyzed or finalized, a coloured light sweeps back and forth over
+-- the dots between the two phases. An answer that is not valid JSON is asked for again,
+-- up to twice, without the user doing anything.
+-- 0.24: Overview: the # and Status columns are gone; the one fixed column holds the play icon and
+-- the file name, coloured by the item's status. A click on a cell selects the item in REAPER, a
+-- double click edits it. The horizontal scrollbar sits under the scrolling columns only.
 local major_version = 0
-local minor_version = 22
+local minor_version = 24
 
 local name = 'Metadata Assistant ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -469,6 +477,32 @@ function icons.stop(dl, x, y, h, col)
   ImGui.DrawList_AddRectFilled(dl, x0, y0, x0 + 8, y0 + 8, col, 1)
 end
 
+-- The dots between two phases while the model works on the step that leads from one
+-- to the other: a light sweeps back and forth over them, with a short trail, slow at
+-- both ends. Its colour moves through the colours of the timeline outline (orange, amber,
+-- warm white, blue), one step per sweep. Time based, so the redraw rate does not matter.
+-- (cx, cy): the middle of the three dots; t: seconds.
+icons.SCAN_PALETTE = { 0xFF6A00FF, 0xFFA53CFF, 0xFFF3DEFF, 0x33ADFFFF }
+icons.SCAN_SWEEP = 0.9   -- seconds for one way
+icons.SCAN_SPAN = 20     -- pixels from the middle to each end
+icons.SCAN_TRAIL = 6     -- circles behind the head
+icons.STATE_GAP = { measuring = 1, listening = 1, drafting = 1, finalizing = 2 } -- state -> gap between phases
+function icons.scan(dl, cx, cy, t)
+  local u = (t % (2 * icons.SCAN_SWEEP)) / (2 * icons.SCAN_SWEEP)
+  local pos = -math.cos(2 * math.pi * u)                    -- -1 .. 1 .. -1
+  local dir = math.sin(2 * math.pi * u) >= 0 and 1 or -1    -- the way the head moves
+  local pal = icons.SCAN_PALETTE
+  local c = (t / icons.SCAN_SWEEP) % #pal
+  local i0 = math.floor(c)
+  local head = mix_color(pal[i0 + 1], pal[(i0 + 1) % #pal + 1], c - i0)
+  for k = icons.SCAN_TRAIL, 0, -1 do                       -- the trail first, the head on top
+    local p = math.max(-1, math.min(1, pos - dir * k * 0.09))
+    local a = 1 - k / (icons.SCAN_TRAIL + 1)
+    ImGui.DrawList_AddCircleFilled(dl, cx + p * icons.SCAN_SPAN, cy, 1.2 + 1.5 * a,
+      (head & 0xFFFFFF00) | math.floor(255 * a * a))
+  end
+end
+
 -- Copy: two overlapping sheets in 1 px lines on whole pixels; only the visible
 -- edges of the back sheet are drawn.
 function icons.copy(dl, x, y, h, col)
@@ -747,6 +781,8 @@ end
 
 local function track_selection()
   local count = reaper.CountSelectedMediaItems(0)
+  -- Library identity filled in after an item was finalized reaches its empty fields (flow.refresh_session).
+  local identity = settings_mod.session_values(settings)
   if count > 1 then
     -- Several items: multi-edit. Items in timeline order (selection order breaks ties).
     local list = {}
@@ -758,6 +794,7 @@ local function track_selection()
     local guids, sessions_in_order = {}, {}
     for _, e in ipairs(list) do
       local sess = session_for(e.item)
+      flow.refresh_session(sess, identity)
       sessions_in_order[#sessions_in_order + 1] = sess
       guids[#guids + 1] = sess.guid
     end
@@ -783,9 +820,10 @@ local function track_selection()
   end
   local key = card_key(item)
   current_item, item_reason = item, nil
-  if current and current.guid == key then return end
+  if current and current.guid == key then flow.refresh_session(current, identity); return end
   confirm_overwrite, render_msg, overwrite_targets = false, nil, nil
   local s = session_for(item, key)
+  flow.refresh_session(s, identity)
   -- Selecting an item opens the page of its step; while it stays selected, the page
   -- moves only when one of its steps completes (draw_workspace).
   view_page = page_for(s)
@@ -1493,28 +1531,32 @@ end
 -- Rows keep their place while a value is edited: they are sorted again when a header
 -- is clicked or the items listed change. ReaImGui keeps the column widths, order,
 -- visibility and sort with the window settings.
-local OVERVIEW_COLS = { { key = '#' }, { key = 'Status' }, { key = 'File name' } }
+local OVERVIEW_COLS = { { key = 'File name' } }
 for _, def in ipairs(fields.FIELDS) do OVERVIEW_COLS[#OVERVIEW_COLS + 1] = { key = def.key } end
-local OVERVIEW_FROZEN = 3 -- #, Status and File name stay in view while scrolling sideways
-local OVERVIEW_WIDTHS = { ['#'] = 100, Status = 96, ['File name'] = 320, CategoryFull = 170, UserCategory = 110,
+local OVERVIEW_FROZEN = 1 -- File name (with the play icon) stays in view while scrolling sideways
+local OVERVIEW_WIDTHS = { ['File name'] = 380, CategoryFull = 170, UserCategory = 110,
   VendorCategory = 140, FXName = 200, TrackTitle = 200, Description = 380, Keywords = 300, Location = 150,
   Microphone = 160, Manufacturer = 130, Library = 140, URL = 160, Copyright = 160, Notes = 160 }
 local OVERVIEW_DEFAULT_WIDTH = 104
 local OVERVIEW_TIPS = {
-  ['#'] = 'Play/Stop plays this item from start to end. Timeline order: position, then track. Click a number to select that item in REAPER (the main window shows it); Cmd/Ctrl- or Shift-click adds it to the selection or takes it out.',
-  Status = 'Not analyzed, Analyzing, To review, Finalizing, Reviewed (final metadata), Rendered (rendered since its last edit), Error. Only reviewed and rendered items have metadata to edit.',
-  ['File name'] = FILENAME_TIP .. '\n\nRed: the name has a problem or a required field is empty (hover the cell). Orange: another item has the same name.',
+  ['File name'] = FILENAME_TIP .. '\n\nThe colour of the name is the item\'s status: grey not analyzed, orange being analyzed, yellow to review, green reviewed, blue rendered, red error. '
+    .. 'A red cell: the name has a problem or a required field is empty (hover the cell). An orange cell: another item has the same name.'
+    .. '\n\nClick a row to select its item in REAPER (Cmd/Ctrl- or Shift-click adds it to the selection or takes it out); double-click a cell to edit it. The play icon plays the item from start to end (a square stops it).',
 }
 local OVERVIEW_FLAGS = ImGui.TableFlags_Resizable | ImGui.TableFlags_Reorderable | ImGui.TableFlags_Hideable
   | ImGui.TableFlags_Sortable | ImGui.TableFlags_SortMulti | ImGui.TableFlags_RowBg
   | ImGui.TableFlags_BordersInnerV | ImGui.TableFlags_BordersOuter
   | ImGui.TableFlags_ScrollX | ImGui.TableFlags_ScrollY | ImGui.TableFlags_SizingFixedFit
 local OVERVIEW_RESCAN_S = 2 -- the items are listed again at least this often
-local STATUS_COLORS = { ok = COL_OK, warn = COL_WARN, busy = COL_ACCENT, dim = COL_DIM, err = COL_ERR }
-local TALLY_ORDER = { 'Rendered', 'Reviewed', 'To review', 'Finalizing', 'Analyzing', 'Listening', 'Not analyzed', 'Error' }
+local STATUS_COLORS = { ok = COL_OK, warn = COL_WARN, busy = COL_ACCENT, dim = COL_DIM, err = COL_ERR, rendered = 0x66C2E0FF }
+local TALLY_ORDER = { 'Rendered', 'Reviewed', 'To review', 'Finalizing', 'Analyzing', 'Listening', 'Measuring', 'Not analyzed', 'Error' }
 local COL_CELL_ERR = 0x6E2A2AFF  -- file name with a problem or a required field missing
 local COL_CELL_DUP = 0x5C4521FF  -- file name another item has too
 local COL_ROW_SELECTED = 0x9A632255 -- item selected in REAPER
+-- The fixed columns (OVERVIEW_FROZEN) against the ones that scroll: a cool tint on their header and
+-- cells, and a line after the last one.
+local FROZEN = { cell = 0x9DB4CC20, head = 0x9DB4CC3C, line = 0x9DB4CCCC }
+local FROZEN_TIP = '\n\nFixed column: it stays in view when the table scrolls sideways; the columns to its right scroll.' 
 local FLT_MIN = ImGui.NumericLimits_Float()
 
 -- Lists the project's items with a card again when the project or its state change, or
@@ -1530,10 +1572,12 @@ local function overview_refresh(force)
   if proj ~= overview.proj then overview.paste_status = nil end
   overview.proj, overview.count, overview.at = proj, count, now
   local rows, by_key, keys = {}, {}, {}
+  local identity = settings_mod.session_values(settings)
   for _, e in ipairs(overview_mod.tagged_items(store)) do
     local key = card_key(e.item)
     if not by_key[key] then
       local s = session_for(e.item, key)
+      flow.refresh_session(s, identity)
       if overview_mod.has_content(s) then
         local row = { key = key, item = e.item, session = s, n = #rows + 1 }
         rows[#rows + 1] = row
@@ -1555,21 +1599,20 @@ local function overview_count()
   local now = reaper.time_precise()
   if now - overview.names_at < 0.5 then return end
   overview.names_at = now
-  local names, tally = {}, {}
+  local names, tally, kinds = {}, {}, {}
   for _, row in ipairs(overview.rows) do
     local s = row.session
     names[row.key] = s.values and flow.result(s).filename or nil
-    local label = overview_mod.status(s).label
-    tally[label] = (tally[label] or 0) + 1
+    local st = overview_mod.status(s)
+    tally[st.label] = (tally[st.label] or 0) + 1
+    kinds[st.label] = st.kind
   end
-  overview.counts, overview.tally = overview_mod.name_counts(names), tally
+  overview.counts, overview.tally, overview.tally_kind = overview_mod.name_counts(names), tally, kinds
 end
 
 -- What a column sorts by.
 local function overview_value(row, key)
   local s = row.session
-  if key == '#' then return row.n end
-  if key == 'Status' then return overview_mod.status(s).rank end
   if not s.values then return '' end
   if key == 'File name' then return flow.result(s).filename end
   return s.values[key] or ''
@@ -1578,8 +1621,11 @@ end
 -- Search the full text of every column, including hidden fields and the description
 -- shown in place of a file name while a card has no final metadata yet.
 local function overview_search_value(row, key)
-  if key == 'Status' then return overview_mod.status(row.session).label end
-  if key == 'File name' and not row.session.values then return row.session.description or '' end
+  if key == 'File name' then
+    local status = overview_mod.status(row.session).label
+    if not row.session.values then return status .. ' ' .. (row.session.description or '') end
+    return status .. ' ' .. overview_value(row, key)
+  end
   return overview_value(row, key)
 end
 
@@ -1649,6 +1695,52 @@ local function overview_select(item, add)
   reaper.UpdateArrange()
 end
 
+-- What the status says, for the tooltip of a row's file name cell.
+local function overview_status_note(s, st)
+  if s.state == 'error' then return 'Error: ' .. tostring(s.error) end
+  if s.state == 'done' and s.rendered then return 'Rendered ' .. tostring(s.rendered.at) .. ': ' .. tostring(s.rendered.path) end
+  if s.state == 'questions' then return 'To review: select the item, check the category, answer the questions and finalize in Clarify.' end
+  if s.state == 'idle' then return 'Not analyzed: select the item and analyze its description on Describe.' end
+  return st.label .. '.'
+end
+
+-- One cell: text (a click selects the row's item in REAPER, a double click edits it) or, while
+-- it is being edited, the input box. color: colour of the text. Returns true when the edit box
+-- was changed.
+function overview.cell(row, key, value, color, item_ok)
+  local s = row.session
+  local id = row.key .. '|' .. key
+  if overview.editing == id then
+    if flow.busy(s) then
+      overview.editing = nil -- the model is writing this card: its answer would replace the edit
+    else
+      ImGui.SetNextItemWidth(ctx, -FLT_MIN)
+      if overview.focus then ImGui.SetKeyboardFocusHere(ctx); overview.focus = false end
+      local changed, v = ImGui.InputText(ctx, '##edit', value)
+      if changed then overview_set(s, key, v) end
+      if ImGui.IsItemDeactivated(ctx) then overview.editing = nil end
+      return changed
+    end
+  end
+  -- One line per cell: line breaks show as spaces (an edit keeps the spaces).
+  local shown = value
+  if shown:find('[\r\n]') then shown = (shown:gsub('%s*[\r\n]+%s*', ' ')) end
+  shown = (shown:gsub('##', '# #'))
+  ImGui.AlignTextToFramePadding(ctx)
+  if color then ImGui.PushStyleColor(ctx, ImGui.Col_Text, color) end
+  local clicked = ImGui.Selectable(ctx, shown .. '##cell', false, ImGui.SelectableFlags_AllowDoubleClick)
+  if color then ImGui.PopStyleColor(ctx) end
+  if clicked then
+    if ImGui.IsMouseDoubleClicked(ctx, 0) then
+      if s.values and not flow.busy(s) then overview.editing, overview.focus = id, true end
+    elseif item_ok then
+      local mods = ImGui.GetKeyMods(ctx)
+      overview_select(row.item, mods & (ImGui.Mod_Ctrl | ImGui.Mod_Super | ImGui.Mod_Shift) ~= 0)
+    end
+  end
+  return false
+end
+
 local function overview_row(row, row_h)
   local s = row.session
   local item_ok = reaper.ValidatePtr2(0, row.item, 'MediaItem*')
@@ -1656,80 +1748,70 @@ local function overview_row(row, row_h)
   if item_ok and reaper.IsMediaItemSelected(row.item) then
     ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_RowBg1, COL_ROW_SELECTED)
   end
+  local st = overview_mod.status(s)
   if ImGui.TableSetColumnIndex(ctx, 0) then
+    ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, FROZEN.cell) -- the problem / duplicate colours below replace it
     local is_playing = playing ~= nil and playing.item == row.item
     ImGui.BeginDisabled(ctx, not item_ok)
-    if ImGui.Button(ctx, is_playing and 'Stop' or 'Play', 46) then
+    if icons.button('##play', is_playing, is_playing and icons.stop or icons.play) then
       if is_playing then stop_item() else play_item(row.item) end
     end
     ImGui.EndDisabled(ctx)
-    tip('Plays this item from start to end; click again to stop. The edit cursor returns to its original position.')
+    tip(is_playing and 'Stop.' or 'Plays this item from start to end; click again to stop. The edit cursor returns to its original position.')
     ImGui.SameLine(ctx)
-    ImGui.AlignTextToFramePadding(ctx)
-    if ImGui.Selectable(ctx, tostring(row.n), false) and item_ok then
-      local mods = ImGui.GetKeyMods(ctx)
-      overview_select(row.item, mods & (ImGui.Mod_Ctrl | ImGui.Mod_Super | ImGui.Mod_Shift) ~= 0)
-    end
-  end
-  local st = overview_mod.status(s)
-  if ImGui.TableSetColumnIndex(ctx, 1) then
-    ImGui.AlignTextToFramePadding(ctx)
-    ImGui.TextColored(ctx, STATUS_COLORS[st.kind] or COL_DIM, st.label)
-    if s.state == 'error' then tip(tostring(s.error))
-    elseif s.state == 'done' and s.rendered then
-      tip('Rendered ' .. tostring(s.rendered.at) .. ': ' .. tostring(s.rendered.path))
-    elseif s.state == 'questions' then tip('Select the item, check the category, answer the questions and finalize in Clarify.')
-    elseif s.state == 'idle' then tip('Select the item and analyze its description on Describe.') end
-  end
-  -- A card the model is writing cannot be edited: its answer would replace the edit.
-  ImGui.BeginDisabled(ctx, flow.busy(s))
-  if ImGui.TableSetColumnIndex(ctx, 2) then
+    local color = STATUS_COLORS[st.kind] or COL_DIM
     if s.values then
       local r = flow.result(s)
       local dup = (overview.counts[r.filename] or 0) > 1
-      local notes = {}
-      for _, p in ipairs(r.problems) do notes[#notes + 1] = p end
-      if #r.missing > 0 then notes[#notes + 1] = 'Missing: ' .. table.concat(r.missing, ', ') .. ' (set in Library, the books icon)' end
-      if #notes > 0 then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, COL_CELL_ERR)
+      local notes = { overview_status_note(s, st) }
+      local problems = {}
+      for _, p in ipairs(r.problems) do problems[#problems + 1] = p end
+      if #r.missing > 0 then problems[#problems + 1] = 'Missing: ' .. table.concat(r.missing, ', ') .. ' (set in Library, the books icon)' end
+      if #problems > 0 then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, COL_CELL_ERR)
       elseif dup then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, COL_CELL_DUP) end
+      for _, p in ipairs(problems) do notes[#notes + 1] = p end
       if dup then notes[#notes + 1] = string.format('%d items have this file name.', overview.counts[r.filename]) end
       if r.edited then notes[#notes + 1] = 'Typed by hand: editing CatID, UserCategory, VendorCategory, FXName, ShortID or SourceID goes back to the automatic name.' end
-      ImGui.SetNextItemWidth(ctx, -FLT_MIN)
-      local changed, v = ImGui.InputText(ctx, '##filename', r.filename)
-      if changed then overview_set(s, 'File name', v) end
+      local changed = overview.cell(row, 'File name', r.filename, color, item_ok)
       tip(table.concat(notes, '\n'))
       column_menu('File name', changed and flow.result(s).filename or r.filename)
     else
       -- No file name yet: the start of the description tells which item it is.
-      ImGui.AlignTextToFramePadding(ctx)
-      ImGui.TextDisabled(ctx, s.description:match('%S') and overview_mod.short_text(s.description, 70) or '(no description)')
+      local text = s.description:match('%S') and overview_mod.short_text(s.description, 70) or '(no description)'
+      overview.cell(row, 'File name', text, color, item_ok)
+      tip(overview_status_note(s, st))
     end
   end
   if s.values then
     for ci = OVERVIEW_FROZEN + 1, #OVERVIEW_COLS do
       if ImGui.TableSetColumnIndex(ctx, ci - 1) then -- false for a hidden column or one scrolled out of view
         local key = OVERVIEW_COLS[ci].key
-        local value = s.values[key] or ''
-        -- One line per cell: line breaks show as spaces (an edit keeps the spaces).
-        if value:find('[\r\n]') then value = (value:gsub('%s*[\r\n]+%s*', ' ')) end
-        ImGui.SetNextItemWidth(ctx, -FLT_MIN)
-        local changed, v = ImGui.InputText(ctx, '##' .. key, value)
-        if changed then overview_set(s, key, v) end
+        overview.cell(row, key, s.values[key] or '', nil, item_ok)
         column_menu(key, s.values[key] or '')
       end
     end
   end
-  ImGui.EndDisabled(ctx)
 end
 
+-- The table sits in a child that cuts off the table's own horizontal scrollbar (the table is
+-- taller than the child by the bar's height), because that bar spans the fixed column too and
+-- the fixed column never scrolls. A bar drawn under the scrolling columns only replaces it, and
+-- scrolls the table (overview.set_scroll_x, applied inside the table in the next frame).
 local function overview_table()
-  ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x00000000) -- cells read as text until hovered or edited
-  if ImGui.BeginTable(ctx, 'overview', #OVERVIEW_COLS, OVERVIEW_FLAGS) then
+  local sb = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ScrollbarSize)
+  local table_x, table_y = ImGui.GetCursorScreenPos(ctx)
+  local avail_w, avail_h = ImGui.GetContentRegionAvail(ctx)
+  local clip_h = math.max(avail_h - sb, 80)
+  local scroll_x, scroll_max, v_scroll = 0, 0, false
+  ImGui.PushStyleColor(ctx, ImGui.Col_FrameBg, 0x00000000) -- cells read as text until edited
+  local child = ImGui.BeginChild(ctx, 'overview_clip', avail_w, clip_h, ImGui.ChildFlags_None,
+    ImGui.WindowFlags_NoScrollbar | ImGui.WindowFlags_NoScrollWithMouse)
+  if child and ImGui.BeginTable(ctx, 'overview', #OVERVIEW_COLS, OVERVIEW_FLAGS, 0, clip_h + (overview.hscroll and sb or 0)) then
+    if overview.set_scroll_x then ImGui.SetScrollX(ctx, overview.set_scroll_x); overview.set_scroll_x = nil end
     for i, col in ipairs(OVERVIEW_COLS) do
       local flags = ImGui.TableColumnFlags_WidthFixed
-      -- The frozen columns stay first and visible (a field dragged before them would be frozen instead).
+      -- The frozen column stays first and visible (a field dragged before it would be frozen instead).
       if i <= OVERVIEW_FROZEN then flags = flags | ImGui.TableColumnFlags_NoHide | ImGui.TableColumnFlags_NoReorder end
-      if i == 1 then flags = flags | ImGui.TableColumnFlags_DefaultSort end
       ImGui.TableSetupColumn(ctx, col.key, flags, OVERVIEW_WIDTHS[col.key] or OVERVIEW_DEFAULT_WIDTH, i)
     end
     ImGui.TableSetupScrollFreeze(ctx, OVERVIEW_FROZEN, 1)
@@ -1739,8 +1821,11 @@ local function overview_table()
     for i, col in ipairs(OVERVIEW_COLS) do
       if ImGui.TableSetColumnIndex(ctx, i - 1) then
         ImGui.PushID(ctx, i)
+        if i <= OVERVIEW_FROZEN then ImGui.TableSetBgColor(ctx, ImGui.TableBgTarget_CellBg, FROZEN.head) end
         ImGui.TableHeader(ctx, col.key)
-        tip(OVERVIEW_TIPS[col.key] or fields.TIPS[col.key])
+        if i == OVERVIEW_FROZEN then overview.frozen_right = (ImGui.GetItemRectMax(ctx)) end -- where the fixed column ends on screen
+        local tip_text = OVERVIEW_TIPS[col.key] or fields.TIPS[col.key]
+        tip(i <= OVERVIEW_FROZEN and ((tip_text or col.key) .. FROZEN_TIP) or tip_text)
         ImGui.PopID(ctx)
       end
     end
@@ -1775,9 +1860,49 @@ local function overview_table()
         ImGui.PopID(ctx)
       end
     end
+    scroll_x, scroll_max = ImGui.GetScrollX(ctx), ImGui.GetScrollMaxX(ctx)
+    v_scroll = ImGui.GetScrollMaxY(ctx) > 0
     ImGui.EndTable(ctx)
   end
+  ImGui.EndChild(ctx)
   ImGui.PopStyleColor(ctx)
+  overview.hscroll = scroll_max > 0
+
+  local fr = overview.frozen_right and math.floor(overview.frozen_right)
+  if not fr then return end
+  local strip_y = table_y + clip_h
+  local dl = ImGui.GetWindowDrawList(ctx)
+  -- The strip under the table: the fixed column's tint, and the bar under the scrolling columns.
+  ImGui.DrawList_AddRectFilled(dl, table_x, strip_y, fr, strip_y + sb, FROZEN.cell)
+  local x1 = table_x + avail_w - (v_scroll and sb or 0)
+  local w = x1 - fr
+  if scroll_max > 0 and w > 24 then
+    ImGui.DrawList_AddRectFilled(dl, fr, strip_y, x1, strip_y + sb, ImGui.GetStyleColor(ctx, ImGui.Col_ScrollbarBg))
+    local thumb = math.min(w, math.max(24, w * w / (w + scroll_max)))
+    local range = w - thumb
+    local thumb_x = fr + (scroll_x / scroll_max) * range
+    ImGui.SetCursorScreenPos(ctx, fr, strip_y)
+    ImGui.InvisibleButton(ctx, '##hscroll', w, sb)
+    local mouse_x = (ImGui.GetMousePos(ctx))
+    if ImGui.IsItemActivated(ctx) then
+      -- grabbed on the thumb: it follows from there; on the track: its middle goes to the mouse
+      overview.grab = (mouse_x >= thumb_x and mouse_x <= thumb_x + thumb) and (mouse_x - thumb_x) or thumb / 2
+    end
+    local active = ImGui.IsItemActive(ctx)
+    if active and range > 0 then
+      local frac = (mouse_x - (overview.grab or thumb / 2) - fr) / range
+      overview.set_scroll_x = math.max(0, math.min(1, frac)) * scroll_max
+    end
+    local col = ImGui.Col_ScrollbarGrab
+    if active then col = ImGui.Col_ScrollbarGrabActive elseif ImGui.IsItemHovered(ctx) then col = ImGui.Col_ScrollbarGrabHovered end
+    ImGui.DrawList_AddRectFilled(dl, thumb_x, strip_y + 1, thumb_x + thumb, strip_y + sb - 1, ImGui.GetStyleColor(ctx, col), 4)
+  end
+  -- A line after the fixed column over the whole table and the strip. The foreground list, cut
+  -- to the table: the table's own windows draw above this window's list.
+  local fg = ImGui.GetForegroundDrawList(ctx)
+  ImGui.DrawList_PushClipRect(fg, table_x, table_y, table_x + avail_w, strip_y + sb, true)
+  ImGui.DrawList_AddLine(fg, fr, table_y, fr, strip_y + sb, FROZEN.line, 2)
+  ImGui.DrawList_PopClipRect(fg)
 end
 
 local curator_deps = deps()
@@ -1909,14 +2034,17 @@ local function draw_overview_table(n)
   tip('Shows only rows containing this text in any column, including hidden columns. Ignores letter case. Clear the text to show all rows.')
   ImGui.SameLine(ctx)
   ImGui.TextDisabled(ctx, 'Right-click a cell to copy or paste a column.')
-  local parts = {}
+  ImGui.TextDisabled(ctx, n == 1 and '1 item:' or (n .. ' items:'))
+  tip('Every item of this project that has a card. Click a row to select its item in REAPER, double-click a cell to edit it; click a header to sort, '
+    .. 'Shift-click another to sort by it too; right-click a header to show or hide columns; drag a header to move its column.')
   for _, label in ipairs(TALLY_ORDER) do
     local c = overview.tally[label]
-    if c then parts[#parts + 1] = string.format('%d %s', c, label:lower()) end
+    if c then
+      ImGui.SameLine(ctx)
+      ImGui.TextColored(ctx, STATUS_COLORS[overview.tally_kind[label]] or COL_DIM, string.format('%d %s', c, label:lower()))
+      tip('File names in this colour: ' .. label:lower() .. '.')
+    end
   end
-  ImGui.TextDisabled(ctx, string.format('%s: %s', n == 1 and '1 item' or (n .. ' items'), table.concat(parts, ', ')))
-  tip('Every item of this project that has a card. Click a cell to edit it; click a header to sort, Shift-click another to sort by it too; '
-    .. 'right-click a header to show or hide columns; drag a header to move its column. Click a number to select that item.')
   local shared = 0
   for _, c in pairs(overview.counts) do if c > 1 then shared = shared + c end end
   if shared > 0 then
@@ -2107,7 +2235,9 @@ local PAGE_TIPS = {
 -- screen is never locked: it stays marked, with its note, as the view is shared by all items.
 -- attention[page] = why the page waits for the user (nil: it does not): its tab
 -- blinks while another page is on screen; hovering it shows the plain hover colour.
-local function draw_tabs(locked, attention)
+-- working: the gap (1 = Describe/Clarify, 2 = Clarify/Review) whose dots show the model
+-- at work, or nil.
+local function draw_tabs(locked, attention, working)
   attention = attention or {}
   local h = ImGui.GetFrameHeight(ctx)
   local line_h = ImGui.GetTextLineHeight(ctx)
@@ -2122,6 +2252,7 @@ local function draw_tabs(locked, attention)
       for k = -1, 1 do
         ImGui.DrawList_AddCircleFilled(dl, math.floor(dx + 24 + k * 8) + 0.5, math.floor(dy + h / 2) + 0.5, 1, ImGui.GetColor(ctx, ImGui.Col_TextDisabled))
       end
+      if working == i - 1 then icons.scan(dl, math.floor(dx + 24) + 0.5, math.floor(dy + h / 2) + 0.5, reaper.time_precise()) end
       ImGui.SameLine(ctx, 0, 0)
     end
     -- A phase: text only, no background. Current: accent and underlined; open:
@@ -2189,7 +2320,7 @@ local function draw_workspace()
   }, {
     Review = current.state == 'questions'
       and 'This item waits for you in Clarify: check the suggested category, answer the questions and finalize.' or nil,
-  })
+  }, icons.STATE_GAP[current.state])
   draw_copy_buttons()
   draw_render_button((r and r.renderable) and { current } or {}, r)
   draw_render_status()
@@ -2234,6 +2365,9 @@ local function status_line()
     own = true
     local elapsed = current.measure_start and (reaper.time_precise()-current.measure_start) or http.elapsed(current.job)
     parts[1] = string.format('%s... %d s', DOING[current.state] or 'Working', math.floor(elapsed or 0))
+    if current.retry then
+      parts[1] = parts[1] .. string.format(' (invalid answer, retry %d of %d)', current.retry, flow.MAX_RETRIES)
+    end
   elseif current and current.cancelled then
     parts[1] = 'Stopped'
   end

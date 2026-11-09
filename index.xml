@@ -183,7 +183,7 @@
   </category>
   <category name="MetadataAssistant">
     <reapack name="mtt_MetadataAssistant.lua" type="script" desc="Metadata Assistant">
-      <version name="0.22" author="Mattia Persico" time="2026-11-09T12:06:27Z">
+      <version name="0.24" author="Mattia Persico" time="2026-11-09T17:01:54Z">
           <source main="main" file="mtt_MetadataAssistant.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_MetadataAssistant.lua</source>
           <source file="mtt_metadataassistant_audio.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_audio.lua</source>
           <source file="mtt_metadataassistant_curator.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_curator.lua</source>

@@ -15,6 +15,7 @@
 local M = {}
 
 M.CANDIDATES = 15
+M.MAX_RETRIES = 2 -- extra requests when the model's answer is not valid JSON
 M.CARD_VERSION = 1
 
 -- deps: ucs, match, index, fields, filename, llm, json,
@@ -69,19 +70,22 @@ local function transport_error(s, res)
   return tostring(res.error or "request failed")
 end
 
--- Model answer -> checked object, or nil after setting the error state.
+-- Model answer -> checked object, or nil, nil, why when it cannot be used. bad is
+-- true when the answer is usable only in part (JSON recovered field by field, or the
+-- reply cut at the token limit): the caller may ask again.
 local function read_answer(s, res, expect_questions)
   local d = s.deps
-  if not res.ok then fail(s, transport_error(s, res)); return nil end
+  if not res.ok then return nil, nil, transport_error(s, res), false end
   local text, info = d.llm.response_text(d.json, res.body)
-  if not text then fail(s, info); return nil end
+  if not text then return nil, nil, info, true end
   local finish = info
   s.raw_text = text
   local obj, err = d.llm.extract_object(d.json, text)
-  if not obj then fail(s, err); return nil end
+  if not obj then return nil, nil, err, true end
   local clean, problems = d.llm.check_answer(d.fields, obj, s.candidates, expect_questions)
-  if finish == "length" then problems[#problems + 1] = "reply cut at the token limit" end
-  return clean, problems
+  local bad = obj._recovered == true
+  if finish == "length" then problems[#problems + 1] = "reply cut at the token limit"; bad = true end
+  return clean, problems, bad and "the answer was not valid JSON" or nil, bad
 end
 
 -- Text chats are streamed (stream = true), so the server sees the request's
@@ -114,6 +118,27 @@ function M.send(s, messages, on_result)
   post_chat(not s.settings.model_audio)
 end
 
+-- Sends a request and reads its answer as a JSON object. An answer that is not valid
+-- JSON (or is cut off) is asked for again, the same request, up to M.MAX_RETRIES
+-- times, without the user doing anything (s.retry says which retry is running); after
+-- that the answer is used as far as it can be read, else the card fails. Transport
+-- errors are not retried. on_answer(clean, problems) runs for a usable answer.
+local function ask(s, messages, expect_questions, on_answer, attempt)
+  attempt = attempt or 0
+  M.send(s, messages, function(res)
+    local clean, problems, why, bad = read_answer(s, res, expect_questions)
+    if bad and attempt < M.MAX_RETRIES then
+      s.retry = attempt + 1
+      s.dirty = true
+      ask(s, messages, expect_questions, on_answer, attempt + 1)
+      return
+    end
+    s.retry = nil
+    if not clean then fail(s, why); return end
+    on_answer(clean, problems)
+  end)
+end
+
 local function context(s)
   return {
     description = s.description,
@@ -134,9 +159,7 @@ local function start_draft(s, extra_terms)
     return
   end
   s.state = "drafting"
-  M.send(s, d.llm.draft_messages(d.fields, context(s), llm_opts(s.settings)), function(res)
-    local clean, problems = read_answer(s, res, true)
-    if not clean then return end
+  ask(s, d.llm.draft_messages(d.fields, context(s), llm_opts(s.settings)), true, function(clean, problems)
     if not clean.catid then
       fail(s, "The model chose a CatID outside the candidates (" .. table.concat(problems, "; ") .. ").")
       return
@@ -250,7 +273,7 @@ function M.analyze(s, description, session_values)
   s.error, s.draft, s.values, s.problems, s.raw_text, s.answers = nil, nil, nil, nil, nil, nil
   s.heard, s.listen_error, s.rendered, s.filename_edit = nil, nil, nil, nil
   s.measures_text, s.model_facts.Measured = nil, nil
-  s.cancelled = nil
+  s.cancelled, s.retry = nil, nil
   s.dirty = true
   if not s.url then fail(s, "Set a valid endpoint (http://...) in Settings."); return end
   if not s.settings.model or s.settings.model == "" then fail(s, "Set the model name in Settings."); return end
@@ -297,9 +320,8 @@ function M.finalize(s)
   s.state = "finalizing"
   s.error = nil
   s.cancelled = nil
-  M.send(s, d.llm.final_messages(d.fields, context(s), s.draft, s.answers, llm_opts(s.settings)), function(res)
-    local clean, problems = read_answer(s, res, false)
-    if not clean then return end
+  s.retry = nil
+  ask(s, d.llm.final_messages(d.fields, context(s), s.draft, s.answers, llm_opts(s.settings)), false, function(clean, problems)
     -- A final CatID outside the candidates keeps the draft's choice.
     if not clean.catid then
       clean.catid, clean.entry = s.draft.catid, s.draft.entry
@@ -312,6 +334,27 @@ function M.finalize(s)
     s.state = "done"
     s.dirty = true
   end)
+end
+
+-- The library identity (fields.SESSION_KEYS: Library, SourceID, CreatorID, Designer...)
+-- filled in the Library view after a card was finalized: the fields of a card that are
+-- still empty take the value from the settings as they are now (session: the table of
+-- settings.session_values). A value already in the card is never replaced. Returns
+-- true when something changed; the card then no longer matches a file rendered before.
+function M.refresh_session(s, session)
+  if not s.values or M.busy(s) then return false end
+  local fields = s.deps.fields
+  local before = {}
+  for _, k in ipairs(fields.SESSION_KEYS) do before[k] = s.values[k] end
+  fields.apply_session(s.values, session)
+  for _, k in ipairs(fields.SESSION_KEYS) do
+    if s.values[k] ~= before[k] then
+      s.rendered = nil
+      s.dirty = true
+      return true
+    end
+  end
+  return false
 end
 
 -- Fields that make up the file name: editing one of them drops a name typed by hand.
@@ -414,6 +457,7 @@ function M.cancel(s)
   s.gen = (s.gen or 0) + 1
   if s.job and s.deps.cancel then s.deps.cancel(s.job) end
   s.job = nil
+  s.retry = nil
   if s.clip_path then os.remove(s.clip_path); s.clip_path = nil end
   if s.state == "finalizing" then
     s.state = s.values and "done" or "questions"
