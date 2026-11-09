@@ -483,7 +483,7 @@ end
 -- Il prefisso di formato viene stratto solo se riconosciuto (le versioni "i" seguono
 -- la base); se non è riconosciuto il nome resta con il prefix. Il suffisso tra
 -- parentesi viene stratto sempre, quando presente ("Synth1" -> "Synth1").
--- Inserisce un FX: item selezionati (ai take), in loro assenza le tracce
+-- Inserisce un FX: item selezionati (alla take attiva), in loro assenza le tracce
 -- selezionate; con drop_take (rilascio su un item), un item non selezionato
 -- bersagliato conta da solo; con drop_track (rilascio su una traccia: track
 -- panel o arrange, senza item sotto il cursore) l'FX va nella catena di
@@ -514,12 +514,9 @@ function insert_fx(fx_ident, drop_take, drop_track)
 
     if #items > 0 then
         for _, item in ipairs(items) do
-            local n_takes = reaper.GetMediaItemNumTakes(item)
-            for j = 0, n_takes - 1 do
-                local take = reaper.GetMediaItemTake(item, j)
-                local idx = reaper.TakeFX_AddByName(take, fx_ident, -1)
-                if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
-            end
+            local take = reaper.GetActiveTake(item)
+            local idx = reaper.TakeFX_AddByName(take, fx_ident, -1)
+            if idx >= 0 then reaper.TakeFX_SetOpen(take, idx, true) end
         end
     else
         -- Nessuna selezione di item: inserisci nelle tracce selezionate
