@@ -181,4 +181,28 @@
       </version>
     </reapack>
   </category>
+  <category name="MetadataAssistant">
+    <reapack name="mtt_MetadataAssistant.lua" type="script" desc="Metadata Assistant">
+      <version name="0.20" author="Mattia Persico" time="2026-11-09T09:26:59Z">
+          <source main="main" file="mtt_MetadataAssistant.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_MetadataAssistant.lua</source>
+          <source file="mtt_metadataassistant_audio.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_audio.lua</source>
+          <source file="mtt_metadataassistant_curator.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_curator.lua</source>
+          <source file="mtt_metadataassistant_fields.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_fields.lua</source>
+          <source file="mtt_metadataassistant_filename.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_filename.lua</source>
+          <source file="mtt_metadataassistant_flow.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_flow.lua</source>
+          <source file="mtt_metadataassistant_http.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_http.lua</source>
+          <source file="mtt_metadataassistant_item.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_item.lua</source>
+          <source file="mtt_metadataassistant_llm.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_llm.lua</source>
+          <source file="mtt_metadataassistant_match.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_match.lua</source>
+          <source file="mtt_metadataassistant_outline.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_outline.lua</source>
+          <source file="mtt_metadataassistant_overview.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_overview.lua</source>
+          <source file="mtt_metadataassistant_render.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_render.lua</source>
+          <source file="mtt_metadataassistant_settings.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_settings.lua</source>
+          <source file="mtt_metadataassistant_store.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_store.lua</source>
+          <source file="mtt_metadataassistant_ucs_data.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_ucs_data.lua</source>
+          <source file="mtt_metadataassistant_wrap.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/mtt_metadataassistant_wrap.lua</source>
+          <source file="dkjson.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/MetadataAssistant/dkjson.lua</source>
+      </version>
+    </reapack>
+  </category>
 </index>
