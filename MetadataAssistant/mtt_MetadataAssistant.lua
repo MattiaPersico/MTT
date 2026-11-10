@@ -105,8 +105,12 @@
 -- 0.28: a paste renumbers an FXName that already ends in a take number ("Whir 02" -> "Whir 01",
 -- "Whir 02", ...) instead of adding a second number ("Whir 02 02"); a name already taken moves on to the
 -- next free number.
+-- 0.29: a project tagged with UCS Tagger (this script before 0.20) is imported the first time the script
+-- sees it: its cards and item tags move to the current names (store.import_ucstagger), the project's
+-- Library, SourceID and Show come from the cards when still empty, and the console says what moved.
+-- Saving the project keeps it.
 local major_version = 0
-local minor_version = 28
+local minor_version = 29
 
 local name = 'Metadata Assistant ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -2482,10 +2486,48 @@ local function status_line()
   return table.concat(parts, ', '), own
 end
 
+-- Settings saved in the project (Library, SourceID, Show).
+local PROJECT_KEYS = {}
+for _, def in ipairs(settings_mod.KEYS) do
+  if def.project then PROJECT_KEYS[#PROJECT_KEYS + 1] = def.key end
+end
+
+-- Cards saved by UCS Tagger move to the current names the first time a project is seen
+-- (store.import_ucstagger). Once per project tab and file: a project opened in a tab that
+-- already had another one counts as new. The console says what moved, once.
+local import_seen = {}
+local function import_ucstagger(project, file)
+  local id = tostring(project) .. '|' .. tostring(file or '')
+  if import_seen[id] then return end
+  import_seen[id] = true
+  local r = store.import_ucstagger(json, project, PROJECT_KEYS)
+  if not r or r.cards + r.kept + r.items + #r.filled == 0 then return end
+  if #r.filled > 0 and project == active_project then -- the block below reads them on a project change
+    settings_mod.load_project(settings)
+    settings_saved = settings_mod.encoded(settings)
+  end
+  local lines = { string.format('Metadata Assistant: %d card%s saved by UCS Tagger imported into this project, %d item%s linked.',
+    r.cards, r.cards == 1 and '' or 's', r.items, r.items == 1 and '' or 's') }
+  if r.kept > 0 then
+    lines[#lines + 1] = string.format('%d UCS Tagger card%s dropped: Metadata Assistant already had a newer card for %s.',
+      r.kept, r.kept == 1 and '' or 's', r.kept == 1 and 'that item' or 'those items')
+  end
+  if r.unlinked > 0 then
+    lines[#lines + 1] = string.format('%d imported card%s not linked to any item in the project (cut or deleted items).',
+      r.unlinked, r.unlinked == 1 and ' is' or 's are')
+  end
+  if #r.filled > 0 then
+    lines[#lines + 1] = 'This project\'s ' .. table.concat(r.filled, ', ') .. ' taken from the cards (Library view, books icon).'
+  end
+  lines[#lines + 1] = 'Save the project to keep them.'
+  reaper.ShowConsoleMsg(table.concat(lines, '\n') .. '\n')
+end
+
 local safe_loop -- loop wrapped in xpcall, defined after loop
 local function loop()
   own_windows = {}
-  local project = reaper.EnumProjects(-1)
+  local project, project_file = reaper.EnumProjects(-1)
+  import_ucstagger(project, project_file)
   if project ~= active_project then
     if chat.request then
       chat.request.gen = (chat.request.gen or 0) + 1
