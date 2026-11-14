@@ -9,7 +9,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 56
+local minor_version = 57
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -89,6 +89,7 @@ local osc_touch = false
 
 function init_osc(ip, port)
 
+        if udp then udp:close() end -- a project switch calls this again: the old socket would keep the port bound
         udp = socket.udp()
         udp:setsockname(ip,port) -- Set IP and PORT
         udp:settimeout(0.0001) -- Dont forget to set a low timeout! udp:receive block until have a message or timeout. values like (1) will make REAPER laggy.
@@ -414,6 +415,7 @@ local range_fader_value = 0.5
 local targetX, targetY = 0, 0 -- Coordinate target
 local lastUpdateTime = reaper.time_precise()
 local needToInitSmoothing = true
+local previousInterpolatedValues = {} -- per-group value smoothing state (mode 1)
 local CURRENT_DRAG_X = 0
 local CURRENT_DRAG_Y = 0
 
@@ -517,6 +519,8 @@ function loadFromFile(filename)
     local osc_message_y_string = ""
     local osc_message_touch_string = ""
 
+    local onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString
+
     local local_settings, err = io.open(filename, "r")
     
     if local_settings then
@@ -557,12 +561,10 @@ function loadFromFile(filename)
 
         local dataFunction = load("return " .. dataString)
 
-        if not dataFunction then
-            local_settings:close()
-            writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
-            loadFromFile(filename)
-        else
-            data = dataFunction()
+        -- an unreadable save loads as an empty snapshot list
+        if dataFunction then
+            local ok, result = pcall(dataFunction)
+            if ok and type(result) == 'table' then data = result end
         end
 
         local_settings:close()
@@ -617,7 +619,7 @@ function loadFromFile(filename)
             onSpacebarPressedString = onSpacebarPressed:match("^ON_SPACEBAR_PRESSED = (.+)$")
             if onSpacebarPressedString then
                 onSpacebarPressedString = load("return " .. onSpacebarPressedString)()
-                if onSpacebarPressedString == '' then onSpacebarPressedString = '40026' end
+                if onSpacebarPressedString == '' then onSpacebarPressedString = '40044' end
             end
         end
 
@@ -632,7 +634,7 @@ function loadFromFile(filename)
             onCmdSPressedString = onCmdSPressed:match("^ON_CMD_S_PRESSED = (.+)$") 
             if onCmdSPressedString then
                 onCmdSPressedString = load("return " .. onCmdSPressedString)()
-                if onCmdSPressedString == '' then onCmdSPressedString = '40044' end
+                if onCmdSPressedString == '' then onCmdSPressedString = '40026' end
             end
         end
 
@@ -687,7 +689,7 @@ function loadFromFile(filename)
     if not device_port_int then device_port_int = 0 end
     if not osc_message_x_string then osc_message_x_string = 'Snapspace_x' end
     if not osc_message_y_string then osc_message_y_string = 'Snapspace_y' end
-    if not osc_message_touch_string then osc_message_touch_string = 'Snapspace_touch' end
+    if not osc_message_touch_string then osc_message_touch_string = 'Snapspace_Touch' end
 
     return data, ignoreParamsPreSaveString, ignoreParamsPostSaveString, ignorePreSaveFxsString, ignorePostSaveFxsString, ignorePreSaveTracksString, ignorePostSaveTracksString, linkToControllerBool, interpolationModeInt, onSpacebarPressedString, onShiftSpacebarPressedString, onCmdSPressedString, device_ip_string, device_port_int, osc_message_x_string, osc_message_y_string, osc_message_touch_string
 end
@@ -778,8 +780,11 @@ function gui_loop()
     main_window_x, main_window_y = reaper.ImGui_GetWindowPos(ctx)
     local tmp_main_window_w, tmp_main_window_h = reaper.ImGui_GetWindowSize(ctx)
 
-    if tmp_main_window_w ~= main_window_width then needToUpdateVoronoi = true end
-    if tmp_main_window_h ~= main_window_height then needToUpdateVoronoi = true end
+    if tmp_main_window_w ~= main_window_width or tmp_main_window_h ~= main_window_height then
+        main_window_width, main_window_height = tmp_main_window_w, tmp_main_window_h
+        needToUpdateVoronoi = true
+        refreshPointsPositions() -- points_list holds pixel positions
+    end
 
     main_window_w = tmp_main_window_w
     main_window_h = tmp_main_window_h
@@ -827,42 +832,42 @@ function gui_loop()
         end
       end
 
-      reaper.ImGui_PopFont(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_PopStyleVar(ctx)
-      reaper.ImGui_PopStyleVar(ctx)
-      reaper.ImGui_PopStyleVar(ctx)  
-      reaper.ImGui_PopStyleVar(ctx)
-      reaper.ImGui_PopStyleVar(ctx)
-      reaper.ImGui_PopStyleVar(ctx)
-  
     end
+  
+    reaper.ImGui_PopFont(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleVar(ctx)  
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleVar(ctx)
+    reaper.ImGui_PopStyleVar(ctx)
 
     if mw_open and PROJECT_NAME ~= '' and quit == false then
         reaper.defer(loop)
@@ -914,9 +919,11 @@ function loop()
             initMS()
         end
 
-        if reaper.IsProjectDirty(0) == 1 then need_to_save = true end
+        local project_dirty = reaper.IsProjectDirty(0)
 
-        if reaper.IsProjectDirty(0) == 0 and need_to_save == true then
+        if project_dirty == 1 then need_to_save = true end
+
+        if project_dirty == 0 and need_to_save == true then
             writeSnapshotsToFile(PROJECT_PATH .. '/snapspace_save')
             need_to_save = false
         end
@@ -1099,14 +1106,15 @@ end
 
 function drawSnapshots()
 
-    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
     local window_x, window_y = reaper.ImGui_GetWindowPos(ctx)
     local mouse_x, mouse_y = reaper.ImGui_GetMousePos(ctx)
+    local anyBallHovered = false
 
     for s, ball in ipairs(balls) do
         
         local ball_screen_pos_x = window_x + ball.pos_x * ACTION_WINDOW_WIDTH
         local ball_screen_pos_y = window_y + ball.pos_y * ACTION_WINDOW_HEIGHT
+        local mouseOverBall = ((mouse_x - ball_screen_pos_x) ^ 2 + (mouse_y - ball_screen_pos_y) ^ 2) <= ball.radius ^ 2
 
         --reaper.ImGui_DrawList_AddCircle(draw_list, ball_screen_pos_x, ball_screen_pos_y, 6, ball.color, 4)
         drawCircle(ball_screen_pos_x, ball_screen_pos_y, 6, ball.color, 4)
@@ -1129,15 +1137,13 @@ function drawSnapshots()
         end
 
         
-        if (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) or DRAGGING_BALL) and isInterpolating == false then 
+        if (mouseOverBall or DRAGGING_BALL) and isInterpolating == false then
             reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_Hand())
-            ENABLE_WINDOW_RESIZE = false
-        else
-            ENABLE_WINDOW_RESIZE = true
+            anyBallHovered = true
         end
         
         -- DRAGGING
-        if DRAGGING_BALL == ball or (isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating) then
+        if DRAGGING_BALL == ball or (mouseOverBall and not isInterpolating) then
             
             local mouse_x_rel = (mouse_x - window_x) / ACTION_WINDOW_WIDTH
             local mouse_y_rel = (mouse_y - window_y) / ACTION_WINDOW_HEIGHT
@@ -1201,7 +1207,7 @@ function drawSnapshots()
         if reaper.ImGui_IsMouseReleased(ctx, 0) and not isInterpolating and not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())then
         
                 if ball.dragging == false and ball.clicked == true then
-                    if isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) then
+                    if mouseOverBall then
                         LAST_TOUCHED_BUTTON_INDEX = s
         
                         for t = 1, #snapshot_list[s].track_list do
@@ -1248,7 +1254,7 @@ function drawSnapshots()
         end
 
         -- SHIFT-CLICK
-        if reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) and isMouseOverBall(ball_screen_pos_x, ball_screen_pos_y, ball.radius) and not isInterpolating then
+        if mouseOverBall and not isInterpolating and reaper.ImGui_IsMouseClicked(ctx, 0) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift()) then
 --[[             if LAST_TOUCHED_BUTTON_INDEX == s then 
                 LAST_TOUCHED_BUTTON_INDEX = #snapshot_list - 1 
                 reaper.ShowConsoleMsg('qui\n')
@@ -1256,12 +1262,12 @@ function drawSnapshots()
 
             if LAST_TOUCHED_BUTTON_INDEX <= 0 then LAST_TOUCHED_BUTTON_INDEX = nil end ]]
             
-            if LAST_TOUCHED_BUTTON_INDEX >= s then
+            -- nil when nothing is selected yet (e.g. right after loading)
+            if LAST_TOUCHED_BUTTON_INDEX and LAST_TOUCHED_BUTTON_INDEX >= s then
                 LAST_TOUCHED_BUTTON_INDEX = LAST_TOUCHED_BUTTON_INDEX - 1
 
                 if LAST_TOUCHED_BUTTON_INDEX <= 0 then
                     LAST_TOUCHED_BUTTON_INDEX = nil
-                    ENABLE_WINDOW_RESIZE = true
                 end
             end 
 
@@ -1269,11 +1275,13 @@ function drawSnapshots()
             table.remove(balls, s)
             updateSnapshotIndexList()
             needToUpdateVoronoi = true
+            anyBallHovered = false
             break
         end
     end
 
-
+    -- any hovered or dragged ball locks window move/resize (used to be decided by the last ball only)
+    ENABLE_WINDOW_RESIZE = not anyBallHovered
     
 end
 
@@ -1286,7 +1294,7 @@ function linearDistanceWeighting(points, x, y)
         local dy = y - point.y
         local distance = math.sqrt(dx^2 + dy^2)
         local maxDistance = snapshot_list[point.snapIndex].range * math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2)
-        if distance <= maxDistance then -- Considera solo i punti entro maxDistance
+        if maxDistance > 0 and distance <= maxDistance then -- Considera solo i punti entro maxDistance
             local weight = (maxDistance - distance) / maxDistance
             numerator = numerator + (point.value * weight)
             denominator = denominator + weight
@@ -1397,7 +1405,7 @@ function updateSmoothingPosition()
     if smoothing > 0 then smooth_multiplier = smoothing else smooth_multiplier = 0.3 end
 
     
-    local smoothingFactor = deltaTime * smooth_multiplier -- Regola questo valore per modificare la "velocità" di smoothing
+    local smoothingFactor = math.min(1, deltaTime * smooth_multiplier) -- above 1 the position overshoots the target
 
     CURRENT_DRAG_X = CURRENT_DRAG_X + (targetX - CURRENT_DRAG_X) * smoothingFactor
     CURRENT_DRAG_Y = CURRENT_DRAG_Y + (targetY - CURRENT_DRAG_Y) * smoothingFactor
@@ -1465,13 +1473,13 @@ function onOSCUpdateNNI()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-                previousInterpolatedValues = {}
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+            previousInterpolatedValues = {}
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1531,9 +1539,9 @@ function onOSCUpdateNNI()
             
 
 
-            for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-            end
+            -- every entry of a group targets the same track/FX/parameter
+            local parameter = group[1]
+            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
         end
 
         for i = 1, #snapshot_list do
@@ -1562,12 +1570,12 @@ function onOSCUpdateIDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1596,9 +1604,9 @@ function onOSCUpdateIDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
          end
 
@@ -1626,12 +1634,12 @@ function onOSCUpdateLDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1660,9 +1668,9 @@ function onOSCUpdateLDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
          end
 
@@ -1722,13 +1730,13 @@ function onDragLeftMouseNNI()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-                previousInterpolatedValues = {}
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+            previousInterpolatedValues = {}
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1788,9 +1796,9 @@ function onDragLeftMouseNNI()
             
 
 
-            for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-            end
+            -- every entry of a group targets the same track/FX/parameter
+            local parameter = group[1]
+            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
         end
 
         for i = 1, #snapshot_list do
@@ -1819,12 +1827,12 @@ function onDragLeftMouseIDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1853,9 +1861,9 @@ function onDragLeftMouseIDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
          end
 
@@ -1883,12 +1891,12 @@ function onDragLeftMouseLDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -1917,9 +1925,9 @@ function onDragLeftMouseLDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
          end
 
@@ -1995,9 +2003,11 @@ function getControllerUpdateIDW()
                 reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
-            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
-            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+            normalizedX = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+            if reaper.GetTrackAutomationMode(CONTROL_TRACK) ~= 1 then
+                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+            end
         end
 
         -- Converti le coordinate normalizzate in posizione reale se necessario
@@ -2005,12 +2015,12 @@ function getControllerUpdateIDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -2038,9 +2048,9 @@ function getControllerUpdateIDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
         end
 
@@ -2086,9 +2096,11 @@ function getControllerUpdateLDW()
                 reaper.TrackFX_SetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1, normalizedY)
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
-            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
-            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
-            reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+            normalizedX = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+            if reaper.GetTrackAutomationMode(CONTROL_TRACK) ~= 1 then
+                reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
+            end
         end
 
         -- Converti le coordinate normalizzate in posizione reale se necessario
@@ -2096,12 +2108,12 @@ function getControllerUpdateLDW()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -2129,9 +2141,9 @@ function getControllerUpdateLDW()
 
             -- Applica questo valore interpolato a tutti i parametri nel gruppo
             if interpolatedValue then
-                for _, parameter in ipairs(group) do
-                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
-                end
+                -- every entry of a group targets the same track/FX/parameter
+                local parameter = group[1]
+                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
             end
         end
 
@@ -2151,7 +2163,7 @@ end
 
 function getControllerUpdateNNI() 
 
-    if not DRAGGING_BALL then
+    if not DRAGGING_BALL and #snapshot_list > 1 and ivoronoi and snapIndexRelatedToPoly then
         isInterpolating = true 
         --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
@@ -2180,8 +2192,8 @@ function getControllerUpdateNNI()
         else
             --local bilbo =  reaper.GetMediaTrackInfo_Value(CONTROL_TRACK, 'P_PROJECT')
             
-            normalizedX, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
-            normalizedY, min, max = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
+            normalizedX = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 0)
+            normalizedY = reaper.TrackFX_GetParam(CONTROL_TRACK, CONTROL_FX_INDEX, 1)
         end
 
         -- Converti le coordinate normalizzate in posizione reale se necessario
@@ -2189,13 +2201,13 @@ function getControllerUpdateNNI()
         DRAG_X = normalizedX * ACTION_WINDOW_WIDTH
         DRAG_Y = normalizedY * ACTION_WINDOW_HEIGHT
 
-        if smoothing_fader_value ~= 0 then
-            if needToInitSmoothing == true then
-                initSmoothing(DRAG_X, DRAG_Y)
-                updateSnapshotIndexList()
-                previousInterpolatedValues = {}
-            end
+        if needToInitSmoothing == true then
+            initSmoothing(DRAG_X, DRAG_Y)
+            updateSnapshotIndexList()
+            previousInterpolatedValues = {}
+        end
 
+        if smoothing_fader_value ~= 0 then
             updateSmoothingTarget(DRAG_X, DRAG_Y)
             updateSmoothingPosition()
         else
@@ -2253,9 +2265,9 @@ function getControllerUpdateNNI()
             local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
             previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
 
-            for _, parameter in ipairs(group) do
-                reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-            end
+            -- every entry of a group targets the same track/FX/parameter
+            local parameter = group[1]
+            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
         end
 
         for i = 1, #snapshot_list do
@@ -2343,11 +2355,21 @@ end
 
 function getControllerUpdate()
 
+    -- the control track can be deleted while playing: look it up again before using the pointer
+    if reaper.ValidatePtr2(0, CONTROL_TRACK, 'MediaTrack*') == false then
+        CONTROL_TRACK, CONTROL_FX_INDEX = getControlTrack()
+        setControlTrackEnvelopeChunks(CONTROL_TRACK, CONTROL_FX_INDEX)
+        reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 0, 1)
+        reaper.GetFXEnvelope(CONTROL_TRACK, CONTROL_FX_INDEX, 1, 1)
+    end
+
+    local automation_mode = reaper.GetTrackAutomationMode(CONTROL_TRACK)
+
     if reaper.ImGui_IsMouseDragging(ctx, 0) then
-        if reaper.GetTrackAutomationMode(CONTROL_TRACK) == 1 then
+        if automation_mode == 1 then
             reaper.SetTrackAutomationMode(CONTROL_TRACK, 4)
         end
-    else
+    elseif automation_mode ~= 1 then
         reaper.SetTrackAutomationMode(CONTROL_TRACK, 1)
     end
 
@@ -2360,6 +2382,19 @@ function getControllerUpdate()
     end
 end
 
+-- Recomputes the pixel position of every interpolation point from its snapshot (window resize).
+function refreshPointsPositions()
+    for _, pointsForGroup in ipairs(points_list) do
+        for _, point in ipairs(pointsForGroup) do
+            local snap = snapshot_list[point.snapIndex]
+            if snap then
+                point.x = snap.x * ACTION_WINDOW_WIDTH
+                point.y = snap.y * ACTION_WINDOW_HEIGHT
+            end
+        end
+    end
+end
+
 function updateSnapshotIndexList()
 
     if #snapshot_list <= 1 then
@@ -2368,42 +2403,132 @@ function updateSnapshotIndexList()
         return
     end
 
-    local parameters_to_be_updated = {}
+    -- project lookups, resolved once per call (they used to run for every parameter of every snapshot pair)
+    local track_by_guid = {}
+    for i = 0, reaper.CountTracks(0) - 1 do
+        local tr = reaper.GetTrack(0, i)
+        local guid = reaper.GetTrackGUID(tr)
+        if track_by_guid[guid] == nil then track_by_guid[guid] = tr end
+    end
+
+    local fx_index_by_track = {} -- track guid -> { fx guid -> index in the chain }
+    local function fxIndexInProject(track_guid, track, fx_guid)
+        local map = fx_index_by_track[track_guid]
+        if not map then
+            map = {}
+            for i = 0, reaper.TrackFX_GetCount(track) - 1 do
+                local guid = reaper.TrackFX_GetFXGUID(track, i)
+                if guid and map[guid] == nil then map[guid] = i end
+            end
+            fx_index_by_track[track_guid] = map
+        end
+        return map[fx_guid]
+    end
+
+    -- post-snap filters, tested once per track / FX / parameter
+    local track_allowed = {} -- track guid -> boolean
+    local function isTrackAllowed(track_guid, track)
+        local allowed = track_allowed[track_guid]
+        if allowed == nil then
+            local retval, track_name = reaper.GetTrackName(track)
+            allowed = not containsAnyFormOf(track_name, IGNORE_TRACKS_POST_SAVE_STRING)
+            track_allowed[track_guid] = allowed
+        end
+        return allowed
+    end
+
+    local fx_allowed = {} -- fx guid -> boolean
+    local function isFxAllowed(fx_guid, track, fx)
+        local allowed = fx_allowed[fx_guid]
+        if allowed == nil then
+            local retval, fx_name = reaper.TrackFX_GetFXName(track, fx)
+            allowed = not containsAnyFormOf(fx_name, IGNORE_FXs_POST_SAVE_STRING)
+            fx_allowed[fx_guid] = allowed
+        end
+        return allowed
+    end
+
+    local param_allowed = {} -- fx guid -> { parameter index -> boolean }
+    local function isParamAllowed(fx_guid, track, fx, param_index)
+        local map = param_allowed[fx_guid]
+        if not map then
+            map = {}
+            param_allowed[fx_guid] = map
+        end
+        local allowed = map[param_index]
+        if allowed == nil then
+            local retval, param_name = reaper.TrackFX_GetParamName(track, fx, param_index)
+            allowed = not containsAnyFormOf(param_name, IGNORE_PARAMS_POST_SAVE_STRING)
+            map[param_index] = allowed
+        end
+        return allowed
+    end
+
+    -- where each track / FX sits inside each snapshot (first match, like the linear searches did)
+    local snap_tracks = {} -- snapshot index -> { track guid -> index in track_list }
+    local snap_fxs = {}    -- snapshot index -> { index in track_list -> { fx guid -> index in fx_list } }
+    for s = 1, #snapshot_list do
+        local tracks, fxs = {}, {}
+        for t, track_snap in ipairs(snapshot_list[s].track_list) do
+            if tracks[track_snap.guid] == nil then tracks[track_snap.guid] = t end
+            local map = {}
+            for f, fx_snap in ipairs(track_snap.fx_list) do
+                if map[fx_snap.guid] == nil then map[fx_snap.guid] = f end
+            end
+            fxs[t] = map
+        end
+        snap_tracks[s], snap_fxs[s] = tracks, fxs
+    end
+
+    grouped_parameters = {} -- Questo conterrà le liste finali raggruppate
+    local group_lookup = {} -- fx guid -> { parameter index -> group }
 
     for s1 = 1, #snapshot_list do
+        local track_list_1 = snapshot_list[s1].track_list
+
         for s2 = 1, #snapshot_list do
+            if s2 ~= s1 then
+                local track_list_2 = snapshot_list[s2].track_list
             
-            for t = 1, #snapshot_list[s1].track_list do
-                local retval, track_list_index = checkIfSameTrackExists(snapshot_list[s1].track_list[t], snapshot_list[s2].track_list)
+                for t = 1, #track_list_1 do
+                    local track_snap = track_list_1[t]
+                    local track_list_index = snap_tracks[s2][track_snap.guid]
+                    local track = track_list_index and track_by_guid[track_snap.guid]
                 
-                if retval then
-                    local track = getTrackByGUID(0, snapshot_list[s1].track_list[t].guid)
+                    if track and isTrackAllowed(track_snap.guid, track) then
+                        local fx_list_2 = track_list_2[track_list_index].fx_list
 
-                    for f = 1, #snapshot_list[s1].track_list[t].fx_list do
-                        local retval, fx_list_index = checkIfSameFxExists(snapshot_list[s1].track_list[t].fx_list[f], snapshot_list[s2].track_list[track_list_index].fx_list)
+                        for f = 1, #track_snap.fx_list do
+                            local fx_snap = track_snap.fx_list[f]
+                            local fx_list_index = snap_fxs[s2][track_list_index][fx_snap.guid]
+                            local fx = fx_list_index and fxIndexInProject(track_snap.guid, track, fx_snap.guid)
                             
-                        if retval then
-                            local retval, fx_parameter_indexes = checkIfParametersHaveDifferentValues(snapshot_list[s1].track_list[t].fx_list[f].param_list, snapshot_list[s2].track_list[track_list_index].fx_list[fx_list_index].param_list)
+                            if fx and isFxAllowed(fx_snap.guid, track, fx) then
+                                local param_list_1 = fx_snap.param_list
+                                local param_list_2 = fx_list_2[fx_list_index].param_list
                             
-                            if retval then
-                                for p = 1, #fx_parameter_indexes do
+                                for p = 1, #param_list_1 do
+                                    if param_list_1[p] ~= param_list_2[p] then
+                                        local param_index = fx_snap.param_index_list[p]
 
-                                    if track then
-                                        local retval, track_name = reaper.GetTrackName(track)
-                                        local fx_index_retval, fx = getFxIndexByGUID(track, snapshot_list[s1].track_list[t].fx_list[f].guid)
+                                        -- the filter is tested on the parameter's own name (it used to read the
+                                        -- name at the list position, which is another parameter once some are ignored)
+                                        if param_index and isParamAllowed(fx_snap.guid, track, fx, param_index) then
+                                            local new_parameter = parameter:new(track, fx, param_index, param_list_1[p], s1)
 
-                                        if fx_index_retval then
+                                            local groups = group_lookup[fx_snap.guid]
+                                            if not groups then
+                                                groups = {}
+                                                group_lookup[fx_snap.guid] = groups
+                                            end
 
-                                            local retval, fx_name = reaper.TrackFX_GetFXName(track, fx)
-                                            local retval, param_name = reaper.TrackFX_GetParamName(track, fx, fx_parameter_indexes[p] - 1)
-
-                                            if  not containsAnyFormOf(track_name, IGNORE_TRACKS_POST_SAVE_STRING) and
-                                                not containsAnyFormOf(fx_name, IGNORE_FXs_POST_SAVE_STRING) and
-                                                not containsAnyFormOf(param_name, IGNORE_PARAMS_POST_SAVE_STRING) then
- 
-                                                local parameter_index = fx_parameter_indexes[p]
-                                                local new_parameter = parameter:new(track, fx, snapshot_list[s1].track_list[t].fx_list[f].param_index_list[parameter_index], snapshot_list[s1].track_list[t].fx_list[f].param_list[parameter_index], s1)
-                                                table.insert(parameters_to_be_updated, new_parameter)
+                                            local group = groups[param_index]
+                                            if group then
+                                                group[#group + 1] = new_parameter
+                                            else
+                                                group = {new_parameter}
+                                                groups[param_index] = group
+                                                grouped_parameters[#grouped_parameters + 1] = group
                                             end
                                         end
                                     end
@@ -2413,27 +2538,6 @@ function updateSnapshotIndexList()
                     end
                 end
             end
-        end
-    end
-
-
-    grouped_parameters = {} -- Questo conterrà le liste finali raggruppate
-
-    for _, parameter in ipairs(parameters_to_be_updated) do
-        local foundGroup = false
-
-        for _, group in ipairs(grouped_parameters) do
-            if  group[1].track == parameter.track and
-                group[1].fx_index == parameter.fx_index and
-                group[1].param_list_index == parameter.param_list_index then
-                table.insert(group, parameter)
-                foundGroup = true
-                break
-            end
-        end
-
-        if not foundGroup then
-            table.insert(grouped_parameters, {parameter})
         end
     end
 
@@ -2487,30 +2591,32 @@ function saveSelected()
             balls[s].color = normalizeAlphaInRange(snapshot_list[s].color,1,1)
         end
 
+        local ignore_params = IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_'
+
         for i = 0, reaper.CountTracks(0) - 1 do
             local current_track = reaper.GetTrack(0,i)
             local new_track_snapshot = track_snapshot:new(reaper.GetTrackGUID(current_track))
             table.insert(snapshot_list[s].track_list, new_track_snapshot)
-            --snapshot_list[s].track_list[#snapshot_list[s].track_list + 1] = new_track_snapshot
+
+            -- track and FX names are fetched and filtered once, not once per parameter
+            local retval, t_name = reaper.GetTrackName(current_track)
+            local track_ignored = containsAnyFormOf(t_name, IGNORE_TRACKS_PRE_SAVE_STRING)
 
             for j = 0, reaper.TrackFX_GetCount(current_track) - 1 do
-                local current_fx_index_retval, current_fx_index = getFxIndexByGUID(current_track, reaper.TrackFX_GetFXGUID(current_track, j))
                 local new_fx_snapshot = fx_snapshot:new(reaper.TrackFX_GetFXGUID(current_track, j))
-                table.insert(snapshot_list[s].track_list[i+1].fx_list, new_fx_snapshot)
+                table.insert(new_track_snapshot.fx_list, new_fx_snapshot)
 
-                for z = 0, reaper.TrackFX_GetNumParams(current_track, current_fx_index) - 1 do
-                    local retval, p_name = reaper.TrackFX_GetParamName(current_track, current_fx_index, z)
-                    local retval, t_name = reaper.GetTrackName(current_track)
-                    local retval, fx_name = reaper.TrackFX_GetFXName(current_track, current_fx_index)
+                local retval, fx_name = reaper.TrackFX_GetFXName(current_track, j)
 
-                    if  not containsAnyFormOf(p_name, IGNORE_PARAMS_PRE_SAVE_STRING .. ', mtt_mc_') and
-                        not containsAnyFormOf(t_name, IGNORE_TRACKS_PRE_SAVE_STRING) and
-                        not containsAnyFormOf(fx_name, IGNORE_FXs_PRE_SAVE_STRING) then
+                if not track_ignored and not containsAnyFormOf(fx_name, IGNORE_FXs_PRE_SAVE_STRING) then
+                    for z = 0, reaper.TrackFX_GetNumParams(current_track, j) - 1 do
+                        local retval, p_name = reaper.TrackFX_GetParamName(current_track, j, z)
                     
-                        local retval, minval, maxval
-                        retval, minval, maxval = reaper.TrackFX_GetParam(current_track, current_fx_index, z)
-                        table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_list, retval)
-                        table.insert(snapshot_list[s].track_list[i+1].fx_list[j+1].param_index_list, z)
+                        if not containsAnyFormOf(p_name, ignore_params) then
+                            local param_value = reaper.TrackFX_GetParam(current_track, j, z)
+                            table.insert(new_fx_snapshot.param_list, param_value)
+                            table.insert(new_fx_snapshot.param_index_list, z)
+                        end
                     end
                 end
             end
@@ -2588,7 +2694,9 @@ function containsAnyFormOf(s, ref_string)
             end
         else
             -- Altrimenti, cerca la parola chiave in qualsiasi punto della stringa compactS
-            if string.find(compactS, word:lower()) then
+            -- (plain text, spaces removed like in compactS; an empty word matches nothing)
+            local compactWord = word:gsub("%s+", ""):lower()
+            if compactWord ~= "" and string.find(compactS, compactWord, 1, true) then
                 return true
             end
         end
@@ -2615,6 +2723,8 @@ function drawIconButton(name, image, width, height, color)
 
     return buttonPressed
 end
+
+local saveShortcutWasDown = false
 
 function mainWindow()
 
@@ -2959,6 +3069,7 @@ function mainWindow()
             if PLAY_STATE == true then
                 PLAY_STATE = false
                 isInterpolating = false
+                needToInitSmoothing = true
             end
         end
         
@@ -2974,9 +3085,12 @@ function mainWindow()
     end
     
 
-    if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S()) then
+    -- once per key press: the action used to run on every frame while the keys were held
+    local saveShortcutDown = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_S())
+    if saveShortcutDown and not saveShortcutWasDown then
         reaper.Main_OnCommand(reaper.NamedCommandLookup(ON_CMD_S_PRESSED), 0)
     end
+    saveShortcutWasDown = saveShortcutDown
 
 
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) and reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_W()) then
@@ -2991,13 +3105,19 @@ function mainWindow()
 
     local hoveringSnapshot = false
 
+    -- read once per frame instead of once per snapshot
+    local area_x, area_y = reaper.ImGui_GetWindowPos(ctx)
+    local area_w, area_h = reaper.ImGui_GetWindowWidth(ctx), reaper.ImGui_GetWindowHeight(ctx)
+    local mouse_wheel = reaper.ImGui_GetMouseWheel(ctx)
+    local ctrl_down = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl())
+
     for i = 1, #snapshot_list do
-        local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * reaper.ImGui_GetWindowWidth(ctx), snapshot_list[i].y * reaper.ImGui_GetWindowHeight(ctx))
+        local snap_x, snap_y = area_x + snapshot_list[i].x * area_w, area_y + snapshot_list[i].y * area_h
         
-        if checkIfPointsAreaOverlapped(mouse_x, mouse_y, snap_x, snap_y, 6) and not reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftCtrl()) then
-            if reaper.ImGui_GetMouseWheel(ctx) > 0 and snapshot_list[i].range < 1 then
+        if checkIfPointsAreaOverlapped(mouse_x, mouse_y, snap_x, snap_y, 6) and not ctrl_down then
+            if mouse_wheel > 0 and snapshot_list[i].range < 1 then
                 snapshot_list[i].range = snapshot_list[i].range + 0.02 
-            elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and snapshot_list[i].range >= 0 then
+            elseif mouse_wheel < 0 and snapshot_list[i].range >= 0 then
                 snapshot_list[i].range = snapshot_list[i].range - 0.02
                 if snapshot_list[i].range < 0.01 then snapshot_list[i].range = 0 end
             end
@@ -3009,9 +3129,9 @@ function mainWindow()
     --reaper.ShowConsoleMsg(tostring(reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftShift())))
 
     if reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Key_LeftSuper()) and not hoveringSnapshot then
-        if reaper.ImGui_GetMouseWheel(ctx) > 0 and smoothing_fader_value < 1 then
+        if mouse_wheel > 0 and smoothing_fader_value < 1 then
             smoothing_fader_value = smoothing_fader_value + 0.02
-        elseif reaper.ImGui_GetMouseWheel(ctx) < 0 and smoothing_fader_value >= 0 then
+        elseif mouse_wheel < 0 and smoothing_fader_value >= 0 then
             smoothing_fader_value = smoothing_fader_value - 0.02
             if smoothing_fader_value < 0.01 then smoothing_fader_value = 0 end
         end
@@ -3099,53 +3219,72 @@ function whichPointIsInThisPolygon(puntiPoligono, listaPunti) -- :)
     return nil -- Nessun punto trovato all'interno del poligono
 end
 
+local VORONOI_LINE_COLOR = 0x000000FF -- opaque black (RGBA)
+local voronoiScreenPolys = nil        -- one vertex array per polygon, in screen coordinates
+local voronoiScreenX, voronoiScreenY  -- window position those arrays were built for
+local voronoiBuiltW, voronoiBuiltH    -- size of the action area the diagram was computed for
+
 function drawVoronoi()
     
     if #snapshot_list > 1 then
 
-        if needToUpdateVoronoi then
+        local window_x, window_y = reaper.ImGui_GetWindowPos(ctx)
+        local window_w, window_h = reaper.ImGui_GetWindowWidth(ctx), reaper.ImGui_GetWindowHeight(ctx)
+
+        if needToUpdateVoronoi or window_w ~= voronoiBuiltW or window_h ~= voronoiBuiltH then
 
             snapPointsForVoronoi = {}
 
             snapIndexRelatedToPoly = {}
 
             for i = 1, #snapshot_list do
-                table.insert(snapPointsForVoronoi, {x = snapshot_list[i].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[i].y * reaper.ImGui_GetWindowHeight(ctx)})
+                table.insert(snapPointsForVoronoi, {x = snapshot_list[i].x * window_w, y = snapshot_list[i].y * window_h})
             end
 
-            ivoronoi = voronoilib:new(#snapshot_list,snapPointsForVoronoi,1,0,0,reaper.ImGui_GetWindowWidth(ctx),reaper.ImGui_GetWindowHeight(ctx))
+            ivoronoi = voronoilib:new(#snapshot_list,snapPointsForVoronoi,1,0,0,window_w,window_h)
             
+            -- which snapshot owns each polygon: once per diagram
+            for v = 1, #ivoronoi.polygons do
+                snapIndexRelatedToPoly[v] = whichPointIsInThisPolygon(ivoronoi.polygons[v].points, snapPointsForVoronoi) or v
+            end
+
+            voronoiScreenPolys = nil
+            voronoiBuiltW, voronoiBuiltH = window_w, window_h
+            needToUpdateVoronoi = false
         end
+
+        -- screen-space vertex arrays: rebuilt when the diagram or the window position changes
+        if not voronoiScreenPolys or voronoiScreenX ~= window_x or voronoiScreenY ~= window_y then
+            voronoiScreenPolys = {}
+
+            for v = 1, #ivoronoi.polygons do
+                local points = ivoronoi.polygons[v].points
+                local polygon_verts = {}
+
+                for i = 1, #points, 2 do
+                    polygon_verts[i] = window_x + points[i]
+                    polygon_verts[i + 1] = window_y + points[i + 1]
+                end
+
+                voronoiScreenPolys[v] = reaper.new_array(polygon_verts, #polygon_verts)
+            end
+
+            voronoiScreenX, voronoiScreenY = window_x, window_y
+        end
+
+        local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
 
         for v = 1, #ivoronoi.polygons do
-            local verts_line = {}
-
-            for g = 1, #ivoronoi.polygons[v].points do
-                table.insert(verts_line, ivoronoi.polygons[v].points[g])
+            local snap = snapshot_list[snapIndexRelatedToPoly[v]]
+            if snap then
+                reaper.ImGui_DrawList_AddConvexPolyFilled(draw_list, voronoiScreenPolys[v], snap.color)
             end
-
-            local polygon_verts = {}
-
-            for i = 1, #verts_line, 2 do
-                local x, y = windowToScreenCoordinates(verts_line[i], verts_line[i+1])
-                table.insert(polygon_verts, x)
-                table.insert(polygon_verts, y)
-            end
-
-            local snapIndex = whichPointIsInThisPolygon(verts_line,snapPointsForVoronoi) or v
-           
-            reaper.ImGui_DrawList_AddConvexPolyFilled(reaper.ImGui_GetWindowDrawList(ctx), reaper.new_array(polygon_verts, #polygon_verts), snapshot_list[snapIndex].color)
-        
-            for index,segment in pairs(ivoronoi.segments) do
-                local x1, y1 = windowToScreenCoordinates(segment.startPoint.x,segment.startPoint.y)
-                local x2, y2 = windowToScreenCoordinates(segment.endPoint.x,segment.endPoint.y)
-                drawLine(x1,y1,x2,y2, reaper.ImGui_ColorConvertDouble4ToU32(0.0, 0.0, 0.0, 1), 1)
-            end
-
-            table.insert(snapIndexRelatedToPoly, snapIndex)
         end
 
-        needToUpdateVoronoi = false
+        -- borders once, above every polygon (they were redrawn after each polygon)
+        for index,segment in pairs(ivoronoi.segments) do
+            reaper.ImGui_DrawList_AddLine(draw_list, window_x + segment.startPoint.x, window_y + segment.startPoint.y, window_x + segment.endPoint.x, window_y + segment.endPoint.y, VORONOI_LINE_COLOR, 1)
+        end
     else
         if #snapshot_list == 1 then
 
@@ -3310,7 +3449,7 @@ function preferencesWindow()
 
     -- IGNORE TRACKS PRE-SAVE
     reaper.ImGui_Text(ctx, 'Ignore Tracks')
-    reaper.ImGui_PushFont(ctx, new_line_fon, new_line_font_size)
+    reaper.ImGui_PushFont(ctx, new_line_font, new_line_font_size)
     reaper.ImGui_NewLine(ctx)
     reaper.ImGui_PopFont(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, PREF_WINDOW_WIDTH - 85)
@@ -3542,7 +3681,7 @@ function getControlTrack()
         if retval then
             if track_name == 'mtt_snapspace_controller' then
                 local n_fx = reaper.TrackFX_GetCount(current_track)
-                for f = 0, n_fx do
+                for f = 0, n_fx - 1 do
                     
                     local retval, fx_name = reaper.TrackFX_GetFXName(current_track, f)
                     
