@@ -2,8 +2,10 @@
 
 <!-- Rewritten whole with write_file at the end of the work, never edited in place. -->
 
-updated: 2026-09-19
+updated: 2026-11-13
 
-- Done: created the three note files (they were missing)
-- Not done:
-- Waiting on:
+- Done: optimisation and bug pass, version 0.20.
+  - Speed: the audio of an item is read once and kept (re-read only when the item, the Definition window, the sample rate or the project state changes, or on "Set Reference Item"); Gain, Compress, Attack and Release reshape the kept levels; Scale, Limits and Offset no longer re-analyse; the per-sample loop no longer computes the gain per sample; the plot curve is cached and reduced to pixel columns when it has more points than pixels; reaper.ini is polled once a second instead of twice per frame; EnvelopeVis reads the chunk once and writes it only when a flag changes; a slider release no longer triggers a second analysis; the five envelope writers share one function.
+  - Fixes: impose no longer runs action 40693 on the selected items at every update (the `ValidatePtr2(..., "TakeEnvelope*")` test could never pass); a MIDI or empty item as reference no longer raises an error; Scale pivots on the real mean level also when it is above 0 dB; the pitch range from reaper.ini is kept as a number; a drop on an envelope whose lane index cannot be read, and a drop target whose envelope was deleted, no longer raise an error; a first envelope point at exactly 0 dB is no longer skipped; `End`/`EndChild` are called only when `Begin`/`BeginChild` returned true; a message is shown when ReaImGui or SWS is missing.
+- Not done: nothing that was asked. Seen and left as they are: with auto-update on a track envelope every slider frame adds an "Envelope Dropped" undo point, while a take target is written outside any undo block; `IsEnvelopeVisible`, `replace_eguid`, `generate_guid` (global) and `drawIconButton` are never called; `CreateFont` receives a number (18, 17, 2) where ReaImGui 0.10 expects font flags, and on Windows a file path where it expects a family name.
+- Waiting on: a run in REAPER — the change was only checked outside REAPER, against a mocked API (same envelope points as 0.19 over set reference, every slider, drops on item / track / envelope lane, impose, release-only mode). Not committed.
