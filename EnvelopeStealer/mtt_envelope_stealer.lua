@@ -12,7 +12,7 @@
 
  APPUNTI ]]
 local major_version = 0
-local minor_version = 20
+local minor_version = 21
 
 local name = "Envelope Stealer " .. tostring(major_version) .. "." .. tostring(minor_version)
 
@@ -1597,7 +1597,71 @@ end
 function EnsureItemVolumeEnv(chunk, take_index)
     take_index = take_index or 0
 
-    -- prepara blocco VOLENV standard (già attivo e visibile, come quello di traccia)
+    local lines = {}
+    for line in (chunk .. "\n"):gmatch("(.-)\n") do
+        lines[#lines + 1] = line
+    end
+    if not lines[1]:match("^%s*<ITEM%s*$") then
+        return chunk
+    end
+
+    -- The first take is inline; subsequent TAKE lines delimit takes only at ITEM depth.
+    local depth, current_take = 1, 0
+    local env_start, env_end, insert_at, item_end
+    local empty_take = false
+    for idx = 2, #lines do
+        local line = lines[idx]
+        if item_end then
+            if not line:match("^%s*$") then
+                return chunk
+            end
+        elseif line:match("^%s*>%s*$") then
+            depth = depth - 1
+            if depth == 1 and env_start and not env_end then
+                env_end = idx
+            elseif depth == 0 then
+                item_end = idx
+                if current_take == take_index then
+                    insert_at = idx
+                end
+            end
+        elseif line:match("^%s*<%S") then
+            if depth == 1 and current_take == take_index and line:match("^%s*<VOLENV%s*$") then
+                env_start = env_start or idx
+            end
+            depth = depth + 1
+        elseif depth == 1 then
+            local flags = line:match("^%s*TAKE%s+(.-)%s*$")
+            if flags or line:match("^%s*TAKE%s*$") then
+                if current_take == take_index then
+                    insert_at = idx
+                end
+                current_take = current_take + 1
+                if current_take == take_index then
+                    empty_take = flags ~= nil and flags:match("^%s*(%S+)") == "NULL"
+                end
+            end
+        end
+    end
+    if not item_end or not insert_at or empty_take then
+        return chunk
+    end
+
+    if env_start and env_end then
+        local env_depth = 1
+        for idx = env_start + 1, env_end - 1 do
+            local line = lines[idx]
+            if line:match("^%s*<%S") then
+                env_depth = env_depth + 1
+            elseif line:match("^%s*>%s*$") then
+                env_depth = env_depth - 1
+            elseif env_depth == 1 then
+                lines[idx] = line:gsub("^(%s*ACT%s+)[+-]?%d+", function(prefix) return prefix .. "1" end)
+            end
+        end
+        return table.concat(lines, "\n")
+    end
+
     local volenv =
         [[
 <VOLENV
@@ -1612,118 +1676,10 @@ VOLTYPE 1
 PT 0 1 0
 >]]
 
-    -- Nel chunk di un item le righe della PRIMA take (compresi i suoi
-    -- envelope: il VOLENV è direttamente sotto <ITEM) seguono le righe
-    -- dell'item, mentre ogni take successiva è un blocco <TAKE>.
-    -- I blocchi sono indentati: i match tollerano gli spazi a inizio riga.
-    local lines = {}
-    for line in chunk:gmatch("[^\r\n]*") do
-        lines[#lines + 1] = line
+    if lines[insert_at - 1] and lines[insert_at - 1]:sub(-1) == "\r" then
+        volenv = volenv:gsub("\n", "\r\n") .. "\r"
     end
-
-    -- sezione con i campi della take richiesta + punto di inserimento
-    local check_start = nil
-    local check_end = nil
-    local insert_at = nil
-
-    if take_index == 0 then
-        -- prima take: dall'inizio al primo blocco <TAKE
-        -- (o fino alla chiusura di <ITEM se l'item ha una sola take)
-        check_start = 1
-        local first_take = nil
-        for idx = 2, #lines do
-            if lines[idx]:match("^%s*<TAKE%s*$") then
-                first_take = idx
-                break
-            end
-        end
-        if first_take then
-            check_end = first_take - 1
-            insert_at = first_take -- prima del primo blocco <TAKE
-        else
-            insert_at = #lines
-            while insert_at >= 1 and lines[insert_at] == "" do
-                insert_at = insert_at - 1
-            end
-            check_end = insert_at - 1 -- riga prima della > che chiude <ITEM
-        end
-    else
-        -- take_index = 1 è il primo blocco <TAKE, e così via
-        local depth = 0
-        local take_idx = 0
-        local target_depth = nil
-        for idx, line in ipairs(lines) do
-            if line:match("^%s*<[A-Z]") then
-                if line:match("^%s*<TAKE%s*$") and target_depth == nil then
-                    take_idx = take_idx + 1
-                    if take_idx == take_index then
-                        check_start = idx
-                        target_depth = depth + 1
-                    end
-                end
-                depth = depth + 1
-            elseif line:match("^%s*>%s*$") then
-                depth = depth - 1
-                if target_depth ~= nil and depth == target_depth - 1 then
-                    check_end = idx
-                    insert_at = idx -- prima della > che chiude il blocco <TAKE
-                    break
-                end
-            end
-        end
-    end
-
-    if not check_start or not check_end or check_end < check_start then
-        return chunk -- take non trovata: chunk invariato
-    end
-
-    -- la take ha già un VOLENV? se è disattivo, lo attivo (ACT 1)
-    local env_start = nil
-    local env_depth = 0
-    local env_end = nil
-    for idx = check_start, check_end do
-        if env_start == nil then
-            if lines[idx]:match("^%s*<VOLENV%s*$") then
-                env_start = idx
-                env_depth = 1
-            end
-        else
-            if lines[idx]:match("^%s*<[A-Z]") then
-                env_depth = env_depth + 1
-            elseif lines[idx]:match("^%s*>%s*$") then
-                env_depth = env_depth - 1
-                if env_depth == 0 then
-                    env_end = idx
-                    break
-                end
-            end
-        end
-    end
-
-    if env_start and env_end then
-        local changed = false
-        for idx = env_start + 1, env_end - 1 do
-            local new_line = lines[idx]:gsub("^(%s*)ACT %d", "%1ACT 1")
-            if new_line ~= lines[idx] then
-                lines[idx] = new_line
-                changed = true
-            end
-        end
-        if changed then
-            return table.concat(lines, "\n")
-        end
-        return chunk -- già attivo
-    end
-
-    -- nessun VOLENV: lo inserisco nel punto di inserimento
-    local volenv_lines = {}
-    for line in volenv:gmatch("[^\r\n]*") do
-        volenv_lines[#volenv_lines + 1] = line
-    end
-    for i = #volenv_lines, 1, -1 do
-        table.insert(lines, insert_at, volenv_lines[i])
-    end
-
+    table.insert(lines, insert_at, volenv)
     return table.concat(lines, "\n")
 end
 
