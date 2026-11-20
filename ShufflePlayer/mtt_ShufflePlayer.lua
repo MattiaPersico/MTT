@@ -45,8 +45,9 @@ local RENDER_ACT = 42230 -- File: Render project, using most recent settings, au
 
 local state = {
   rate_ms    = 500,
-  file_count = 0,
+  files      = {},    -- ultimo render completo, anche dopo Stop
   gmem_ok    = false,
+  previous_gmem = '',
   msg        = '',
 }
 
@@ -57,6 +58,7 @@ local rs = {
   files   = {},       -- percorsi assoluti dei file renderizzati
   pending = nil,      -- basename atteso dal render corrente
   wait    = 0,        -- contatore di timeout
+  serial  = 0,
 }
 
 local saved_render = nil  -- impostazioni di render salvate
@@ -78,19 +80,13 @@ local function list_files(dir)
   return out
 end
 
--- Cancella SOLO i file temporanei creati da questo script (mai wildcard generiche)
-local function delete_temp_files()
-  local files = list_files(TMP_DIR)   -- prima raccolgo, poi cancello
-  for _, f in ipairs(files) do
-    if f:sub(1, #PREFIX) == PREFIX then
-      os.remove(TMP_DIR .. SEP .. f)
-    end
-  end
+local function delete_render_files(paths)
+  for _, path in ipairs(paths) do os.remove(path) end
 end
 
 local function find_rendered(basename)
   for _, f in ipairs(list_files(TMP_DIR)) do
-    if f:sub(1, #basename) == basename then
+    if f:sub(1, #basename + 1) == basename .. '.' then
       return TMP_DIR .. SEP .. f
     end
   end
@@ -122,15 +118,28 @@ end
 -- Cleanup completo
 --------------------------------------------------------------------------------
 
-local function full_cleanup()
+local function stop_playback()
+  if not state.gmem_ok then return end
   remove_jsfx()
-  if state.gmem_ok then
-    r.gmem_attach('')       -- stringa vuota = detach
-    state.gmem_ok = false
+  r.gmem_attach(state.previous_gmem)
+  state.gmem_ok = false
+end
+
+local function discard_pending_render()
+  if rs.pending then
+    local path = find_rendered(rs.pending)
+    if path then rs.files[#rs.files + 1] = path end
+    rs.pending = nil
   end
-  delete_temp_files()
-  os.remove(JSFX_PATH)      -- cancello solo IL MIO file, non tutta la cartella
-  state.file_count = 0
+  delete_render_files(rs.files)
+  rs.files = {}
+end
+
+local function full_cleanup()
+  stop_playback()
+  discard_pending_render()
+  delete_render_files(state.files)
+  os.remove(JSFX_PATH)
 end
 
 --------------------------------------------------------------------------------
@@ -325,7 +334,7 @@ local function install_jsfx(src)
   end
   if idx < 0 then return false, 'Impossibile inserire il JSFX sulla master' end
 
-  r.gmem_attach(GMEM_NAME)
+  state.previous_gmem = r.gmem_attach(GMEM_NAME) or ''
   state.gmem_ok = true
   r.gmem_write(0, state.rate_ms)
   return true
@@ -335,11 +344,20 @@ end
 -- Render asincrono
 --------------------------------------------------------------------------------
 
+local function play_last_render()
+  local ok, err = install_jsfx(generate_jsfx(state.files))
+  state.msg = ok and '' or (err or 'Errore installazione JSFX')
+end
+
 local function render_current()
   local it = rs.items[rs.idx]
   if not it then return end
   r.GetSet_LoopTimeRange2(0, true, false, it.position, it.position + it.length, false)
-  local name = ('%s%03d'):format(PREFIX, rs.idx)
+  local name
+  repeat
+    rs.serial = rs.serial + 1
+    name = ('%s%d_%d'):format(PREFIX, os.time(), rs.serial)
+  until not find_rendered(name)
   r.GetSetProjectInfo_String(0, 'RENDER_PATTERN', name, true)
   rs.pending = name
   rs.wait    = 0
@@ -349,7 +367,8 @@ end
 local function start_render(items)
   save_render_settings()
   r.RecursiveCreateDirectory(TMP_DIR, 0)
-  full_cleanup()
+  stop_playback()
+  discard_pending_render()
 
   r.GetSetProjectInfo(0, 'RENDER_BOUNDSFLAG', 2, true)  -- 2 = time selection
   r.GetSetProjectInfo(0, 'RENDER_SETTINGS',   0, true)  -- 0 = master mix
@@ -372,13 +391,10 @@ local function finish_render()
     state.msg = 'Nessun file renderizzato.'
     return
   end
-  local ok, err = install_jsfx(generate_jsfx(rs.files))
-  if ok then
-    state.file_count = #rs.files
-    state.msg = ''
-  else
-    state.msg = err or 'Errore installazione JSFX'
-  end
+  delete_render_files(state.files)
+  state.files = rs.files
+  rs.files = {}
+  play_last_render()
 end
 
 local function check_render()
@@ -421,66 +437,48 @@ end)
 
 local ctx = ImGui.CreateContext('SFX Preview')
 
--- pulizia di eventuali residui di una sessione precedente
-full_cleanup()
 
 --------------------------------------------------------------------------------
--- Stile (ripreso da mtt_Shelf.lua: push prima di Begin, pop dopo End)
+-- Stile della finestra principale di FmodSync, limitato ai controlli presenti.
 --------------------------------------------------------------------------------
+
+local palette = {
+  { ImGui.Col_WindowBg, 0x191A1BFF }, { ImGui.Col_TitleBg, 0x202223FF },
+  { ImGui.Col_TitleBgActive, 0x292B2CFF }, { ImGui.Col_Text, 0xECEEEBFF },
+  { ImGui.Col_TextDisabled, 0xA6AAA8FF },
+  { ImGui.Col_FrameBg, 0x2D3031FF }, { ImGui.Col_FrameBgHovered, 0x373B3CFF },
+  { ImGui.Col_FrameBgActive, 0x3C4142FF }, { ImGui.Col_Button, 0x303435FF },
+  { ImGui.Col_ButtonHovered, 0x414948FF }, { ImGui.Col_ButtonActive, 0x4D5956FF },
+  { ImGui.Col_SliderGrab, 0xE89B3CFF }, { ImGui.Col_SliderGrabActive, 0xF0B462FF },
+  { ImGui.Col_ResizeGrip, 0xE89B3C33 }, { ImGui.Col_ResizeGripHovered, 0xE89B3C99 },
+  { ImGui.Col_ResizeGripActive, 0xE89B3CFF },
+}
+local style_vars = {
+  { ImGui.StyleVar_WindowRounding, 0 }, { ImGui.StyleVar_FrameRounding, 0 },
+  { ImGui.StyleVar_GrabRounding, 0 },
+  { ImGui.StyleVar_WindowPadding, 16, 14 },
+  { ImGui.StyleVar_ItemSpacing, 8, 7 },
+  { ImGui.StyleVar_FramePadding, 9, 5 },
+}
+
+local FONT_SIZE = 15
+local ok_font, font = pcall(function()
+  local f = ImGui.CreateFont("sans-serif")
+  ImGui.Attach(ctx, f)
+  return f
+end)
+if not ok_font then font = nil end
 
 local function apply_style()
-  local col = r.ImGui_ColorConvertDouble4ToU32
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_WindowBg(), col(0.1, 0.1, 0.1, 1))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), col(0.45, 0.45, 0.45, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_BorderShadow(), col(0, 0, 0, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(), col(0.1, 0.1, 0.1, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), col(0.1, 0.1, 0.1, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), col(0.18, 0.18, 0.18, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_MenuBarBg(), col(0.1, 0.1, 0.1, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), col(0.18, 0.18, 0.18, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), col(0.3, 0.3, 0.3, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), col(0.18, 0.18, 0.18, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ResizeGrip(), col(0.1, 0.1, 0.1, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ResizeGripActive(), col(0.3, 0.3, 0.3, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ResizeGripHovered(), col(0.18, 0.18, 0.18, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBg(), col(0.14, 0.14, 0.14, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgActive(), col(0.18, 0.18, 0.18, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_TitleBgCollapsed(), col(0.18, 0.18, 0.18, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), col(0.2, 0.2, 0.2, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), col(0.4, 0.4, 0.4, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), col(0.25, 0.25, 0.25, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_SliderGrab(), col(0.5, 0.5, 0.5, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_SliderGrabActive(), col(0.13, 0.13, 0.13, 2))
-
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_CheckMark(), col(0.8, 0.8, 0.8, 2))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Separator(), col(0.35, 0.35, 0.35, 2))
-
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ScrollbarSize(), 10)
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarBg(), col(0.09, 0.09, 0.09, 1))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrab(), col(0.3, 0.3, 0.3, 1))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabActive(), col(0.2, 0.2, 0.2, 1))
-  r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ScrollbarGrabHovered(), col(0.5, 0.5, 0.5, 1))
-
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowRounding(), 7)
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ScrollbarRounding(), 7)
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_GrabRounding(), 7)
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_ChildRounding(), 7)
-  r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(), 5)
+  if font then ImGui.PushFont(ctx, font, FONT_SIZE) end
+  for _, pair in ipairs(palette) do ImGui.PushStyleColor(ctx, pair[1], pair[2]) end
+  for _, v in ipairs(style_vars) do ImGui.PushStyleVar(ctx, table.unpack(v)) end
 end
 
 local function pop_style()
-  for _ = 1, 6 do
-    r.ImGui_PopStyleVar(ctx)
-  end
-  for _ = 1, 27 do
-    r.ImGui_PopStyleColor(ctx)
-  end
+  ImGui.PopStyleVar(ctx, #style_vars)
+  ImGui.PopStyleColor(ctx, #palette)
+  if font then ImGui.PopFont(ctx) end
 end
 
 local LOG_MIN, LOG_MAX = math.log(30), math.log(4000)
@@ -499,8 +497,9 @@ local function draw()
   local status
   if rs.phase == 'rendering' then
     status = ('Render %d/%d...'):format(rs.idx, #rs.items)
-  elseif state.file_count > 0 then
-    status = ('%d file caricati - in riproduzione'):format(state.file_count)
+  elseif #state.files > 0 then
+    status = ('%d file renderizzati - %s'):format(#state.files,
+      state.gmem_ok and 'in riproduzione' or 'fermo')
   else
     status = 'Seleziona degli item e premi Render & Start'
   end
@@ -524,13 +523,13 @@ local function draw()
   ImGui.EndDisabled(ctx)
 
   ImGui.SameLine(ctx)
-  ImGui.BeginDisabled(ctx, state.file_count == 0 and rs.phase == 'idle')
-  if ImGui.Button(ctx, 'Stop & Clear', 150, 0) then
-    rs.phase = 'idle'
-    rs.pending = nil
-    restore_render_settings()
-    full_cleanup()
-  end
+  ImGui.BeginDisabled(ctx, rs.phase == 'rendering' or #state.files == 0 or state.gmem_ok)
+  if ImGui.Button(ctx, 'Play', 70, 0) then play_last_render() end
+  ImGui.EndDisabled(ctx)
+
+  ImGui.SameLine(ctx)
+  ImGui.BeginDisabled(ctx, not state.gmem_ok)
+  if ImGui.Button(ctx, 'Stop', 70, 0) then stop_playback() end
   ImGui.EndDisabled(ctx)
 end
 
