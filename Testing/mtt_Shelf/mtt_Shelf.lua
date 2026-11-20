@@ -638,7 +638,7 @@ function apply_style()
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ScrollbarRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(), 7)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ChildRounding(), 7)
-    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 3)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 0)
 end
 
 function pop_style()
@@ -1173,7 +1173,9 @@ function draw_left_scrollbar()
         local scroll_y = reaper.ImGui_GetScrollY(ctx)
         grab_h = math.max(24, track_h * sb_avail_h / (sb_avail_h + max_y))
         grab_h = math.min(grab_h, track_h - 2 * LEFT_SB_GRAB_MARGIN_Y)
-        grab_top_y = track_top + (scroll_y / max_y) * (track_h - grab_h)
+        -- Il grab viaggia dentro la track senza mai toccarne il bordo.
+        grab_top_y = track_top + LEFT_SB_GRAB_MARGIN_Y
+            + (scroll_y / max_y) * (track_h - 2 * LEFT_SB_GRAB_MARGIN_Y - grab_h)
     else
         grab_h = track_h - 2 * LEFT_SB_GRAB_MARGIN_Y
         grab_top_y = track_top + LEFT_SB_GRAB_MARGIN_Y
@@ -1202,7 +1204,8 @@ function draw_left_scrollbar()
     -- Il punto p della track corrisponde a (p - sb_top_y) / (track_h - grab_h)
     -- * max_y, clampato.
     local function scroll_at(rel_y)
-        local s = (rel_y - track_top) / (track_h - grab_h) * max_y
+        local s = (rel_y - track_top - LEFT_SB_GRAB_MARGIN_Y)
+            / (track_h - 2 * LEFT_SB_GRAB_MARGIN_Y - grab_h) * max_y
         return math.min(math.max(s, 0), max_y)
     end
 
