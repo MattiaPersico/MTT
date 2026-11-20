@@ -1,7 +1,8 @@
 # mtt_MetadataAssistant — where we left off
 
-updated: 2026-11-10
+updated: 2026-11-19
 - Done:
+  - No rounded corners: every Rounding style var is 0 (window, child, popup, scrollbar, grab, frame), and the icon-button hover square and the Overview scroll thumb are drawn square. Asked by the user to match mtt_Shelf and FmodSync Mini. Not checked in REAPER.
   - 0.29: projects tagged with UCS Tagger (this script's name up to 0.19) open with their cards. The rename in 0.20 moved the cards from ProjExtState section "mtt_UCSTagger" to "mtt_MetadataAssistant" and the item tag to P_EXT:mtt_metadataassistant, so an older project showed nothing. Asked by the user for a project tagged with UCS Tagger ("altrimenti devo rifare tutto"). The first time the script sees a project (per project tab and file), store.import_ucstagger copies every old card to the new section under the same key (a card already there under that key is newer and wins), gives each item its tag (the old tag as it was, else the item's GUID when a card has that key), empties the old cards and tags, and fills the project's Library, SourceID and Show from the value most imported cards carry when they are still empty here. The project is marked modified; the console lists what moved once (cards imported, items linked, cards dropped, cards with no item, settings filled). The old tag's spelling is not recorded anywhere: P_EXT:mtt_ucstagger and P_EXT:mtt_UCSTagger are both read, and the GUID match covers items never cut and pasted. Run on a fake REAPER in pure Lua (cut-pasted item, untouched copy, card already redone, card with no item, non-card value, second run a no-op), not in REAPER.
 - Not done:
   - The user's UCS Tagger project (PM_REC_Cyborgs_Mattia, on the ProjectMemory_MTT drive) was not opened from here: access to its folder was refused, so the import was not run on it.

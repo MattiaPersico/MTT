@@ -110,7 +110,7 @@
 -- Library, SourceID and Show come from the cards when still empty, and the console says what moved.
 -- Saving the project keeps it.
 local major_version = 0
-local minor_version = 29
+local minor_version = 30
 
 local name = 'Metadata Assistant ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -201,11 +201,11 @@ local palette = {
 }
 
 local ITEM_SPACING_X = 8 -- also lines up the buttons at the right end of a row
--- Rounded window, popups, children, scrollbars and controls.
+-- No rounded corners anywhere: rectangular windows, popups, children, scrollbars and controls.
 local style_vars = {
-  { ImGui.StyleVar_WindowRounding, 12 }, { ImGui.StyleVar_ChildRounding, 8 },
-  { ImGui.StyleVar_PopupRounding, 8 }, { ImGui.StyleVar_ScrollbarRounding, 12 },
-  { ImGui.StyleVar_GrabRounding, 5 }, { ImGui.StyleVar_FrameRounding, 5 },
+  { ImGui.StyleVar_WindowRounding, 0 }, { ImGui.StyleVar_ChildRounding, 0 },
+  { ImGui.StyleVar_PopupRounding, 0 }, { ImGui.StyleVar_ScrollbarRounding, 0 },
+  { ImGui.StyleVar_GrabRounding, 0 }, { ImGui.StyleVar_FrameRounding, 0 },
   { ImGui.StyleVar_WindowPadding, 16, 14 }, { ImGui.StyleVar_ItemSpacing, ITEM_SPACING_X, 7 },
   { ImGui.StyleVar_FramePadding, 9, 5 },
 }
@@ -424,7 +424,7 @@ function icons.button(id, active, paint)
   local under = ImGui.GetColor(ctx, ImGui.Col_WindowBg)
   if hovered then
     under = ImGui.GetColor(ctx, held and ImGui.Col_ButtonActive or ImGui.Col_ButtonHovered)
-    ImGui.DrawList_AddRectFilled(dl, x, y, x + h, y + h, under, 5)
+    ImGui.DrawList_AddRectFilled(dl, x, y, x + h, y + h, under)
   end
   paint(dl, math.floor(x), math.floor(y), h, active and COL_ACCENT or ImGui.GetColor(ctx, ImGui.Col_Text), under)
   return clicked
@@ -1990,7 +1990,7 @@ local function overview_table()
     end
     local col = ImGui.Col_ScrollbarGrab
     if active then col = ImGui.Col_ScrollbarGrabActive elseif ImGui.IsItemHovered(ctx) then col = ImGui.Col_ScrollbarGrabHovered end
-    ImGui.DrawList_AddRectFilled(dl, thumb_x, strip_y + 1, thumb_x + thumb, strip_y + sb - 1, ImGui.GetStyleColor(ctx, col), 4)
+    ImGui.DrawList_AddRectFilled(dl, thumb_x, strip_y + 1, thumb_x + thumb, strip_y + sb - 1, ImGui.GetStyleColor(ctx, col))
   end
   -- A line after the fixed column over the whole table and the strip. The foreground list, cut
   -- to the table: the table's own windows draw above this window's list.
