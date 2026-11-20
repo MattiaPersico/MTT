@@ -1,188 +1,229 @@
 local major_version = 1
-local minor_version = 8
+local minor_version = 9
 
-if reaper.CountSelectedMediaItems(0) < 2 then return end
-
--- CONFIG ------------------------------------------------------------
 local TREAT_CROSSFADED_AS_SINGLE = true
 local INCLUDE_TOUCHING = false
----------------------------------------------------------------------
+local EPS = 1e-9
+local UNDO_LABEL = "Align items: start to target peak"
 
-reaper.PreventUIRefresh(1)
-reaper.Undo_BeginBlock()
+local DUPLICATE = 41295 -- Item: Duplicate items
+local RIPPLE_OFF = 40309 -- Set ripple editing off
+local RIPPLE_TRACK = 40310 -- Set ripple editing per-track
+local RIPPLE_ALL = 40311 -- Set ripple editing all tracks
+local GROUPING = 1156 -- Toggle item grouping and track media/razor edit grouping
+local AUTO_CROSSFADE = 40041 -- Auto-crossfade media items when editing
+local TRIM_BEHIND = 41117 -- Trim content behind media items when editing
 
-local track_items = {}
-local highest_track_num = math.huge
-local highest_track = nil
-for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+local selected_count = reaper.CountSelectedMediaItems(0)
+if selected_count < 2 then return end
+
+local selected, track_items = {}, {}
+local highest_track, highest_track_num = nil, math.huge
+for i = 0, selected_count - 1 do
     local item = reaper.GetSelectedMediaItem(0, i)
     local track = reaper.GetMediaItem_Track(item)
     local track_num = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
     local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    selected[#selected + 1] = item
     if not track_items[track] then track_items[track] = {} end
-    table.insert(track_items[track], {item=item, pos=pos})
-    if track_num < highest_track_num then highest_track_num = track_num highest_track = track end
+    local items = track_items[track]
+    items[#items + 1] = { item = item, pos = pos, len = len }
+    if track_num < highest_track_num then
+        highest_track, highest_track_num = track, track_num
+    end
 end
-for track, items in pairs(track_items) do table.sort(items, function(a,b) return a.pos < b.pos end) end
 
-local function build_groups(sorted_items)
-    if not TREAT_CROSSFADED_AS_SINGLE then
-        local single = {}
-        for _, it in ipairs(sorted_items) do
-            local pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
-            local len = reaper.GetMediaItemInfo_Value(it.item, "D_LENGTH")
-            single[#single+1] = { items={it}, start_pos=pos, end_pos=pos+len }
-        end
-        return single
-    end
-    local groups = {}
-    local current
-    for _, it in ipairs(sorted_items) do
-        local pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
-        local len = reaper.GetMediaItemInfo_Value(it.item, "D_LENGTH")
-        local item_end = pos + len
-        if not current then
-            current = { items={it}, start_pos=pos, end_pos=item_end }
+local function build_groups(items)
+    table.sort(items, function(a, b) return a.pos < b.pos end)
+    local groups, current = {}, nil
+    for _, it in ipairs(items) do
+        local finish = it.pos + it.len
+        local joins = TREAT_CROSSFADED_AS_SINGLE and current and
+            (it.pos < current.end_pos or (INCLUDE_TOUCHING and it.pos == current.end_pos))
+        if not joins then
+            current = { items = {}, start_pos = it.pos, end_pos = finish }
+            groups[#groups + 1] = current
         else
-            local overlap = INCLUDE_TOUCHING and (pos <= current.end_pos) or (pos < current.end_pos)
-            if overlap then
-                current.items[#current.items+1] = it
-                if item_end > current.end_pos then current.end_pos = item_end end
-            else
-                groups[#groups+1] = current
-                current = { items={it}, start_pos=pos, end_pos=item_end }
-            end
+            current.end_pos = math.max(current.end_pos, finish)
         end
+        -- Immutable geometry: the seed may already have moved when it is reused.
+        it.relative_pos = it.pos - current.start_pos
+        current.items[#current.items + 1] = it
     end
-    if current then groups[#groups+1] = current end
     return groups
 end
 
-local function compute_group_peaks(groups)
-    for _, g in ipairs(groups) do
-        local best_amp = -math.huge
-        local best_time = g.start_pos
-        for _, it in ipairs(g.items) do
-            local amp, peak_pos = reaper.NF_GetMediaItemMaxPeakAndMaxPeakPos(it.item)
-            if amp and peak_pos and amp > best_amp then
-                best_amp = amp
-                local item_pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
-                best_time = item_pos + peak_pos
-            end
-        end
-        g.peak_time = best_time
-        g.peak_amp = best_amp
-        g.rel_peak_offset = best_time - g.start_pos
-    end
+local ref_items = track_items[highest_track]
+track_items[highest_track] = nil
+if not next(track_items) then return end
+if not reaper.APIExists("NF_GetMediaItemMaxPeakAndMaxPeakPos") then
+    reaper.MB("SWS is required for peak alignment.", UNDO_LABEL, 0)
+    return
 end
 
-local ref_items_raw = highest_track and track_items[highest_track] or {}
-if highest_track then track_items[highest_track] = nil end
-local ref_groups = build_groups(ref_items_raw)
-compute_group_peaks(ref_groups)
-
-local function duplicate_item_on_track(item)
-    local track = reaper.GetMediaItem_Track(item)
-    local new_item = reaper.AddMediaItemToTrack(track)
-    local item_props = {"D_LENGTH","D_SNAPOFFSET","D_FADEINLEN","D_FADEOUTLEN","D_FADEINDIR","D_FADEOUTDIR","D_FADEINSHAPE","D_FADEOUTSHAPE","D_VOL","D_PAN","D_PANLAW","C_BEATATTACHMODE","B_LOOPSRC","B_ALLTAKESLPLAY","B_UISEL","C_LOCK","B_MUTE","B_REVERSE","C_FADEIN","C_FADEOUT"}
-    for _, prop in ipairs(item_props) do reaper.SetMediaItemInfo_Value(new_item, prop, reaper.GetMediaItemInfo_Value(item, prop)) end
-    reaper.SetMediaItemInfo_Value(new_item, "I_CUSTOMCOLOR", reaper.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR"))
-    local _, item_name = reaper.GetSetMediaItemInfo_String(item, "P_NAME", "", false)
-    reaper.GetSetMediaItemInfo_String(new_item, "P_NAME", item_name, true)
-    local take = reaper.GetActiveTake(item)
-    local new_take = reaper.AddTakeToMediaItem(new_item)
-    if take and new_take then
-        local src = reaper.GetMediaItemTake_Source(take)
-        reaper.SetMediaItemTake_Source(new_take, src)
-        local take_props = {"D_STARTOFFS","D_VOL","D_PAN","D_PANLAW","D_PLAYRATE","D_PITCH","B_PPITCH","I_CHANMODE","I_PITCHMODE","I_STRETCHFLAGS","F_STRETCHFADESIZE"}
-        for _, prop in ipairs(take_props) do reaper.SetMediaItemTakeInfo_Value(new_take, prop, reaper.GetMediaItemTakeInfo_Value(take, prop)) end
-        local fx_count = reaper.TakeFX_GetCount(take)
-        for fx_i = 0, fx_count-1 do reaper.TakeFX_CopyToTake(take, fx_i, new_take, fx_i, false) end
-    end
-    if reaper.GetMediaItemNumTakes(new_item) > 1 then
-        local first_take = reaper.GetMediaItemTake(new_item,0)
-        if first_take then reaper.RemoveTake(first_take) end
-    end
-    reaper.SetMediaItemSelected(new_item, true)
-    return new_item
-end
-
-local function duplicate_group_on_track(group)
-    local new_group = { items = {}, start_pos = math.huge, end_pos = -math.huge }
+local function peak_offset(group)
+    local best_amp, best_offset = -math.huge, 0
     for _, it in ipairs(group.items) do
-        local new_item = duplicate_item_on_track(it.item)
-        local pos = reaper.GetMediaItemInfo_Value(new_item, "D_POSITION")
-        local len = reaper.GetMediaItemInfo_Value(new_item, "D_LENGTH")
-        if pos < new_group.start_pos then new_group.start_pos = pos end
-        if pos + len > new_group.end_pos then new_group.end_pos = pos + len end
-        new_group.items[#new_group.items+1] = { item = new_item }
+        local amp, peak = reaper.NF_GetMediaItemMaxPeakAndMaxPeakPos(it.item)
+        if amp and peak and amp > best_amp then
+            best_amp, best_offset = amp, it.relative_pos + peak
+        end
     end
-    new_group.rel_peak_offset = group.rel_peak_offset
-    new_group.peak_time = new_group.start_pos + (group.rel_peak_offset or 0)
-    return new_group
+    return best_offset
+end
+local ref_groups = build_groups(ref_items)
+for _, group in ipairs(ref_groups) do group.peak_offset = peak_offset(group) end
+local cursor, ripple, switches
+local copies = {}
+local pending_lock
+local undo_open, refresh_held = false, false
+
+local function toggle_state(action)
+    return reaper.GetToggleCommandStateEx(0, action)
 end
 
--- Allineamento: start target -> peak ref
-for track, items in pairs(track_items) do
-    table.sort(items, function(a,b) return a.pos < b.pos end)
-    local groups = build_groups(items)
-    compute_group_peaks(groups)
-    local base_groups = {}
-    for i,g in ipairs(groups) do base_groups[i] = g end
-    local original_count = #base_groups
-    if original_count == 0 then goto continue_track end
-    for idx, ref_group in ipairs(ref_groups) do
-        local source_idx = ((idx-1) % original_count) + 1
-        local target_group
-        if idx > original_count then
-            local seed = base_groups[source_idx]
-            local new_group = duplicate_group_on_track(seed)
-            groups[#groups+1] = new_group
-            target_group = new_group
-        else
-            target_group = groups[source_idx]
-        end
-        -- Sposta inizio gruppo sul picco del gruppo di riferimento
-        local offset = ref_group.peak_time - target_group.start_pos
-        for _, it in ipairs(target_group.items) do
-            local item_pos = reaper.GetMediaItemInfo_Value(it.item, "D_POSITION")
-            reaper.SetMediaItemInfo_Value(it.item, "D_POSITION", item_pos + offset)
-        end
-        target_group.start_pos = target_group.start_pos + offset
-        target_group.end_pos = target_group.end_pos + offset
-        target_group.peak_time = target_group.peak_time + offset
+local function prepare_duplication()
+    if cursor ~= nil then return end
+    local all, per_track, off = toggle_state(RIPPLE_ALL), toggle_state(RIPPLE_TRACK), toggle_state(RIPPLE_OFF)
+    local saved_ripple = all == 1 and RIPPLE_ALL or per_track == 1 and RIPPLE_TRACK or off == 1 and RIPPLE_OFF
+    assert(saved_ripple, "Cannot determine ripple editing mode.")
+    local saved_switches = {}
+    for _, action in ipairs({ GROUPING, AUTO_CROSSFADE, TRIM_BEHIND }) do
+        local state = toggle_state(action)
+        assert(state == 0 or state == 1, "Cannot determine editing option " .. action .. ".")
+        saved_switches[#saved_switches + 1] = { action = action, state = state }
     end
-    ::continue_track::
+    cursor = reaper.GetCursorPosition()
+    ripple, switches = saved_ripple, saved_switches
+    if ripple ~= RIPPLE_OFF then reaper.Main_OnCommand(RIPPLE_OFF, 0) end
+    for _, option in ipairs(switches) do
+        if toggle_state(option.action) == 1 then reaper.Main_OnCommand(option.action, 0) end
+    end
+    assert(toggle_state(RIPPLE_OFF) == 1, "Cannot disable ripple editing.")
+    for _, option in ipairs(switches) do
+        assert(toggle_state(option.action) == 0, "Cannot disable editing option " .. option.action .. ".")
+    end
+    reaper.SelectAllMediaItems(0, false)
+end
 
-    -- Free item positioning sui gruppi
-    local needToSetFreeItemPositioningTrue = false
-    if reaper.GetMediaTrackInfo_Value(track, "I_FREEMODE") == 1 then
-        needToSetFreeItemPositioningTrue = true
-        reaper.SetMediaTrackInfo_Value(track, "I_FREEMODE", 0)
+local function cleanup()
+    if pending_lock then
+        reaper.SetMediaItemInfo_Value(pending_lock.item, "C_LOCK", pending_lock.value)
+        pending_lock = nil
     end
-    local prev_end = nil
-    local EPS = 1e-9
-    for _, g in ipairs(groups) do
-        if prev_end then
-            local overlap = g.start_pos < prev_end - EPS
-            if overlap then needToSetFreeItemPositioningTrue = true break end
+    if cursor ~= nil then
+        reaper.SelectAllMediaItems(0, false)
+        for _, item in ipairs(selected) do reaper.SetMediaItemSelected(item, true) end
+        for _, item in ipairs(copies) do reaper.SetMediaItemSelected(item, true) end
+        reaper.SetEditCurPos(cursor, false, false)
+        for _, option in ipairs(switches) do
+            if toggle_state(option.action) ~= option.state then reaper.Main_OnCommand(option.action, 0) end
         end
-        prev_end = g.end_pos
+        if toggle_state(ripple) ~= 1 then reaper.Main_OnCommand(ripple, 0) end
+        cursor = nil
     end
-    if needToSetFreeItemPositioningTrue then
-        local selected_tracks = {}
-        for i=0, reaper.CountSelectedTracks(0)-1 do
-            selected_tracks[i] = reaper.GetSelectedTrack(0, i)
-            reaper.SetTrackSelected(selected_tracks[i], false)
-        end
-        reaper.SetTrackSelected(track, true)
-        reaper.Main_OnCommand(40751, 0)
-        for i=0, #selected_tracks-1 do
-            reaper.SetTrackSelected(selected_tracks[i], true)
-        end
+    if refresh_held then
+        reaper.PreventUIRefresh(-1)
+        refresh_held = false
+        reaper.UpdateArrange()
+    end
+    if undo_open then
+        reaper.Undo_EndBlock(UNDO_LABEL, -1)
+        undo_open = false
     end
 end
 
-reaper.UpdateArrange()
-reaper.Undo_EndBlock("Allinea start al picco (ref) con grouping crossfade", -1)
-reaper.PreventUIRefresh(-1)
+local function set_item_value(item, field, value)
+    assert(reaper.SetMediaItemInfo_Value(item, field, value), "Cannot set item " .. field .. ".")
+end
+
+local function duplicate_item(item, track, pos)
+    prepare_duplication()
+    local count = reaper.CountMediaItems(0)
+    local lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
+    if lock & 1 ~= 0 then
+        pending_lock = { item = item, value = lock }
+        set_item_value(item, "C_LOCK", lock & ~1)
+    end
+    -- A single seed makes the mapping unambiguous even for equal start times.
+    reaper.SetMediaItemSelected(item, true)
+    reaper.Main_OnCommand(DUPLICATE, 0)
+    if pending_lock then
+        set_item_value(item, "C_LOCK", lock)
+        pending_lock = nil
+    end
+    reaper.SetMediaItemSelected(item, false)
+    local copy = reaper.GetSelectedMediaItem(0, 0)
+    assert(reaper.CountMediaItems(0) == count + 1 and reaper.CountSelectedMediaItems(0) == 1
+        and copy and reaper.GetMediaItem_Track(copy) == track,
+        "Native duplication did not return exactly one selected copy on the seed track.")
+    copies[#copies + 1] = copy
+    reaper.SetMediaItemSelected(copy, false)
+    set_item_value(copy, "D_POSITION", pos)
+    if lock & 1 ~= 0 then set_item_value(copy, "C_LOCK", lock) end
+    return copy
+end
+
+local function add_final_span(spans, items)
+    local start_pos, end_pos = math.huge, -math.huge
+    for _, item in ipairs(items) do
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+        start_pos, end_pos = math.min(start_pos, pos), math.max(end_pos, pos + len)
+    end
+    spans[#spans + 1] = { start_pos = start_pos, end_pos = end_pos }
+end
+
+local function has_overlap(spans)
+    table.sort(spans, function(a, b) return a.start_pos < b.start_pos end)
+    local end_pos = -math.huge
+    for _, span in ipairs(spans) do
+        if span.start_pos < end_pos - EPS then return true end
+        end_pos = math.max(end_pos, span.end_pos)
+    end
+    return false
+end
+
+local function align()
+    local timeline_changed = false
+    for track, items in pairs(track_items) do
+        local groups, spans = build_groups(items), {}
+        local original_count = #groups
+        for idx, ref in ipairs(ref_groups) do
+            local group = groups[(idx - 1) % original_count + 1]
+            local group_start = ref.start_pos + ref.peak_offset
+            local placed = {}
+            for _, it in ipairs(group.items) do
+                local pos = group_start + it.relative_pos
+                if idx > original_count then
+                    placed[#placed + 1] = duplicate_item(it.item, track, pos)
+                else
+                    set_item_value(it.item, "D_POSITION", pos)
+                    placed[#placed + 1] = it.item
+                end
+            end
+            add_final_span(spans, placed)
+        end
+        for idx = #ref_groups + 1, original_count do
+            local placed = {}
+            for _, it in ipairs(groups[idx].items) do placed[#placed + 1] = it.item end
+            add_final_span(spans, placed)
+        end
+        -- Do not cycle existing free positioning or replace fixed lanes.
+        if reaper.GetMediaTrackInfo_Value(track, "I_FREEMODE") == 0 and has_overlap(spans) then
+            assert(reaper.SetMediaTrackInfo_Value(track, "I_FREEMODE", 1), "Cannot enable free item positioning.")
+            timeline_changed = true
+        end
+    end
+    if timeline_changed then reaper.UpdateTimeline() end
+end
+
+reaper.atexit(cleanup)
+reaper.Undo_BeginBlock()
+undo_open = true
+reaper.PreventUIRefresh(1)
+refresh_held = true
+local ok, err = xpcall(align, debug.traceback)
+cleanup()
+if not ok then reaper.MB(err .. "\n\nUndo to revert any partial alignment.", UNDO_LABEL, 0) end
