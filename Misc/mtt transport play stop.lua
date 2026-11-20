@@ -1,20 +1,10 @@
 
-reaper.Main_OnCommand(reaper.NamedCommandLookup("_SWS_UNSETREPEAT"), 0)
-reaper.Main_OnCommand(40434, 0) -- move edit cursor to play cursor
-reaper.Main_OnCommand(40044,0)
-reaper.Main_OnCommand(40634, 0) -- Move edit cursor to start of time selection
-
-
---local TEMP_FILE = reaper.GetResourcePath() .. "/.mtt_sample_rate_switch.txt"
-
-local proj = 0
-
--- Stoppa il playback (e la registrazione), salvando i media registrati.
-
---reaper.Main_OnCommand(reaper.NamedCommandLookup("_RSdaa04eeb257e1c26c1e4e1a9d995995204ea824e"), 0)
+local move_to_play_cursor = 40434 -- View: Move edit cursor to play cursor
+local play_stop = 40044 -- Transport: Play/stop
+local remove_loop_points = 40634 -- Loop points: Remove (unselect) loop point selection
 
 reaper.GetSetRepeat(0)
-local time_selection_start_time, time_selection_end_time = reaper.GetSet_LoopTimeRange(false, 0, 0, 0, false)
-
---reaper.ShowConsoleMsg("Loop start time: " .. tostring(time_selection_start_time) .. "\n")
---reaper.ShowConsoleMsg("Loop end time: " .. tostring(time_selection_end_time) .. "\n")
+reaper.Main_OnCommand(move_to_play_cursor, 0)
+reaper.Main_OnCommand(play_stop, 0)
+reaper.Main_OnCommand(remove_loop_points, 0)
+reaper.GetSetRepeat(0)
