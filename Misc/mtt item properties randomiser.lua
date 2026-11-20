@@ -1,10 +1,21 @@
 
 local major_version = 0
-local minor_version = 1
+local minor_version = 2
 
 local name = 'Item Properties Randomiser ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
-dofile(reaper.GetResourcePath() .. '/Scripts/ReaTeam Extensions/API/imgui.lua')('0.10')
+if not reaper.APIExists('ImGui_GetBuiltinPath') then
+    reaper.MB('ReaImGui 0.10 is required (ReaPack: ReaTeam Extensions).', name, 0)
+    return
+end
+
+local imgui_ok, imgui_error = pcall(function()
+    dofile(reaper.ImGui_GetBuiltinPath() .. '/imgui.lua')('0.10')
+end)
+if not imgui_ok then
+    reaper.MB('Could not load ReaImGui 0.10:\n' .. tostring(imgui_error), name, 0)
+    return
+end
 local ctx = reaper.ImGui_CreateContext(name)
 
 -- Funzione EEL per i Vincoli delle Dimensioni della Finestra
@@ -155,39 +166,30 @@ function randomiseRate()
         local selected_items = {}
         reaper.Main_OnCommand(40652, 0) -- reset playrate to 1.0
 
-        -- decrease 40520
-        -- increase 40519
-        for i = 0, reaper.CountSelectedMediaItems(0) - 1, 1 do
+        local last = reaper.CountSelectedMediaItems(0) - 1
+        for i = 0, last do
             selected_items[i] = reaper.GetSelectedMediaItem(0, i)
         end
 
-        for i = 0, #selected_items, 1 do
+        for i = 0, last do
             reaper.SetMediaItemSelected(selected_items[i], false)
         end
 
-        for i = 0, #selected_items, 1 do
-
+        -- Keep native steps and selection order: the actions also resize the item.
+        local run_command = reaper.Main_OnCommand
+        for i = 0, last do
             local how_many_cycles = (math.random() * 100) * rate
-            local up_or_down = math.floor(math.random(0, 1) + 0.5)
+            local command = math.random(0, 1) == 0 and 40520 or 40519 -- decrease/increase rate by 10 cents
+            local item = selected_items[i]
 
-            --reaper.ShowConsoleMsg("how_many_cycles: " .. tostring(how_many_cycles) .. " | up_or_down: " .. tostring(up_or_down) .. "\n")
-
-            reaper.SetMediaItemSelected(selected_items[i], true)
-
-            if up_or_down == 0 then
-                for j = 1, how_many_cycles, 1 do
-                    reaper.Main_OnCommand(40520, 0) -- decrease playrate
-                end
-            else
-                for j = 1, how_many_cycles, 1 do
-                    reaper.Main_OnCommand(40519, 0) -- increase playrate
-                end
+            reaper.SetMediaItemSelected(item, true)
+            for j = 1, how_many_cycles do
+                run_command(command, 0)
             end
-
-            reaper.SetMediaItemSelected(selected_items[i], false)
+            reaper.SetMediaItemSelected(item, false)
         end
 
-        for i = 0, #selected_items, 1 do
+        for i = 0, last do
             reaper.SetMediaItemSelected(selected_items[i], true)
         end
 
@@ -198,7 +200,7 @@ end
 
 function randomiseVolume()
 
-    retval, v = reaper.ImGui_SliderDouble(ctx, "Volume", volume, 0, 1)
+    local retval, v = reaper.ImGui_SliderDouble(ctx, "Volume", volume, 0, 1)
 
     if retval then
 
@@ -209,7 +211,7 @@ function randomiseVolume()
             local take = reaper.GetActiveTake(reaper.GetSelectedMediaItem(0, i))
             local new_volume = math.max((((math.random() * 3) - 2) * volume) + 1, 0.001)
 
-            reaper.SetMediaItemTakeInfo_Value(take, "D_VOL", new_volume)
+            if take then reaper.SetMediaItemTakeInfo_Value(take, "D_VOL", new_volume) end
 
         end
 
@@ -229,7 +231,7 @@ function randomisePan()
             local take = reaper.GetActiveTake(reaper.GetSelectedMediaItem(0, i))
             local new_pan = (math.random() * 2 - 1) * pan
 
-            reaper.SetMediaItemTakeInfo_Value(take, "D_PAN", new_pan)
+            if take then reaper.SetMediaItemTakeInfo_Value(take, "D_PAN", new_pan) end
 
         end
 
@@ -239,13 +241,14 @@ end
 
 function mainWindow()
 
-    if reaper.CountSelectedMediaItems(0) == 0 then reaper.ImGui_BeginDisabled(ctx) end
+    local no_selection = reaper.CountSelectedMediaItems(0) == 0
+    if no_selection then reaper.ImGui_BeginDisabled(ctx) end
 
     randomiseVolume()
     randomiseRate()
     randomisePan()
 
-    if reaper.CountSelectedMediaItems(0) == 0 then reaper.ImGui_EndDisabled(ctx) end
+    if no_selection then reaper.ImGui_EndDisabled(ctx) end
 
 end
 
@@ -285,5 +288,5 @@ end
 
 
 SetButtonState(1)
-reaper.defer(loop)
 reaper.atexit(onExit)
+reaper.defer(loop)
