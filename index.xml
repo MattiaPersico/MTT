@@ -78,7 +78,7 @@
       </version>
     </reapack>
         <reapack name="mtt_Arrange Selected Items with Fixed Spacing per Track.lua" type="script" desc="Arrange Selected Items with Fixed Spacing per Track">
-      <version name="1.1" author="Mattia Persico" time="2024-04-30T12:15:56Z">
+      <version name="1.2" author="Mattia Persico" time="2026-11-20T11:09:39Z">
           <source main="main" file="mtt_Arrange Selected Items with Fixed Spacing per Track.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Misc/mtt_Arrange%20Selected%20Items%20with%20Fixed%20Spacing%20per%20Track.lua</source>
       </version>
     </reapack>
