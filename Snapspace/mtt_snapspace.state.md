@@ -2,25 +2,15 @@
 
 updated: 2026-11-14
 - Done:
-  - Optimization pass, `minor_version` 57. Interpolation results are unchanged (same parameter values on every frame of a scripted gesture in the three modes, checked outside REAPER with a stubbed API).
-    - One `TrackFX_SetParam` per parameter per frame instead of one per group entry (8 snapshots, 240 differing parameters: 13,440 calls per frame became 240).
-    - `updateSnapshotIndexList` rebuilt with cached track / FX / name-filter lookups and a keyed grouping; same groups, entries and order.
-    - The Voronoi diagram is cached: the resize check compared against a size that was never updated, so the diagram was rebuilt on every frame. Polygon→snapshot map and vertex arrays are built once per diagram, borders are drawn once per frame.
-    - `saveSelected` reads and filters track / FX names once instead of once per parameter.
-  - Fixes:
-    - Crash on Shift+click delete when no snapshot is selected (right after loading).
-    - Crash on an unreadable `snapspace_save` (it now loads as empty).
-    - Crash in mode 1 with Smooth = 0, or after a controller playback in another mode (`previousInterpolatedValues` did not exist yet); crash in controller mode + mode 1 with fewer than two snapshots.
-    - With Smooth = 0 the parameter list was not rebuilt at gesture start, so moved snapshots kept their old positions.
-    - Smoothing factor clamped to 1 (long frames made the cursor overshoot and bounce).
-    - Window move/resize lock was decided by the last snapshot only; now by any hovered snapshot.
-    - Ignore filters: text is matched literally (it was a Lua pattern: `(` raised an error), spaces are ignored on both sides, an empty word (trailing `, `) no longer matches everything; the post-snap parameter filter read the name of the wrong parameter when some parameters were ignored at save time.
-    - Cmd/Ctrl+S ran its action on every frame while held; defaults for an empty Spacebar / Cmd+S field were swapped; the OSC socket was not closed on project switch; `LINK` play stop left the smoothing state armed; range 0 produced 0/0 in mode 2; style pops moved out of the `visible` block; control track pointer validated before use.
+  - `minor_version` 58, two changes the user asked for ("si e si"):
+    - One group entry per snapshot in `updateSnapshotIndexList`. A snapshot used to be entered once per other snapshot holding a different value, which multiplied its weight in the three modes (values 0, 0, 1 at an equidistant point gave 0.50; now 0.33). Where no two snapshots share a value the output is unchanged (largest difference 2e-15 over a scripted gesture, modes 0 and 2).
+    - Mode 1 is now natural neighbour (Sibson) interpolation, the method of AudioMulch's Metasurface: the cursor is one more Voronoi site and each snapshot weighs the share of the cursor's cell taken from its own cell. Cells are the action area clipped by the bisectors (`updateNaturalNeighborCells`), weights are computed once per frame (`naturalNeighborWeights`). The gaussian kernel, the per-cell neighbour lookup and the fixed 0.6 value lag are gone. The diagram is still drawn by `voronoi.lua`.
+  - Checked outside REAPER with a stubbed API: mode 1 gives the snapshot's values with the cursor on it (error 0), weights sum to 1 and move by at most 0.013 per half-pixel step with 9 snapshots; the earlier crash and filter cases still pass.
 - Not done:
-  - Duplicated group entries are still there: a snapshot is added to a parameter's group once per other snapshot holding a different value, which biases the weights (values 0, 0, 1 at an equidistant point give 0.50, not 0.33). Left as is because removing them changes what the three modes output.
+  - The combo still labels mode 1 "Nearest Neighbors" and mode 2 "Inverse Distance Weighting (range)".
   - The nine near-identical gesture functions (3 inputs × 3 modes) were not merged.
-  - `verify` was not run: the docs tools were not available in the session that made the changes. No new API name was introduced; changed call sites reuse calls already present in the file.
+  - `verify` was not run: the docs tools were not available in the session that made the changes. No new API name was introduced.
   - Nothing was run inside REAPER.
 - Waiting on:
-  - The user's test of 0.57 in REAPER.
-  - The user's decision on the duplicated group entries and on the mode 1 / mode 2 findings (mode 1: not exact on a snapshot, depends on window size, jumps at cell borders; mode 2: normalised weights make the range edge a hard step).
+  - The user's test of 0.57 and 0.58 in REAPER.
+  - Four snapshots on the corners (panner L R Ls Rs): along the top edge the front/back parameter still dips towards the centre, 0.19 in mode 0 and 0.13 in mode 1 (left/right is now exactly linear in mode 1). A straight path there needs bilinear interpolation, which no mode does: the user has not asked for it.

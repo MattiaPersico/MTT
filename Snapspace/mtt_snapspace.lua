@@ -9,7 +9,7 @@ For information about the MIT-licensed dependency, refer to the file voronoi.lua
 
 
 local major_version = 0
-local minor_version = 57
+local minor_version = 58
 
 local name = 'Snapspace ' .. tostring(major_version) .. '.' .. tostring(minor_version)
 
@@ -415,7 +415,6 @@ local range_fader_value = 0.5
 local targetX, targetY = 0, 0 -- Coordinate target
 local lastUpdateTime = reaper.time_precise()
 local needToInitSmoothing = true
-local previousInterpolatedValues = {} -- per-group value smoothing state (mode 1)
 local CURRENT_DRAG_X = 0
 local CURRENT_DRAG_Y = 0
 
@@ -1330,59 +1329,159 @@ function inverseDistanceWeighting(points, x, y, power)
     return numerator / denominator
 end
 
-function containsValue(value, list)
-    for _, v in ipairs(list) do
-        if v == value then
-            return true
+-- Natural neighbour (Sibson) interpolation, the method of AudioMulch's Metasurface.
+-- The cursor is treated as one more Voronoi site: the weight of a snapshot is the share of the
+-- cursor's cell that is taken from that snapshot's cell. A snapshot's weight falls to zero by itself
+-- as it stops being a neighbour (no jump at cell borders), and it is 1 with the cursor on the snapshot.
+-- Everything is in action-area pixels, like points_list and CURRENT_DRAG_X / CURRENT_DRAG_Y.
+local nnSites = {}   -- per snapshot: x, y in pixels, and the normalised nx, ny they were computed from
+local nnCells = {}   -- per snapshot: its Voronoi cell clipped to the action area, flat {x1, y1, x2, y2, ...}
+local nnWeights = {} -- per snapshot: weight for the last cursor position (reused table)
+local nnWidth, nnHeight
+
+-- Part of a convex polygon where a*x + b*y <= c, as a new flat vertex list.
+local function clipPolygon(poly, a, b, c)
+    local out = {}
+    local n = #poly
+    if n < 6 then return out end
+
+    local x1, y1 = poly[n - 1], poly[n]
+    local d1 = a * x1 + b * y1 - c
+
+    for i = 1, n, 2 do
+        local x2, y2 = poly[i], poly[i + 1]
+        local d2 = a * x2 + b * y2 - c
+
+        if (d1 < 0 and d2 > 0) or (d1 > 0 and d2 < 0) then
+            local t = d1 / (d1 - d2)
+            out[#out + 1] = x1 + t * (x2 - x1)
+            out[#out + 1] = y1 + t * (y2 - y1)
         end
+
+        if d2 <= 0 then
+            out[#out + 1] = x2
+            out[#out + 1] = y2
+        end
+
+        x1, y1, d1 = x2, y2, d2
     end
-    return false
+
+    return out
 end
 
-function gaussianKernel(distance, sigma)
-    return math.exp(-((distance^2) / (2 * sigma^2)))
-end
+-- Area of the part of a convex polygon where a*x + b*y <= c (same walk as clipPolygon, no table).
+local function clippedArea(poly, a, b, c)
+    local n = #poly
+    if n < 6 then return 0 end
 
-function calculateDynamicSigma(points, x, y)
-    local distances = {}
-    for _, point in ipairs(points) do
-        local dx = x - point.x
-        local dy = y - point.y
-        table.insert(distances, math.sqrt(dx^2 + dy^2))
-    end
-    -- Calcola la media delle distanze come un esempio semplice di adattamento di sigma
+    local first_x, first_y, prev_x, prev_y
     local sum = 0
-    for _, distance in ipairs(distances) do
-        sum = sum + distance
+    local x1, y1 = poly[n - 1], poly[n]
+    local d1 = a * x1 + b * y1 - c
+
+    for i = 1, n, 2 do
+        local x2, y2 = poly[i], poly[i + 1]
+        local d2 = a * x2 + b * y2 - c
+
+        if (d1 < 0 and d2 > 0) or (d1 > 0 and d2 < 0) then
+            local t = d1 / (d1 - d2)
+            local x, y = x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+            if first_x then sum = sum + prev_x * y - x * prev_y else first_x, first_y = x, y end
+            prev_x, prev_y = x, y
+        end
+
+        if d2 <= 0 then
+            if first_x then sum = sum + prev_x * y2 - x2 * prev_y else first_x, first_y = x2, y2 end
+            prev_x, prev_y = x2, y2
+        end
+
+        x1, y1, d1 = x2, y2, d2
     end
-    return sum / #distances
+
+    if not first_x then return 0 end
+    sum = sum + prev_x * first_y - first_x * prev_y
+
+    return math.abs(sum) / 2
 end
 
-function smoothTransition(currentValue, targetValue, smoothingFactor)
-    return currentValue + (targetValue - currentValue) * smoothingFactor
+-- "Closer to p than to s" is the half-plane a*x + b*y <= c with these coefficients.
+-- c is written as a product so that it is exactly 0 when p and s coincide.
+local function closerHalfPlane(px, py, sx, sy)
+    local dx, dy = sx - px, sy - py
+    return 2 * dx, 2 * dy, dx * (sx + px) + dy * (sy + py)
 end
 
-function naturalNeighborInterpolation(points, x, y, closestSnapshotsIndexes)
-    local baseSigma = 80 -- Sigma di base
-    local sigmaIncreaseFactor = 0.09 -- Fattore di aumento per sigma per unità di distanza
+local function naturalNeighborCellsAreCurrent()
+    if #nnSites ~= #snapshot_list or nnWidth ~= ACTION_WINDOW_WIDTH or nnHeight ~= ACTION_WINDOW_HEIGHT then
+        return false
+    end
 
+    for i, snap in ipairs(snapshot_list) do
+        if nnSites[i].nx ~= snap.x or nnSites[i].ny ~= snap.y then return false end
+    end
+
+    return true
+end
+
+-- Voronoi cell of every snapshot: the action area cut by the bisector with each other snapshot.
+local function updateNaturalNeighborCells()
+    nnSites, nnCells = {}, {}
+    nnWidth, nnHeight = ACTION_WINDOW_WIDTH, ACTION_WINDOW_HEIGHT
+
+    for i, snap in ipairs(snapshot_list) do
+        nnSites[i] = { x = snap.x * nnWidth, y = snap.y * nnHeight, nx = snap.x, ny = snap.y }
+    end
+
+    for i, site in ipairs(nnSites) do
+        local cell = { 0, 0, nnWidth, 0, nnWidth, nnHeight, 0, nnHeight }
+
+        for j, other in ipairs(nnSites) do
+            if j ~= i then
+                cell = clipPolygon(cell, closerHalfPlane(site.x, site.y, other.x, other.y))
+            end
+        end
+
+        nnCells[i] = cell
+    end
+end
+
+-- Weight of every snapshot (index = snapshot index, sum = 1) for a cursor at x, y.
+-- Returns nil when there is nothing to weigh. The table is reused: read it before the next call.
+function naturalNeighborWeights(x, y)
+    if not naturalNeighborCellsAreCurrent() then updateNaturalNeighborCells() end
+
+    local total = 0
+
+    for i, site in ipairs(nnSites) do
+        local stolen = clippedArea(nnCells[i], closerHalfPlane(x, y, site.x, site.y))
+        nnWeights[i] = stolen
+        total = total + stolen
+    end
+
+    for i = #nnSites + 1, #nnWeights do nnWeights[i] = nil end
+
+    if total <= 0 then return nil end
+
+    for i = 1, #nnSites do nnWeights[i] = nnWeights[i] / total end
+
+    return nnWeights
+end
+
+-- Value of one parameter from the snapshot weights. A snapshot that does not hold the parameter
+-- is left out and the others are renormalised; nil when none of the weighted snapshots holds it.
+function naturalNeighborInterpolation(points, weights)
     local numerator = 0
     local denominator = 0
 
     for _, point in ipairs(points) do
-        if containsValue(point.snapIndex, closestSnapshotsIndexes) then
-            local dx = x - point.x
-            local dy = y - point.y
-            local distance = math.sqrt(dx^2 + dy^2)
-            -- Aumenta sigma in base alla distanza
-            local sigma = baseSigma + (sigmaIncreaseFactor * distance)
-            local weight = gaussianKernel(distance, sigma)
+        local weight = weights[point.snapIndex]
+        if weight and weight > 0 then
             numerator = numerator + (point.value * weight)
             denominator = denominator + weight
         end
     end
 
-    if denominator == 0 then return 0 end
+    if denominator == 0 then return nil end
     return numerator / denominator
 end
 
@@ -1476,7 +1575,6 @@ function onOSCUpdateNNI()
         if needToInitSmoothing == true then
             initSmoothing(DRAG_X, DRAG_Y)
             updateSnapshotIndexList()
-            previousInterpolatedValues = {}
         end
 
         if smoothing_fader_value ~= 0 then
@@ -1499,57 +1597,28 @@ function onOSCUpdateNNI()
         drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
-        local temp_points = {}
-        for k = 1, #snapshot_list do
-            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
-        end
+        -- one set of weights per frame, shared by every parameter
+        local weights = naturalNeighborWeights(CURRENT_DRAG_X, CURRENT_DRAG_Y)
 
-        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
-        local relatedPolyIndex = 0
-        for i = 1, #snapshot_list do
-            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
-        end
+        if weights then
+            for groupIndex, group in ipairs(grouped_parameters) do
+                local interpolatedValue = naturalNeighborInterpolation(points_list[groupIndex], weights)
 
-        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
-
-        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
-
-        local closest_snapshots = {}
-
-        for l = 1, #n do
-            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
-            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
-        end
-        
-        table.insert(closest_snapshots, cpi)
-        
-
-        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
-
-        
-        for groupIndex, group in ipairs(grouped_parameters) do
-            local pointsForGroup = points_list[groupIndex]
-            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
-            -- Applica smoothing al valore interpolato
-            if not previousInterpolatedValues[groupIndex] then
-                previousInterpolatedValues[groupIndex] = interpolatedValue
+                if interpolatedValue then
+                    -- every entry of a group targets the same track/FX/parameter
+                    local parameter = group[1]
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
             end
-            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
-            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
-            
 
-
-            -- every entry of a group targets the same track/FX/parameter
-            local parameter = group[1]
-            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-        end
-
-        for i = 1, #snapshot_list do
-            if containsValue(i, closest_snapshots) then
-                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
-                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            -- lines to the snapshots that take part: the cursor's natural neighbours
+            for i = 1, #snapshot_list do
+                if weights[i] and weights[i] > 0 then
+                    local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                    drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+                end
             end
-         end
+        end
 
     else
         isInterpolating = false
@@ -1733,7 +1802,6 @@ function onDragLeftMouseNNI()
         if needToInitSmoothing == true then
             initSmoothing(DRAG_X, DRAG_Y)
             updateSnapshotIndexList()
-            previousInterpolatedValues = {}
         end
 
         if smoothing_fader_value ~= 0 then
@@ -1756,57 +1824,28 @@ function onDragLeftMouseNNI()
         drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
-        local temp_points = {}
-        for k = 1, #snapshot_list do
-            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
-        end
+        -- one set of weights per frame, shared by every parameter
+        local weights = naturalNeighborWeights(CURRENT_DRAG_X, CURRENT_DRAG_Y)
 
-        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
-        local relatedPolyIndex = 0
-        for i = 1, #snapshot_list do
-            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
-        end
+        if weights then
+            for groupIndex, group in ipairs(grouped_parameters) do
+                local interpolatedValue = naturalNeighborInterpolation(points_list[groupIndex], weights)
 
-        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
-
-        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
-
-        local closest_snapshots = {}
-
-        for l = 1, #n do
-            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
-            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
-        end
-        
-        table.insert(closest_snapshots, cpi)
-        
-
-        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
-
-        
-        for groupIndex, group in ipairs(grouped_parameters) do
-            local pointsForGroup = points_list[groupIndex]
-            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
-            -- Applica smoothing al valore interpolato
-            if not previousInterpolatedValues[groupIndex] then
-                previousInterpolatedValues[groupIndex] = interpolatedValue
+                if interpolatedValue then
+                    -- every entry of a group targets the same track/FX/parameter
+                    local parameter = group[1]
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
             end
-            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
-            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
-            
 
-
-            -- every entry of a group targets the same track/FX/parameter
-            local parameter = group[1]
-            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-        end
-
-        for i = 1, #snapshot_list do
-            if containsValue(i, closest_snapshots) then
-                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
-                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            -- lines to the snapshots that take part: the cursor's natural neighbours
+            for i = 1, #snapshot_list do
+                if weights[i] and weights[i] > 0 then
+                    local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                    drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+                end
             end
-         end
+        end
 
     else
         isInterpolating = false
@@ -1951,24 +1990,6 @@ function drawDistanceLines(x1, y1, x2, y2, maxDistance, color)
     local alpha =  inverselyProportionalValue(x1, y1, x2, y2, maxDistance) --+ 0.0000001
     color = normalizeAlphaInRange(color, alpha, alpha)
     drawLine(x1, y1, x2, y2, color, 3 * alpha)
-end
-
-function findClosestPointIndex(points, targetPoint)
-    if #points == 0 then return nil end -- Controlla se la lista è vuota
-
-    local closestIndex = 1 -- Inizializza l'indice del punto più vicino con il primo punto della lista
-    local minDistance = ((points[closestIndex].x - targetPoint.x)^2 + (points[closestIndex].y - targetPoint.y)^2)
-
-    for i = 2, #points do
-        local point = points[i]
-        local distance = ((point.x - targetPoint.x)^2 + (point.y - targetPoint.y)^2)
-        if distance < minDistance then
-            closestIndex = i
-            minDistance = distance
-        end
-    end
-
-    return closestIndex
 end
 
 function getControllerUpdateIDW() 
@@ -2163,7 +2184,7 @@ end
 
 function getControllerUpdateNNI() 
 
-    if not DRAGGING_BALL and #snapshot_list > 1 and ivoronoi and snapIndexRelatedToPoly then
+    if not DRAGGING_BALL then
         isInterpolating = true 
         --reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_None())
         -- Ottieni la posizione normalizzata del mouse
@@ -2204,7 +2225,6 @@ function getControllerUpdateNNI()
         if needToInitSmoothing == true then
             initSmoothing(DRAG_X, DRAG_Y)
             updateSnapshotIndexList()
-            previousInterpolatedValues = {}
         end
 
         if smoothing_fader_value ~= 0 then
@@ -2227,55 +2247,28 @@ function getControllerUpdateNNI()
         drawCircle(circle_x,circle_y, 10, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
         drawDot(dot_x,dot_y, 3, reaper.ImGui_ColorConvertDouble4ToU32(1, 1, 1, 1), 4)
 
-        local temp_points = {}
-        for k = 1, #snapshot_list do
-            table.insert(temp_points, {x = snapshot_list[k].x * reaper.ImGui_GetWindowWidth(ctx), y = snapshot_list[k].y * reaper.ImGui_GetWindowHeight(ctx)})
-        end
+        -- one set of weights per frame, shared by every parameter
+        local weights = naturalNeighborWeights(CURRENT_DRAG_X, CURRENT_DRAG_Y)
 
-        local cpi = findClosestPointIndex(temp_points, {x = CURRENT_DRAG_X, y = CURRENT_DRAG_Y})
-        local relatedPolyIndex = 0
-        for i = 1, #snapshot_list do
-            if snapIndexRelatedToPoly[i] == cpi then relatedPolyIndex = i end
-        end
+        if weights then
+            for groupIndex, group in ipairs(grouped_parameters) do
+                local interpolatedValue = naturalNeighborInterpolation(points_list[groupIndex], weights)
 
-        local n = ivoronoi:getNeighborsForIndex(relatedPolyIndex)
-
-        --reaper.ShowConsoleMsg('n: ' .. tostring(#n) .. '\n')
-
-        local closest_snapshots = {}
-
-        for l = 1, #n do
-            table.insert(closest_snapshots, findClosestPointIndex(temp_points, n[l].centroid))
-            --reaper.ShowConsoleMsg(tostring(findClosestPointIndex(temp_points, n[l].centroid)).. ' - ')
-        end
-        
-        table.insert(closest_snapshots, cpi)
-        
-
-        local smoothingFactor = 0.6 -- Adegua questo valore in base alle tue necessità
-
-        
-        for groupIndex, group in ipairs(grouped_parameters) do
-            local pointsForGroup = points_list[groupIndex]
-            local interpolatedValue = naturalNeighborInterpolation(pointsForGroup, CURRENT_DRAG_X, CURRENT_DRAG_Y, closest_snapshots)
-            -- Applica smoothing al valore interpolato
-            if not previousInterpolatedValues[groupIndex] then
-                previousInterpolatedValues[groupIndex] = interpolatedValue
+                if interpolatedValue then
+                    -- every entry of a group targets the same track/FX/parameter
+                    local parameter = group[1]
+                    reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, interpolatedValue)
+                end
             end
-            local smoothedValue = smoothTransition(previousInterpolatedValues[groupIndex], interpolatedValue, smoothingFactor)
-            previousInterpolatedValues[groupIndex] = smoothedValue -- Aggiorna il valore precedente con quello appena calcolato
 
-            -- every entry of a group targets the same track/FX/parameter
-            local parameter = group[1]
-            reaper.TrackFX_SetParam(parameter.track, parameter.fx_index, parameter.param_list_index, smoothedValue)
-        end
-
-        for i = 1, #snapshot_list do
-            if containsValue(i, closest_snapshots) then
-                local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
-                drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+            -- lines to the snapshots that take part: the cursor's natural neighbours
+            for i = 1, #snapshot_list do
+                if weights[i] and weights[i] > 0 then
+                    local snap_x, snap_y = windowToScreenCoordinates(snapshot_list[i].x * ACTION_WINDOW_WIDTH, snapshot_list[i].y * ACTION_WINDOW_HEIGHT)
+                    drawDistanceLines(snap_x, snap_y, circle_x, circle_y, math.sqrt(ACTION_WINDOW_WIDTH^2 + ACTION_WINDOW_HEIGHT^2))
+                end
             end
-         end
+        end
 
     else
         isInterpolating = false
@@ -2514,8 +2507,6 @@ function updateSnapshotIndexList()
                                         -- the filter is tested on the parameter's own name (it used to read the
                                         -- name at the list position, which is another parameter once some are ignored)
                                         if param_index and isParamAllowed(fx_snap.guid, track, fx, param_index) then
-                                            local new_parameter = parameter:new(track, fx, param_index, param_list_1[p], s1)
-
                                             local groups = group_lookup[fx_snap.guid]
                                             if not groups then
                                                 groups = {}
@@ -2523,12 +2514,18 @@ function updateSnapshotIndexList()
                                             end
 
                                             local group = groups[param_index]
-                                            if group then
-                                                group[#group + 1] = new_parameter
-                                            else
-                                                group = {new_parameter}
+                                            if not group then
+                                                group = {}
                                                 groups[param_index] = group
                                                 grouped_parameters[#grouped_parameters + 1] = group
+                                            end
+
+                                            -- One entry per snapshot. A snapshot used to be added once per other
+                                            -- snapshot holding a different value, which multiplied its weight.
+                                            -- s1 is the outer loop, so its entry, if any, is the last one.
+                                            local last = group[#group]
+                                            if not last or last.snap_index ~= s1 then
+                                                group[#group + 1] = parameter:new(track, fx, param_index, param_list_1[p], s1)
                                             end
                                         end
                                     end
