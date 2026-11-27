@@ -205,4 +205,20 @@
       </version>
     </reapack>
   </category>
+  <category name="FmodSync">
+    <reapack name="mtt_FmodSync.lua" type="script" desc="FMOD Sync">
+      <version name="0.1" author="Mattia Persico" time="2026-11-27T09:00:00Z">
+          <source main="main" file="mtt_FmodSync.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_FmodSync.lua</source>
+          <source main="main" file="mtt_FmodSync_Mini.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_FmodSync_Mini.lua</source>
+          <source file="mtt_fmodsync_assets.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_assets.lua</source>
+          <source file="mtt_fmodsync_config.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_config.lua</source>
+          <source file="mtt_fmodsync_link.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_link.lua</source>
+          <source file="mtt_fmodsync_render.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_render.lua</source>
+          <source file="mtt_fmodsync_drag.js">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_drag.js</source>
+          <source file="dkjson.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/dkjson.lua</source>
+          <source file="socket module/socket/core.dll">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/socket%20module/socket/core.dll</source>
+          <source file="socket module/socket/core.so">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/socket%20module/socket/core.so</source>
+      </version>
+    </reapack>
+  </category>
 </index>
