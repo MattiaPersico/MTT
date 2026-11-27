@@ -1,0 +1,417 @@
+@init
+function setup() local(i,hz,b,flo,fhi,fc,hw) (
+  configured_rate = srate; configured_short = f_short; configured_overlap = f_overlap;
+  // Tonal: about 85–93 ms at standard rates. Transient: about 43–46 ms.
+  fft_size = f_short ? 1024 : 2048;
+  while(fft_size < 32768 && fft_size < srate*(f_short ? 0.04 : 0.08)) (fft_size *= 2;);
+  // Reserve a fixed tail for small arrays; support up to 192 kHz (N=16384).
+  fft_size = min(16384,fft_size);
+  // 75% overlap (50% only through the testing override). Square-root Hann windows
+  // sum to 1 at 50% and to 2 at 75%: ola_scale compensates.
+  hop = f_overlap ? fft_size/4 : fft_size/2;
+  ola_scale = f_overlap ? 0.5 : 1;
+  power = 262144; average = 262400; own_profile = 262656;
+  live_profile = 262912; desired = 263168; gain_db = 263424;
+  band_gain = 263680; members = 263936; frozen_profile = 267000;
+  display_gain = 264192; display_own = 264448; display_ref = 264704;
+  fine_power = 264960; fine_average = 265216; fine_profile = 265472;
+  fine_to_band = 265728; ref_profile = 265984; held_curve = 266240;
+  solve_base = 268000; solve_power = 268256; held_power = 268512;
+  applied_db = 268768; zone_weight = 269024; held_base = 269280;
+  // Test options (0.5.0): Envelope smoothing on the fine grid, Smooth curve FIR.
+  env_own = 270000; env_ref = 270256; cell_lo = 270512; cell_hi = 270768;
+  cell_bw = 271024; pre_s = 271280; pre_b = 271536; cell_fc = 272048;
+  target = 272304;  // matching target per band (the guide, or its mirror with Invert)
+  // 0.12.0: FFT bins per band, nearest occupied bands, curve source, display buffers.
+  band_bins = 274256; band_prev = 274512; band_next = 274768;
+  curve_db = 274000; disp_own = 275024; disp_ref = 275280;
+  fir = 327680;  // 2N complex, inside one 65536-word page
+  band_cells = 271792;  // display: per-band width in octaves (density per octave)
+  band_count = 0; held_valid = 0;
+  // Window/map arrays need up to N entries: stored in free FFT page tails.
+  window = 2*fft_size;
+  bin_band = 65536+2*fft_size;
+  bin_pos = 3*fft_size;  // continuous band position per bin (Smooth curve)
+  i = 0;
+  loop(fft_size,
+    window[i] = sin($pi*i/fft_size);
+    hz = min(i,fft_size-i)*srate/fft_size;
+    // Fixed fine grid exactly subdivides the original 14 interior bands.
+    b = hz < 50 ? 0 : min(225,1+floor(log(hz/50)/log(2)/(8.4/224)));
+    bin_band[i] = b;
+    i += 1;
+  );
+  // Fine-cell bandwidths and centres for the Detail averaging.
+  i = 0;
+  loop(226,
+    flo = i == 0 ? 0 : 50*2^((i-1)*8.4/224);
+    fhi = i == 225 ? max(flo+1,srate/2) : 50*2^(i*8.4/224);
+    cell_bw[i] = max(1,fhi-flo);
+    cell_fc[i] = i == 0 ? 25 : i == 225 ? (flo+fhi)/2 : 50*2^((i-0.5)*8.4/224);
+    i += 1;
+  );
+  env_scale = -1;  // force env_kernel() on the next frame
+  reset_pending = 1;
+);
+
+function reset_audio() (
+  memset(ring_l,0,fft_size); memset(ring_r,0,fft_size);
+  memset(ola_l,0,fft_size); memset(ola_r,0,fft_size);
+  memset(average,0,128); memset(gain_db,0,128);
+  memset(fine_average,0,226);
+  memset(own_profile,0,128); memset(applied_db,0,128);
+  peak_gain = 1;
+  ring_pos = 0; hop_count = 0; frames = 0;
+  live_valid = 0; input_valid = 0; reference_valid = 0;
+  missing_samples = srate; seen_sequence = -1;
+  trim_gain = exp(slider13*log(10)/20);
+  reset_pending = 0; invalidate_publish = 1;
+);
+
+// Range limit: linear up to half the
+// limit, then a tanh knee that approaches the limit (hard clamp only through the
+// testing override). Monotonic, so the energy solve still converges.
+function range_limit(x) local(l,k,y,e) (
+  f_softrange ? (
+    l = x >= 0 ? limit_boost : limit_cut; k = 0.5*l;
+    abs(x) <= k ? x : (
+      y = min(20,(abs(x)-k)/max(0.000001,l-k)); e = exp(2*y);
+      sign(x)*(k+(l-k)*(e-1)/(e+1));
+    );
+  ) : max(-limit_cut,min(limit_boost,x));
+);
+
+// Bands without FFT bins (narrow low bands at high Definition, more with the Short
+// window) carry no audio of their own. They take the interpolation of their nearest
+// occupied neighbours: linear for dB values, geometric for powers. Without it the
+// smooth curve dipped towards 0 dB between boosted bins (0.11.0 lost 2-4 dB of low-end
+// correction at 128 bands) and the display drew a comb. src may equal dst.
+function fill_empty(src,dst,is_power) local(i,j,q,t,a,b) (
+  i = 0;
+  loop(band_count,
+    j = band_prev[i]; q = band_next[i];
+    band_bins[i] > 0 || (j < 0 && q >= band_count) ? dst[i] = src[i] : (
+      j < 0 ? (j = q;) : q >= band_count ? (q = j;);
+      t = q == j ? 0 : (i-j)/(q-j);
+      is_power ? (
+        a = log(max((10^-30),src[j])); b = log(max((10^-30),src[q]));
+        dst[i] = exp(a+(b-a)*t);
+      ) : dst[i] = src[j]+(src[q]-src[j])*t;
+    );
+    i += 1;
+  );
+);
+
+// Smoothing: one spectral averaging whose width changes continuously. Each fine
+// cell is compared through the average power within +/-max(150 Hz, 12% of its
+// centre) * scale, scale = Smoothing. 100%: full width (timbre only, harmonics
+// averaged out). 0%: the cell alone (each band on its own, so a pitched guide
+// imprints its harmonics). Edges are fractional, so the width is continuous.
+function cell_pos(f) ( f < 50 ? max(0,f/50) : min(226,1+log(f/50)/log(2)/(8.4/224)); );
+function env_kernel(scale) local(i,hw) (
+  env_scale = scale; i = 0;
+  loop(226,
+    hw = max(150,0.12*cell_fc[i])*scale;
+    cell_lo[i] = min(i,cell_pos(cell_fc[i]-hw));
+    cell_hi[i] = max(i+1,cell_pos(cell_fc[i]+hw));
+    i += 1;
+  );
+);
+function env_cum(pre,arr,x) local(k) (
+  k = floor(x); k >= 226 ? pre[226] : pre[k]+(x-k)*arr[k];
+);
+function env_smooth(src,dst) local(i,s,b,total) (
+  pre_s[0] = 0; pre_b[0] = 0; i = 0;
+  loop(226, pre_s[i+1] = pre_s[i]+src[i]; pre_b[i+1] = pre_b[i]+cell_bw[i]; i += 1;);
+  total = 0; i = 0;
+  loop(226,
+    s = env_cum(pre_s,src,cell_hi[i])-env_cum(pre_s,src,cell_lo[i]);
+    b = env_cum(pre_b,cell_bw,cell_hi[i])-env_cum(pre_b,cell_bw,cell_lo[i]);
+    dst[i] = s*cell_bw[i]/max(1,b); total += dst[i]; i += 1;
+  );
+  i = 0; loop(226, dst[i] /= max(total,(10^-30)); i += 1;);
+);
+
+// Reconfigure only at a frame boundary, without clearing overlap/add audio.
+function configure_bands() local(i,b,hz) (
+  band_count = floor(max(4,min(128,slider14)));
+  i = 0;
+  loop(226,
+    b = i == 0 ? 0 : i == 225 ? band_count-1 :
+      1+floor((i-0.5)*(band_count-2)/224);
+    fine_to_band[i] = b; i += 1;
+  );
+  // Width in octaves per band for the display density. Interior fine cells are
+  // 8.4/224 octave; the edge cells are wider: 0-50 Hz counts as one octave,
+  // 16.89 kHz-Nyquist as its true width.
+  memset(band_cells,0,128);
+  i = 0;
+  loop(226,
+    band_cells[fine_to_band[i]] += i == 0 ? 1 : i == 225 ? max(8.4/224,log(srate/2/16890)/log(2)) : 8.4/224;
+    i += 1;
+  );
+  // Band i spans [i,i+1) in this coordinate; its centre is i+0.5.
+  i = 0;
+  loop(fft_size,
+    hz = min(i,fft_size-i)*srate/fft_size;
+    bin_pos[i] = (hz < 50 ? hz/50 : 1+log(hz/50)/log(2)/8.4*(band_count-2))-0.5;
+    i += 1;
+  );
+  // FFT bins per band (k and N-k share a band: count 0..N/2) and, for each band, the
+  // nearest occupied band below and above (-1 / band_count when there is none).
+  memset(band_bins,0,128);
+  i = 0; loop(fft_size/2+1, band_bins[fine_to_band[bin_band[i]]] += 1; i += 1;);
+  b = -1; i = 0; loop(band_count, band_bins[i] > 0 ? b = i; band_prev[i] = b; i += 1;);
+  b = band_count; i = band_count-1; loop(band_count, band_bins[i] > 0 ? b = i; band_next[i] = b; i -= 1;);
+  memset(gain_db,0,128); memset(applied_db,0,128); held_valid = 0;
+);
+
+// limit_boost/limit_cut stay global: range_limit() reads them.
+function process_frame() local(i,j,b,total,raw_total,energy_scale,pfloor,
+    active,lo,hi,offset,estimate,g,match_amount,solve_total,
+    shape,hz,x1,x2,t,weight,profile_floor,step,held_same,p,f,q,d,w) (
+  band_count != slider14 ? configure_bands();
+  i = 0;
+  loop(fft_size,
+    j = (ring_pos+i) % fft_size;
+    // Stereo packed as one complex signal, left + i*right (as mtt_TimbreMatch):
+    // every filter is real, so the inverse transform returns the filtered left channel
+    // in the real part and the right channel in the imaginary part.
+    fft_l[2*i] = ring_l[j]*window[i]; fft_l[2*i+1] = ring_r[j]*window[i];
+    i += 1;
+  );
+  fft(fft_l,fft_size); fft_permute(fft_l,fft_size);
+  memset(fine_power,0,226);
+  i = 0;
+  loop(fft_size,
+    b = bin_band[i];
+    // Bins k and N-k always share a band, so the left/right cross terms of |Z|^2
+    // cancel in each band: the sum equals the separate channel powers exactly.
+    fine_power[b] += sqr(fft_l[2*i])+sqr(fft_l[2*i+1]);
+    i += 1;
+  );
+  // Parseval + two channels + Hann window mean 0.5 => divide by N^2.
+  energy_scale = 1/sqr(fft_size);
+  total = 0; raw_total = 0; i = 0;
+  memset(power,0,band_count); memset(average,0,band_count);
+  loop(226,
+    fine_power[i] *= energy_scale;
+    fine_average[i] = fine_power[i] + analysis_alpha*(fine_average[i]-fine_power[i]);
+    total += fine_average[i]; raw_total += fine_power[i];
+    b = fine_to_band[i]; power[b] += fine_power[i]; average[b] += fine_average[i];
+    i += 1;
+  );
+  frame_power = raw_total;
+  atomic_set(display_level_db,10*log10(max((10^-30),raw_total)));
+  input_valid = raw_total > exp(slider11*log(10)/10) && total > (10^-30);
+  i = 0; loop(226, fine_profile[i] = fine_average[i]/max(total,(10^-30)); i += 1;);
+  // Smoothing 0% (or the testing override) compares the raw profiles.
+  f_envelope = env_amount > 0;
+  f_envelope && env_scale != env_amount ? env_kernel(env_amount);
+  f_envelope ? (
+    env_smooth(fine_power,env_own);
+    memset(own_profile,0,band_count);
+    i = 0; loop(226, own_profile[fine_to_band[i]] += env_own[i]; i += 1;);
+  ) : (
+    i = 0; loop(band_count, own_profile[i] = power[i]/max(raw_total,(10^-30)); i += 1;);
+  );
+  exchange_profile();
+  memset(ref_profile,0,band_count);
+  f_envelope ? (
+    env_smooth(frozen_profile,env_ref);
+    i = 0; loop(226, ref_profile[fine_to_band[i]] += env_ref[i]; i += 1;);
+  ) : (
+    i = 0; loop(226, ref_profile[fine_to_band[i]] += frozen_profile[i]; i += 1;);
+  );
+  // The guide's threshold enables Hold; at its minimum (Off) correction always updates.
+  hold_enabled = live_threshold_db > -90;
+  hold_active = hold_enabled && !(live_valid && live_level_db >= live_threshold_db);
+  pfloor = exp(slider12*log(10)/10);
+  // Target. Normal: the guide's profile. Invert (slider 33): the guide's profile
+  // mirrored around its mean log level and renormalized, so the follower moves
+  // towards the complement of the guide (full where the guide is thin, thin where
+  // it is full). Band floor bounds the mirror; Range still limits the gains.
+  slider33 ? (
+    shape = 0; i = 0; loop(band_count, shape += log(max(pfloor,ref_profile[i])); i += 1;);
+    shape /= band_count; total = 0; i = 0;
+    loop(band_count, target[i] = exp(2*shape-log(max(pfloor,ref_profile[i]))); total += target[i]; i += 1;);
+    i = 0; loop(band_count, target[i] /= max(total,(10^-30)); i += 1;);
+  ) : (
+    i = 0; loop(band_count, target[i] = ref_profile[i]; i += 1;);
+  );
+  active = reference_valid && input_valid;
+  limit_boost = max(0,min(48,slider5)); limit_cut = max(0,min(48,slider6));
+  match_amount = max(0,min(1,slider4*0.01));
+  i = 0;
+  loop(band_count,
+    desired[i] = active ? 10/log(10)*
+      log(max(pfloor,target[i])/max(pfloor,own_profile[i])) : 0;
+    // Do not boost an empty/near-empty band. Negative correction remains valid.
+    own_profile[i] < pfloor ? desired[i] = min(0,desired[i]);
+    !hold_active ? gain_db[i] = desired[i] + gain_alpha*(gain_db[i]-desired[i]);
+    gain_db[i] = max(-96,min(96,gain_db[i]));
+    i += 1;
+  );
+  // Hold stores the full-strength detector and its original power distribution.
+  // Recompute amount changes against that frozen distribution: never divide by
+  // a captured Match value, especially while detector smoothing is still moving.
+  solve_total = 0; i = 0;
+  loop(band_count,
+    solve_base[i] = hold_active && held_valid ? held_base[i] : gain_db[i];
+    solve_power[i] = hold_active && held_valid ? held_power[i] : power[i];
+    solve_total += solve_power[i]; i += 1;
+  );
+  lo = -144; hi = 144;
+  loop(28,
+    offset = (lo+hi)*0.5; estimate = 0; i = 0;
+    loop(band_count,
+      g = range_limit(solve_base[i]*match_amount+offset);
+      solve_power[i]/max(solve_total,(10^-30)) < pfloor ? g = min(0,g);
+      estimate += solve_power[i]*exp(g*log(10)/10); i += 1;
+    );
+    estimate > solve_total ? hi = offset : lo = offset;
+  );
+  offset = (lo+hi)*0.5;
+  x2 = max(80,min(18000,slider21)); x1 = min(x2/1.25,max(50,min(12000,slider20)));
+  xo_k1 = 2^floor(max(0,min(3,slider34))); xo_k2 = 2^floor(max(0,min(3,slider35)));
+  held_same = slider4 == held_overall && slider17 == held_low && slider18 == held_mid &&
+    slider19 == held_high && slider20 == held_x1 && slider21 == held_x2 &&
+    slider5 == held_boost && slider6 == held_cut &&
+    slider34 == held_s1 && slider35 == held_s2;
+  step = 240*hop/srate;
+  i = 0;
+  loop(band_count,
+    g = range_limit(solve_base[i]*match_amount+offset);
+    solve_power[i]/max(solve_total,(10^-30)) < pfloor ? g = min(0,g);
+    hz = i == 0 ? 25 : i == band_count-1 ? 20000 : 50*2^((i-0.5)*8.4/(band_count-2));
+    // Zone transitions: logistic in log frequency, steepness k = slope/6 for
+    // 6/12/24/48 dB/oct (sliders 34/35), like a crossover of order 1/2/4/8.
+    t = 1/(1+(hz/x1)^(-xo_k1));
+    weight = slider17 + (slider18-slider17)*t;
+    t = 1/(1+(hz/x2)^(-xo_k2));
+    weight += (slider19-slider18)*t;
+    zone_weight[i] = max(0,min(1,weight*0.01));
+    g *= zone_weight[i];
+    hold_active ? (
+      !held_valid ? g = 0 : held_same ? g = held_curve[i];
+    );
+    (!parent || slider4 <= 0 || !input_valid) ? g = 0;
+    // All changes, including zero, Hold and amount automation, use this path.
+    applied_db[i] += max(-step,min(step,g-applied_db[i]));
+    abs(applied_db[i]) < 0.000000001 ? applied_db[i] = 0;
+    g = applied_db[i];
+    hold_enabled && !hold_active && active ? (
+      held_curve[i] = g; held_base[i] = gain_db[i]; held_power[i] = power[i];
+    );
+    band_gain[i] = exp(g*log(10)/20);
+    i += 1;
+  );
+  hold_enabled && !hold_active && active ? (
+    held_valid = 1; held_overall = slider4;
+    held_low = slider17; held_mid = slider18; held_high = slider19;
+    held_x1 = slider20; held_x2 = slider21; held_boost = slider5; held_cut = slider6;
+    held_s1 = slider34; held_s2 = slider35;
+  );
+  // Curve source: the applied gains, empty bands interpolated (see fill_empty).
+  fill_empty(applied_db,curve_db,0);
+  // Display (UI only). Power density per fine cell, not the band sum: bands hold one
+  // or two fine cells at high counts, which would otherwise draw a 3 dB sawtooth.
+  // A follower shows the profiles it compares; an instance that follows nobody shows
+  // the profile it publishes (averaged by its Speed, not smoothed in frequency).
+  parent > 0 ? (
+    i = 0; loop(band_count, disp_own[i] = own_profile[i]; i += 1;);
+  ) : (
+    memset(disp_own,0,band_count);
+    i = 0; loop(226, disp_own[fine_to_band[i]] += fine_profile[i]; i += 1;);
+  );
+  i = 0;
+  loop(band_count,
+    d = (8.4/224)/max(0.000001,band_cells[i]);
+    disp_own[i] *= d; disp_ref[i] = reference_valid ? ref_profile[i]*d : 0;
+    i += 1;
+  );
+  fill_empty(disp_own,disp_own,1); fill_empty(disp_ref,disp_ref,1);
+  i = 0;
+  loop(band_count,
+    atomic_set(display_gain[i],curve_db[i]);
+    atomic_set(display_own[i],disp_own[i]); atomic_set(display_ref[i],disp_ref[i]);
+    i += 1;
+  );
+  atomic_set(display_band_count,band_count);
+  // Skip the curve filter when every band is neutral: exact unity, less CPU.
+  any_gain = 0; i = 0; loop(band_count, applied_db[i] != 0 ? any_gain = 1; i += 1;);
+  f_smooth && any_gain && band_count > 1 ? (
+    // Smooth curve: interpolate the band gains in dB at each bin's band position.
+    // Minimum phase (slider 36 = 0, default since 0.12.0): homomorphic design as in
+    // mtt_TimbreMatch (log magnitude -> real cepstrum folded onto positive
+    // quefrencies -> exponential), so the response rings only after the input: no
+    // pre-ringing before transients. Linear phase (slider 36 = 1, the 0.11.0 curve):
+    // zero-phase response, symmetric ringing. Both keep the impulse response within
+    // N/2 (taper from N/4) so it cannot wrap around the frame; same latency and cost
+    // class (2 more FFTs for minimum phase).
+    i = 0;
+    loop(fft_size,
+      p = bin_pos[i]; j = floor(p); f = p-j;
+      j < 0 ? (j = 0; f = 0;) : j >= band_count-1 ? (j = band_count-1; f = 0;);
+      g = curve_db[j]+(j < band_count-1 ? (curve_db[j+1]-curve_db[j])*f : 0);
+      fir[2*i] = f_linear ? exp(g*log(10)/20) : g*log(10)/20; fir[2*i+1] = 0;
+      i += 1;
+    );
+    !f_linear ? (
+      fft_ipermute(fir,fft_size); ifft(fir,fft_size);
+      // Real cepstrum (ifft is unscaled: divide by N), doubled on 1..N/2-1, zero above.
+      fir[0] /= fft_size; fir[1] = 0;
+      i = 1; loop(fft_size/2-1, fir[2*i] *= 2/fft_size; fir[2*i+1] = 0; i += 1;);
+      fir[fft_size] /= fft_size; fir[fft_size+1] = 0;
+      memset(fir+fft_size+2,0,fft_size-2);
+      fft(fir,fft_size); fft_permute(fir,fft_size);
+      i = 0;
+      loop(fft_size,
+        f = exp(fir[2*i]); p = fir[2*i+1];
+        fir[2*i] = f*cos(p); fir[2*i+1] = f*sin(p);
+        i += 1;
+      );
+    );
+    fft_ipermute(fir,fft_size); ifft(fir,fft_size);
+    // Taper: linear phase around time 0 in both directions, minimum phase after it.
+    q = fft_size/4; i = 0;
+    loop(fft_size,
+      d = f_linear ? min(i,fft_size-i) : i;
+      w = d <= q ? 1 : d >= 2*q ? 0 : 0.5+0.5*cos($pi*(d-q)/q);
+      fir[2*i] *= w/fft_size; fir[2*i+1] = 0;
+      i += 1;
+    );
+    fft(fir,fft_size); fft_permute(fir,fft_size);
+    i = 0;
+    f_linear ? (
+      // Real, even response: scale both packed channels.
+      loop(fft_size,
+        g = fir[2*i];
+        fft_l[2*i] *= g; fft_l[2*i+1] *= g;
+        i += 1;
+      );
+    ) : (
+      loop(fft_size,
+        g = fir[2*i]; p = fir[2*i+1]; f = fft_l[2*i];
+        fft_l[2*i] = f*g-fft_l[2*i+1]*p; fft_l[2*i+1] = f*p+fft_l[2*i+1]*g;
+        i += 1;
+      );
+    );
+  ) : (
+    i = 0;
+    loop(fft_size,
+      g = band_gain[fine_to_band[bin_band[i]]];
+      fft_l[2*i] *= g; fft_l[2*i+1] *= g;
+      i += 1;
+    );
+  );
+  fft_ipermute(fft_l,fft_size); ifft(fft_l,fft_size);
+  i = 0;
+  loop(fft_size,
+    j = (ring_pos+i) % fft_size;
+    ola_l[j] += fft_l[2*i]*window[i]*ola_scale/fft_size;
+    ola_r[j] += fft_l[2*i+1]*window[i]*ola_scale/fft_size;
+    i += 1;
+  );
+  frames += 1;
+);

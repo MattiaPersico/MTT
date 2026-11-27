@@ -1,0 +1,515 @@
+@init
+// Compact, responsive interface drawn directly at the window size (Retina aware).
+// UI-owned state uses ui_* variables only. The audio thread owns DSP and registry.
+// Look (0.12.0): the window of mtt_TimbreMatch (ReaImGui with the mtt_FmodSync
+// palette): its colours, square corners, framed controls, accent and plot style.
+gfx_ext_retina = 1;
+UI_DB = 72;  // dB shown below the graph's top, as the offline plot (grid every 24 dB)
+
+// Palette (0xRRGGBB): the offline window's ImGui colours.
+C_BG = 0x191A1B; C_FRAME = 0x2D3031; C_FRAME_HOV = 0x373B3C; C_FRAME_ACT = 0x3C4142;
+C_TEXT = 0xECEEEB; C_DIM = 0xA6AAA8; C_SEP = 0x464A49;
+C_BUTTON = 0x303435; C_BUTTON_HOV = 0x414948; C_BUTTON_ACT = 0x4D5956;
+C_ACCENT = 0xE89B3C; C_ACCENT_ACT = 0xF0B462; C_SEL = 0x9A6322; C_SEL_HOV = 0xAE7229;
+C_BODY = 0x8FB8C8; C_WARN = 0xE6B43C; C_ERR = 0xFF6464;
+// Data: the guide is the reference (accent, as the offline reference curve); the
+// follower's own spectrum and its correction use the offline's second curve colour.
+
+function ui_col(c,a) ( gfx_set(((c>>16)&255)/255,((c>>8)&255)/255,(c&255)/255,a); );
+// Opaque mix of two palette colours (t = 0: c1, t = 1: c2), for pre-blended fills.
+function ui_mix(c1,c2,t) (
+  gfx_set((((c1>>16)&255)*(1-t)+((c2>>16)&255)*t)/255,
+    (((c1>>8)&255)*(1-t)+((c2>>8)&255)*t)/255,((c1&255)*(1-t)+(c2&255)*t)/255,1);
+);
+
+// Lines scale with the display: 1 px at 1x, 2 px on Retina. Curves are 1.5 px as in
+// the offline plot (2 px at 1x, 3 px on Retina).
+function ui_lw() ( max(1,floor(ui_s+0.5)); );
+function ui_hline(x1,x2,y) ( gfx_rect(x1,floor(y-(ui_lw()-1)/2),max(1,x2-x1),ui_lw()); );
+function ui_vline(x,y1,y2) ( gfx_rect(floor(x-(ui_lw()-1)/2),y1,ui_lw(),max(1,y2-y1)); );
+function ui_line(x1,y1,x2,y2,n) local(k) (
+  k = 0; loop(n, gfx_line(x1,y1+k-(n-1)/2,x2,y2+k-(n-1)/2,1); k += 1;);
+);
+
+function ui_font() ( gfx_setfont(1,"Arial",13*ui_s); );
+function ui_font_small() ( gfx_setfont(2,"Arial",11*ui_s); );
+function ui_text(x,y,text,c) ( ui_col(c,1); gfx_x = x; gfx_y = y; gfx_drawstr(text); );
+function ui_text_right(x,y,text,c) ( gfx_measurestr(text,ui_tw,ui_th); ui_text(x-ui_tw,y,text,c); );
+function ui_inside(x,y,w,h) (
+  ui_mx >= x && ui_mx < x+w && ui_my >= y && ui_my < y+h;
+);
+function ui_write(id,value) (
+  slider(id) = value; slider_automate(2^(id-1));
+  // Range is one control for both limits (sliders 5 and 6).
+  id == 5 ? (slider6 = value; slider_automate(2^5););
+);
+function ui_end(id) (
+  slider_automate(2^(id-1),1); id == 5 ? slider_automate(2^5,1);
+);
+
+// Square button (ImGui look). on: the selected state, drawn like the offline window's
+// accent button.
+function ui_button(x,y,w,h,text,on) local(hit) (
+  hit = ui_inside(x,y,w,h);
+  on ? ui_col(hit ? C_SEL_HOV : C_SEL,1) :
+    ui_col(hit ? ((mouse_cap & 1) ? C_BUTTON_ACT : C_BUTTON_HOV) : C_BUTTON,1);
+  gfx_rect(x,y,w,h);
+  gfx_measurestr(text,ui_tw,ui_th);
+  ui_text(x+floor((w-ui_tw)/2),y+floor((h-ui_th)/2),text,C_TEXT);
+  ui_click && !ui_drag && hit;
+);
+
+// Checkbox (ImGui look): framed square, accent check mark, label in the text colour.
+// Returns the width it used.
+function ui_check(id,x,y,text) local(w,hit,b) (
+  b = 13*ui_s; gfx_measurestr(text,ui_tw,ui_th); w = b+6*ui_s+ui_tw;
+  hit = ui_inside(x,y,w,max(b,ui_th));
+  ui_col(hit ? C_FRAME_HOV : C_FRAME,1); gfx_rect(x,y,b,b);
+  slider(id) > 0 ? (
+    ui_col(C_ACCENT,1);
+    ui_line(x+3*ui_s,y+6.5*ui_s,x+5.5*ui_s,y+9*ui_s,ui_lw2);
+    ui_line(x+5.5*ui_s,y+9*ui_s,x+10*ui_s,y+3.5*ui_s,ui_lw2);
+  );
+  ui_text(x+b+6*ui_s,y+floor((b-ui_th)/2),text,C_TEXT);
+  ui_click && !ui_drag && hit ? (ui_write(id,slider(id) > 0 ? 0 : 1); ui_end(id););
+  w;
+);
+
+// Fader position <-> value. kind: 0 linear, 1 logarithmic, 2 Speed (logarithmic
+// milliseconds, reversed: right is faster).
+function ui_pos(kind,value,minimum,maximum) (
+  kind == 0 ? (value-minimum)/(maximum-minimum) :
+  kind == 1 ? log(1+value-minimum)/log(1+maximum-minimum) :
+  1-log(1+value-minimum)/log(1+maximum-minimum);
+);
+function ui_value(kind,t,minimum,maximum) (
+  kind == 0 ? minimum+t*(maximum-minimum) :
+  kind == 1 ? minimum+exp(t*log(1+maximum-minimum))-1 :
+  minimum+exp((1-t)*log(1+maximum-minimum))-1;
+);
+
+// Compact fader: label and value on one line, a slim framed track below, filled in
+// the dark accent up to a square accent grab. Relative drag (Shift = fine), mouse
+// wheel, double-click resets.
+function ui_fader(id,x,y,w,label,minimum,maximum,step,units,kind,def) local(t,hover,ty,gw,fit) (
+  hover = ui_inside(x,y,w,ui_row);
+  ui_click && !ui_drag && hover ? (
+    ui_last_id == id && ui_now-ui_last_click < 0.3 ? (
+      ui_write(id,def); ui_end(id); ui_last_id = 0;
+    ) : (
+      ui_drag = id; ui_drag_mx = ui_mx; ui_drag_w = w;
+      ui_drag_t = ui_pos(kind,slider(id),minimum,maximum);
+      ui_last_id = id; ui_last_click = ui_now;
+    );
+  );
+  ui_drag == id && (mouse_cap & 1) ? (
+    t = max(0,min(1,ui_drag_t+(ui_mx-ui_drag_mx)/ui_drag_w*((mouse_cap & 8) ? 0.1 : 1)));
+    ui_write(id,max(minimum,min(maximum,floor(ui_value(kind,t,minimum,maximum)/step+0.5)*step)));
+  );
+  hover && mouse_wheel && !ui_drag ? (
+    t = max(0,min(1,ui_pos(kind,slider(id),minimum,maximum)+sign(mouse_wheel)*((mouse_cap & 8) ? 0.005 : 0.03)));
+    ui_write(id,max(minimum,min(maximum,floor(ui_value(kind,t,minimum,maximum)/step+0.5)*step)));
+    ui_end(id); mouse_wheel = 0;
+  );
+  t = max(0,min(1,ui_pos(kind,slider(id),minimum,maximum)));
+  id == 5 ? sprintf(#ui_value,"\xc2\xb1%.0f dB",slider(id)) :
+    sprintf(#ui_value,step < 1 ? "%.1f %s" : "%.0f %s",slider(id),units);
+  // Narrow windows: if label and value collide, show the value only while the
+  // fader is hovered or dragged.
+  gfx_measurestr(label,ui_lw_,ui_th); gfx_measurestr(#ui_value,ui_tw,ui_th);
+  fit = ui_lw_+ui_tw+6*ui_s <= w;
+  fit || !(hover || ui_drag == id) ? ui_text(x,y,label,C_DIM);
+  fit || hover || ui_drag == id ? ui_text_right(x+w,y,#ui_value,C_TEXT);
+  ty = y+ui_row-10*ui_s; gw = 6*ui_s;
+  ui_col(hover && !ui_drag ? C_FRAME_HOV : C_FRAME,1); gfx_rect(x,ty,w,5*ui_s);
+  ui_col(C_SEL,1); gfx_rect(x,ty,floor((w-gw)*t+gw/2),5*ui_s);
+  // The grab stays inside the column at both ends.
+  ui_col(ui_drag == id ? C_ACCENT_ACT : C_ACCENT,1); gfx_rect(x+floor((w-gw)*t),ty-3*ui_s,gw,11*ui_s);
+);
+
+// Level meter with the Threshold. The track spans -90..0 dBFS; its left end is Off
+// (stored as -120: correction always updates). editable: the guide drags slider 16;
+// a follower shows its guide's level and threshold read-only. Drawn like the offline
+// progress bar: framed track, accent fill.
+function ui_meter(x,y,w,level,threshold,editable,label) local(t,lt,hover,on,open,ty,th,mx) (
+  hover = ui_inside(x,y,w,ui_row);
+  editable && ui_click && !ui_drag && hover ? (
+    ui_last_id == 16 && ui_now-ui_last_click < 0.3 ? (
+      ui_write(16,-120); ui_end(16); ui_last_id = 0;
+    ) : (
+      ui_drag = 16; ui_drag_mx = ui_mx; ui_drag_w = w;
+      ui_drag_t = max(0,(slider16+90)/90); ui_last_id = 16; ui_last_click = ui_now;
+    );
+  );
+  editable && ui_drag == 16 && (mouse_cap & 1) ? (
+    t = max(0,min(1,ui_drag_t+(ui_mx-ui_drag_mx)/ui_drag_w*((mouse_cap & 8) ? 0.1 : 1)));
+    ui_write(16,t*90 < 0.5 ? -120 : floor(t*90+0.5)-90);
+  );
+  editable && hover && mouse_wheel && !ui_drag ? (
+    t = max(-90,slider16)+sign(mouse_wheel)*((mouse_cap & 8) ? 1 : 3);
+    ui_write(16,t <= -90 ? -120 : min(0,t)); ui_end(16); mouse_wheel = 0;
+  );
+  on = threshold > -90;
+  t = on ? (threshold+90)/90 : 0; lt = max(0,min(1,(level+90)/90));
+  open = !on || level >= threshold;
+  ui_text(x,y,label,C_DIM);
+  on ? sprintf(#ui_value,"%.0f dB",threshold) : strcpy(#ui_value,"Off");
+  ui_text_right(x+w,y,#ui_value,on ? C_TEXT : C_DIM);
+  on ? (
+    gfx_measurestr(#ui_value,ui_tw,ui_th);
+    ui_text_right(x+w-ui_tw-10*ui_s,y,open ? "updating" : "holding",open ? C_ACCENT : C_DIM);
+  );
+  ty = y+ui_row-11*ui_s; th = 7*ui_s; mx = x+floor(w*t);
+  ui_col(editable && hover && !ui_drag ? C_FRAME_HOV : C_FRAME,1); gfx_rect(x,ty,w,th);
+  // Below the threshold followers keep their last correction: shade that range.
+  on ? (ui_col(C_FRAME_ACT,1); gfx_rect(x,ty,mx-x,th););
+  ui_col(open ? C_ACCENT : C_DIM,1); gfx_rect(x,ty+ui_s,floor(w*lt),th-2*ui_s);
+  ui_col(on ? C_TEXT : C_DIM,1); gfx_rect(mx-ui_s,ty-3*ui_s,2*ui_s,th+6*ui_s);
+  editable ? gfx_triangle(mx-4*ui_s,ty+th+7*ui_s,mx+4*ui_s,ty+th+7*ui_s,mx,ty+th+3*ui_s);
+);
+
+// Band position <-> frequency, matching the band layout used by the DSP.
+function ui_freq_x(hz) (
+  ui_gx+ui_gw*max(0,min(1,(1+log(max(50,hz)/50)/log(2)/8.4*(ui_count-2))/ui_count));
+);
+function ui_x_freq(x) (
+  max(50,min(18000,50*2^(((x-ui_gx)/ui_gw*ui_count-1)/(ui_count-2)*8.4)));
+);
+function ui_hz_text(hz) (
+  hz < 1000 ? sprintf(#ui_hz,"%.0f Hz",hz) : sprintf(#ui_hz,"%.1f kHz",hz/1000);
+);
+
+function ui_source_menu() local(i,n,choice) (
+  // A leading '#' greys out a gfx_showmenu item: labels start with a space.
+  strcpy(#ui_menu,slider3 == 0 ? "! #SELF" : " #SELF");
+  ui_menu_map = 261100; ui_menu_map[0] = 0; n = 1; i = 1;
+  loop(64,
+    (atomic_get(members[i-1]) || i == slider3) && i != slider2 ? (
+      sprintf(#ui_item,"|%s #%02d%s",i == slider3 ? "!" : "",i,
+        atomic_get(members[i-1]) ? "" : "  (inactive)");
+      strcat(#ui_menu,#ui_item); ui_menu_map[n] = i; n += 1;
+    );
+    i += 1;
+  );
+  gfx_x = mouse_x; gfx_y = mouse_y; choice = gfx_showmenu(#ui_menu);
+  choice > 0 ? (ui_write(3,ui_menu_map[choice-1]); ui_end(3););
+);
+
+// Level scale: ui_top (dB) sits 16 px under the graph's top edge, UI_DB below it at
+// the bottom edge. Values outside are kept inside the graph.
+function ui_db_y(db) (
+  max(ui_gy,min(ui_gy+ui_gh,ui_gy+16*ui_s+(ui_top-db)/UI_DB*(ui_gh-16*ui_s)));
+);
+
+// Display arrays, y per band (UI_OWN, UI_REF). The DSP already gives the values the
+// match uses (bands without FFT bins interpolated); no display-only smoothing, so the
+// distance between the guide line and the bars is the correction being requested.
+UI_OWN = 273000; UI_REF = 273200;
+function ui_prepare(src,dst) local(i) (
+  i = 0; loop(ui_count, dst[i] = ui_db_y(10*log10(max((10^-12),atomic_get(src[i])))); i += 1;);
+);
+// Straight segments through the band centres (the DSP interpolates the curve the same
+// way, linearly between centres), extended flat to both edges.
+function ui_curve(arr,c) local(k,x0,y0,x1,y1,cell) (
+  cell = ui_gw/ui_count; ui_col(c,1);
+  x0 = ui_gx; y0 = arr[0]; k = 0;
+  loop(ui_count+1,
+    x1 = k < ui_count ? ui_gx+(k+0.5)*cell : ui_gx+ui_gw; y1 = arr[min(k,ui_count-1)];
+    ui_line(x0,y0,x1,y1,ui_lw2);
+    x0 = x1; y0 = y1; k += 1;
+  );
+);
+
+// Tooltip-like readout inside the graph, near the mouse (the offline window shows its
+// hints inside the plot); the header keeps the instance's state.
+function ui_tip_draw() local(bw,bh,bx,by) (
+  ui_font(); gfx_measurestr(#ui_tip,ui_tw,ui_th);
+  bw = ui_tw+12*ui_s; bh = ui_th+8*ui_s;
+  bx = max(ui_gx,min(ui_gx+ui_gw-bw,ui_mx+14*ui_s));
+  by = ui_my-bh-8*ui_s; by < ui_gy ? by = ui_my+18*ui_s;
+  by = max(ui_gy,min(ui_cy+ui_ch-bh,by));
+  ui_col(C_BG,0.94); gfx_rect(bx,by,bw,bh);
+  ui_col(C_SEP,1); gfx_rect(bx,by,bw,bh,0);
+  ui_text(bx+6*ui_s,by+4*ui_s,#ui_tip,C_TEXT);
+);
+
+function ui_graph() local(i,cell,x,v,x1,x2,z,id,lft,rgt,pct,y,hz,k,hover,fy,a,m,j,near1,near2,inbox,rng,tt,top) (
+  cell = ui_gw/ui_count;
+  ui_col(C_FRAME,1); gfx_rect(ui_gx,ui_gy,ui_gw,ui_gh);
+  // Top of the scale: the louder of the displayed profiles in 6 dB steps. It rises at
+  // once and falls only after a drop of more than 12 dB, so the grid does not jitter.
+  top = -200; i = 0;
+  loop(ui_count,
+    top = max(top,10*log10(max((10^-12),atomic_get(display_own[i]))));
+    ui_follow && reference_valid ? top = max(top,10*log10(max((10^-12),atomic_get(display_ref[i]))));
+    i += 1;
+  );
+  tt = max(-UI_DB,min(0,ceil(top/6)*6));
+  (!ui_top_set || tt > ui_top || tt < ui_top-12) ? (ui_top = tt; ui_top_set = 1;);
+  // Own input: one bar per band (shows Definition), pre-blended with the frame.
+  ui_prepare(display_own,UI_OWN);
+  i = 0;
+  loop(ui_count,
+    v = UI_OWN[i];
+    ui_mix(C_FRAME,C_BODY,0.28);
+    gfx_rect(ui_gx+i*cell+0.5*ui_s,v,max(1,cell-ui_s),ui_gy+ui_gh-v);
+    ui_col(C_BODY,0.9); ui_hline(ui_gx+i*cell+0.5*ui_s,ui_gx+(i+1)*cell-0.5*ui_s,v);
+    i += 1;
+  );
+  // Grid as the offline plot: 50 Hz..10 kHz and every 24 dB, labels at the bottom.
+  ui_font_small(); k = 0;
+  loop(8,
+    hz = k == 0 ? 50 : k == 1 ? 100 : k == 2 ? 200 : k == 3 ? 500 : k == 4 ? 1000 : k == 5 ? 2000 : k == 6 ? 5000 : 10000;
+    x = floor(ui_freq_x(hz));
+    x > ui_gx+2*ui_s ? (
+      ui_col(C_SEP,0.8); ui_vline(x,ui_gy,ui_gy+ui_gh);
+      sprintf(#ui_hz,hz < 1000 ? "%.0f" : "%.0fk",hz < 1000 ? hz : hz/1000);
+      ui_text(x+3*ui_s,ui_gy+ui_gh-ui_small-3*ui_s,#ui_hz,C_DIM);
+    );
+    k += 1;
+  );
+  k = 1; loop(2, ui_col(C_SEP,0.8); ui_hline(ui_gx,ui_gx+ui_gw,floor(ui_db_y(ui_top-24*k))); k += 1;);
+  ui_font();
+  ui_follow && reference_valid ? (
+    ui_prepare(display_ref,UI_REF); ui_curve(UI_REF,C_ACCENT);
+  );
+  ui_follow ? (
+    x1 = ui_freq_x(min(slider20,slider21/1.25)); x2 = ui_freq_x(slider21);
+    m = ui_gy+ui_gh*0.55;
+    // Crossover slope selector (sliders 34/35): appears while hovering a crossover
+    // line and stays while the mouse is on it. Handled before any other click.
+    near1 = ui_inside(ui_gx,ui_gy,ui_gw,ui_gh) && abs(ui_mx-x1) < 7*ui_s;
+    near2 = ui_inside(ui_gx,ui_gy,ui_gw,ui_gh) && abs(ui_mx-x2) < 7*ui_s;
+    inbox = ui_xo_show && ui_inside(ui_xo_bx,ui_xo_by,104*ui_s,18*ui_s);
+    ui_drag ? ui_xo_show = 0 : near1 ? ui_xo_show = 1 : near2 ? ui_xo_show = 2 : !inbox ? ui_xo_show = 0;
+    ui_xo_show ? (
+      x = ui_xo_show == 1 ? x1 : x2;
+      ui_xo_bx = max(ui_gx,min(ui_gx+ui_gw-104*ui_s,x-52*ui_s)); ui_xo_by = m+12*ui_s;
+      j = 0;
+      loop(4,
+        ui_click && ui_inside(ui_xo_bx+j*26*ui_s,ui_xo_by,26*ui_s,18*ui_s) ? (
+          ui_write(33+ui_xo_show,j); ui_end(33+ui_xo_show); ui_click = 0;
+        );
+        j += 1;
+      );
+    );
+    // Zone lines: vertical drag of the amounts (checked first). Neutral lines with
+    // square handles; the dragged or hovered one in the text colour.
+    z = 0;
+    loop(3,
+      id = 17+z; lft = z == 0 ? ui_gx : z == 1 ? x1 : x2; rgt = z == 0 ? x1 : z == 1 ? x2 : ui_gx+ui_gw;
+      pct = slider(id); y = floor(ui_gy+ui_gh-6*ui_s-pct/100*(ui_gh-26*ui_s));
+      hover = ui_inside(lft+12*ui_s,y-7*ui_s,rgt-lft-24*ui_s,14*ui_s);
+      ui_click && !ui_drag && hover ? (
+        ui_drag = id; ui_drag_my = ui_my; ui_drag_v = pct;
+      );
+      ui_drag == id && (mouse_cap & 1) ? (
+        ui_write(id,max(0,min(100,floor(ui_drag_v+(ui_drag_my-ui_my)/(ui_gh-26*ui_s)*100+0.5))));
+        sprintf(#ui_tip,"%s %d%%",z == 0 ? "Low" : z == 1 ? "Mid" : "High",slider(id)); ui_tip_on = 1;
+      );
+      a = ui_drag == id || (!ui_drag && hover);
+      ui_col(a ? C_TEXT : C_DIM,a ? 1 : 0.75);
+      ui_hline(lft+2*ui_s,rgt-2*ui_s,y);
+      k = (ui_drag == id ? 5 : 4)*ui_s; gfx_rect((lft+rgt)/2-k,y-k,2*k,2*k);
+      sprintf(#ui_zone,"%d%%",slider(id));
+      gfx_measurestr(#ui_zone,ui_tw,ui_th);
+      ui_text(floor((lft+rgt-ui_tw)/2),ui_gy+3*ui_s,#ui_zone,a ? C_TEXT : C_DIM);
+      z += 1;
+    );
+    // Crossovers: horizontal drag anywhere along the line.
+    ui_click && !ui_drag && ui_inside(ui_gx,ui_gy,ui_gw,ui_gh) ? (
+      abs(ui_mx-x1) < 7*ui_s ? ui_drag = 20 : abs(ui_mx-x2) < 7*ui_s ? ui_drag = 21;
+    );
+    (mouse_cap & 1) ? (
+      ui_drag == 20 ? ui_write(20,floor(min(slider21/1.25,ui_x_freq(ui_mx))));
+      ui_drag == 21 ? ui_write(21,floor(max(slider20*1.25,min(18000,ui_x_freq(ui_mx)))));
+    );
+    k = 0;
+    loop(2,
+      x = k == 0 ? x1 : x2;
+      a = ui_drag == 20+k || (abs(ui_mx-x) < 7*ui_s && ui_inside(ui_gx,ui_gy,ui_gw,ui_gh));
+      ui_col(a ? C_TEXT : C_DIM,a ? 0.95 : 0.55); ui_vline(x,ui_gy,ui_gy+ui_gh);
+      // Left/right arrows at the centre tell that the crossover moves sideways.
+      ui_col(a ? C_TEXT : C_DIM,a ? 1 : 0.8);
+      gfx_triangle(x-3*ui_s,m-4*ui_s,x-3*ui_s,m+4*ui_s,x-8*ui_s,m);
+      gfx_triangle(x+3*ui_s,m-4*ui_s,x+3*ui_s,m+4*ui_s,x+8*ui_s,m);
+      k += 1;
+    );
+    // Slope selector drawn on top of the crossover lines: square buttons, the
+    // selected one as the offline accent button.
+    ui_xo_show ? (
+      ui_font_small(); j = 0;
+      loop(4,
+        x = ui_xo_bx+j*26*ui_s;
+        sprintf(#ui_slope,"%d",6*2^j);
+        ui_button(x,ui_xo_by,25*ui_s,18*ui_s,#ui_slope,slider(33+ui_xo_show) == j);
+        j += 1;
+      );
+      ui_font();
+      ui_hz_text(ui_xo_show == 1 ? min(slider20,slider21/1.25) : slider21);
+      sprintf(#ui_tip,"Crossover %s  %d dB/oct",#ui_hz,6*2^slider(33+ui_xo_show)); ui_tip_on = 1;
+    );
+    // Band floor (slider 12): dashed line, tab at the right edge. Slider 12 is a share
+    // of the band's power; the bars show density per fine cell, so the line sits
+    // 10*log10(fine cells per band) lower, where a bar at the floor would end.
+    fy = floor(ui_db_y(slider12-10*log10(224/max(1,ui_count-2))));
+    ui_click && !ui_drag && ui_inside(ui_gx+ui_gw-34*ui_s,fy-6*ui_s,34*ui_s,12*ui_s) ? (
+      ui_drag = 12; ui_drag_my = ui_my; ui_drag_v = slider12;
+    );
+    ui_drag == 12 && (mouse_cap & 1) ? (
+      ui_write(12,max(-90,min(0,floor(ui_drag_v-(ui_my-ui_drag_my)/(ui_gh-16*ui_s)*UI_DB+0.5))));
+      sprintf(#ui_tip,"Band floor %.0f dB",slider12); ui_tip_on = 1;
+    );
+    a = ui_drag == 12 || ui_inside(ui_gx+ui_gw-34*ui_s,fy-6*ui_s,34*ui_s,12*ui_s);
+    ui_col(a ? C_TEXT : C_DIM,a ? 0.9 : 0.55);
+    x = ui_gx; loop(ceil(ui_gw/(8*ui_s)), ui_hline(x,min(ui_gx+ui_gw,x+4*ui_s),fy); x += 8*ui_s;);
+    gfx_rect(ui_gx+ui_gw-24*ui_s,fy-2*ui_s,24*ui_s,4*ui_s);
+    // Correction strip under the graph: applied gain per band, scaled to Range (the
+    // correction never exceeds it), labelled with the scale.
+    rng = max(1,max(slider5,slider6));
+    ui_col(C_FRAME,1); gfx_rect(ui_gx,ui_cy,ui_gw,ui_ch);
+    ui_col(C_SEP,1); ui_hline(ui_gx,ui_gx+ui_gw,ui_cy+ui_ch/2);
+    i = 0;
+    loop(ui_count,
+      v = max(-rng,min(rng,atomic_get(display_gain[i])));
+      ui_col(C_BODY,0.9);
+      gfx_rect(ui_gx+i*cell+0.5*ui_s,v >= 0 ? ui_cy+ui_ch/2-v/rng*(ui_ch/2-ui_s) : ui_cy+ui_ch/2,
+        max(1,cell-ui_s),max(1,abs(v)/rng*(ui_ch/2-ui_s)));
+      i += 1;
+    );
+    ui_font_small(); sprintf(#ui_rng,"\xc2\xb1%.0f dB",rng);
+    ui_text_right(ui_gx+ui_gw-3*ui_s,ui_cy+ui_s,#ui_rng,C_DIM); ui_font();
+    ui_drag == 20 || ui_drag == 21 ? (
+      ui_hz_text(ui_drag == 20 ? min(slider20,slider21/1.25) : slider21);
+      sprintf(#ui_tip,"Crossover %s",#ui_hz); ui_tip_on = 1;
+    ) : !ui_drag && !ui_tip_on && ui_inside(ui_gx,ui_gy,ui_gw,ui_cy+ui_ch-ui_gy) ? (
+      hover = max(0,min(ui_count-1,floor((ui_mx-ui_gx)/cell)));
+      ui_hz_text(hover == 0 ? 25 : hover == ui_count-1 ? 20000 : 50*2^((hover-0.5)*8.4/(ui_count-2)));
+      sprintf(#ui_tip,"%s  %+.1f dB",#ui_hz,atomic_get(display_gain[hover])); ui_tip_on = 1;
+    );
+  );
+);
+
+function ui_controls(y) local(c,cw,g,c5,x,w,lbl) (
+  g = 18*ui_s; cw = (ui_w-2*ui_pad-3*g)/4; c = ui_pad;
+  ui_follow ? (
+    // Five columns on the follower row; Frequency smoothing gets a wider one.
+    c5 = (ui_w-2*ui_pad-4*g)/5.5;
+    ui_fader(4,c,y,c5,"Match",0,100,1,"%",0,100);
+    ui_fader(5,c+(c5+g),y,c5,"Range",0,48,1,"dB",0,24);
+    ui_fader(8,c+2*(c5+g),y,c5,"Speed",0,2000,1,"ms",2,80);
+    ui_fader(14,c+3*(c5+g),y,c5,"Definition",4,128,1,"",0,16);
+    // The full name while it fits its column (the value then shows on hover, as for
+    // every fader); "Smoothing" in narrower windows, where it overflowed.
+    gfx_measurestr("Frequency smoothing",ui_tw,ui_th);
+    lbl = ui_tw <= 1.5*c5 ? "Frequency smoothing" : "Smoothing";
+    ui_fader(32,c+4*(c5+g),y,1.5*c5,lbl,0,100,1,"%",0,100);
+    y += ui_row+6*ui_s;
+    // Second follower row: Invert, Linear phase and, while the guide's Threshold is
+    // Off, Keep target when guide stops; with the Threshold on, the guide's level and
+    // threshold (read-only) take the place of Keep target.
+    x = c; w = 0;
+    ui_guide_threshold ? (
+      w = 2*cw+g;
+      ui_meter(c,y,w,live_valid ? live_level_db : -120,live_threshold_db,0,"Guide threshold");
+      x = c+w+g;
+    );
+    ui_inv_x = x; ui_inv_y = y+floor((ui_row-13*ui_s)/2);
+    x += ui_check(33,ui_inv_x,ui_inv_y,"Invert")+20*ui_s;
+    // Phase of the curve filter (slider 36): minimum (no pre-ringing) or linear.
+    // Same latency either way.
+    ui_lin_x = x; ui_lin_y = ui_inv_y;
+    x += ui_check(36,ui_lin_x,ui_lin_y,"Linear phase")+20*ui_s;
+    !ui_guide_threshold ? (
+      // Keep target (slider 10): if the guide stops or disappears, keep matching to
+      // its last spectrum instead of returning to neutral.
+      ui_keep_x = x; ui_keep_y = ui_inv_y; ui_check(10,ui_keep_x,ui_keep_y,"Keep target when guide stops");
+    );
+    y += ui_row+6*ui_s;
+  );
+  // Guide controls: own level with the Threshold, and the published Speed.
+  (!ui_follow || ui_master) ? (
+    ui_meter(c,y,3*cw+2*g,ui_level,slider16,1,"Threshold");
+    ui_fader(7,c+3*(cw+g),y,cw,"Speed",0,2000,1,"ms",2,80);
+  );
+);
+
+function draw_interface() local(rows,bar,x,w,kind,col,ty) (
+  // REAPER sets gfx_ext_retina to the current screen's scale (2 on Retina) and
+  // updates it when the window moves to another screen: re-read every frame.
+  ui_s = max(1,gfx_ext_retina); ui_w = gfx_w; ui_h = gfx_h;
+  ui_pad = 8*ui_s; ui_row = 30*ui_s; ui_small = 11*ui_s; bar = 24*ui_s;
+  ui_lw2 = max(1,floor(1.5*ui_s+0.5));
+  ui_now = time_precise(); ui_mx = mouse_x; ui_my = mouse_y;
+  ui_count = atomic_get(display_band_count); !ui_count ? ui_count = slider14;
+  ui_follow = slider3 > 0; ui_master = atomic_get(followers) > 0;
+  ui_guide_threshold = ui_follow && live_threshold_db > -90;
+  ui_click = (mouse_cap & 1) && !(ui_previous_mouse & 1);
+  !(mouse_cap & 1) && ui_drag ? (ui_end(ui_drag); ui_drag = 0;);
+  ui_tip_on = 0; strcpy(#ui_tip,"");
+  ui_col(C_BG,1); gfx_rect(0,0,ui_w,ui_h);
+  ui_font();
+
+  rows = ui_follow ? 2+ui_master : 1;
+  // Display level: instant rise, about 20 dB/s fall.
+  ui_level = max(atomic_get(display_level_db),ui_level-20*max(0,min(0.2,ui_now-ui_level_time)));
+  ui_level_time = ui_now;
+  ui_gx = ui_pad; ui_gw = ui_w-2*ui_pad; ui_gy = ui_pad+bar+ui_pad;
+  ui_ch = ui_follow ? 30*ui_s : 0;
+  ui_oh = 0;
+  ui_gh = max(40*ui_s,ui_h-ui_gy-(ui_follow ? ui_ch+4*ui_s+ui_oh : 0)-
+    rows*ui_row-(rows-1)*6*ui_s-2*ui_pad);
+  ui_cy = ui_gy+ui_gh+4*ui_s;
+  ui_controls(ui_cy+(ui_follow ? ui_ch+ui_oh : -4*ui_s)+ui_pad);
+  ui_graph();
+  ui_tip_on ? ui_tip_draw();
+
+  // Header. Left: own ID, "Follows" and the guide menu (#SELF = follows nobody), a
+  // combo as in ImGui. Centre: the name, or the instance's state with a coloured dot
+  // (as the offline window's status footer). Right: Window Long / Short.
+  ty = ui_pad+floor((bar-13*ui_s)/2);
+  sprintf(#ui_id,"ID #%02d",slider2); ui_text(ui_pad,ty,#ui_id,C_TEXT);
+  gfx_measurestr(#ui_id,ui_tw,ui_th); x = ui_pad+ui_tw+16*ui_s;
+  ui_text(x,ty,"Follows",C_DIM);
+  gfx_measurestr("Follows",ui_tw,ui_th); x += ui_tw+8*ui_s; w = 88*ui_s;
+  slider3 ? sprintf(#ui_select,"#%02d",slider3) : strcpy(#ui_select,"#SELF");
+  ui_inside(x,ui_pad,w,bar) ? (
+    ui_col(C_FRAME_HOV,1); gfx_rect(x,ui_pad,w-bar,bar); ui_col(C_BUTTON_HOV,1); gfx_rect(x+w-bar,ui_pad,bar,bar);
+    ui_click && !ui_drag ? ui_source_menu();
+  ) : (
+    ui_col(C_FRAME,1); gfx_rect(x,ui_pad,w-bar,bar); ui_col(C_BUTTON,1); gfx_rect(x+w-bar,ui_pad,bar,bar);
+  );
+  ui_text(x+9*ui_s,ty,#ui_select,C_TEXT);
+  ui_col(C_TEXT,1);
+  gfx_triangle(x+w-bar/2-4*ui_s,ui_pad+bar/2-2*ui_s,x+w-bar/2+4*ui_s,ui_pad+bar/2-2*ui_s,x+w-bar/2,ui_pad+bar/2+3*ui_s);
+  ui_menu_right = x+w;
+  // Window selector (segmented): Long = more frequency precision, Short = sharper
+  // attacks and half the latency. Every instance (guides publish with it).
+  w = ui_w-ui_pad-104*ui_s;
+  ui_button(w,ui_pad,52*ui_s-ui_s,bar,"Long",slider29 < 0.5) ? (ui_write(29,0); ui_end(29););
+  ui_button(w+52*ui_s,ui_pad,52*ui_s,bar,"Short",slider29 >= 0.5) ? (ui_write(29,1); ui_end(29););
+  // State: 1 error, 2 warning, 3 busy (accent). Hover readouts appear in the graph.
+  kind = 0;
+  ui_now < reject_until ? (strcpy(#ui_status,"Loop not allowed"); kind = 1;) :
+  ui_follow && !reference_valid && !(hold_active && held_valid) ? (strcpy(#ui_status,"Waiting for guide"); kind = 2;) :
+  ui_follow && hold_active ? (held_valid ? (strcpy(#ui_status,"Holding"); kind = 3;) : (strcpy(#ui_status,"Waiting for threshold"); kind = 2;)) :
+  display_peak_reduction < -0.1 ? (sprintf(#ui_status,"Peak guard %.1f dB",display_peak_reduction); kind = 2;);
+  // The "Window" label gives way when the centre text would not fit beside it.
+  kind ? gfx_measurestr(#ui_status,ui_tw,ui_th) : gfx_measurestr("mtt_TimbreLink",ui_tw,ui_th);
+  ui_th = ui_tw+(kind ? 10*ui_s : 0);
+  gfx_measurestr("Window",ui_tw,ui_window_left);
+  ui_window_left = w-8*ui_s-ui_tw;
+  ui_window_left-ui_menu_right-24*ui_s >= ui_th ? ui_text_right(w-8*ui_s,ty,"Window",C_DIM) : ui_window_left = w;
+  kind ? (
+    col = kind == 1 ? C_ERR : kind == 2 ? C_WARN : C_ACCENT;
+    gfx_measurestr(#ui_status,ui_tw,ui_th);
+    x = max(ui_menu_right+16*ui_s+ui_tw/2,min(ui_window_left-8*ui_s-ui_tw/2,ui_w/2));
+    ui_col(col,1); gfx_circle(x-ui_tw/2-7*ui_s,ui_pad+bar/2,3*ui_s,1);
+    ui_text(x-ui_tw/2,ty,#ui_status,col);
+  ) : (
+    gfx_measurestr("mtt_TimbreLink",ui_tw,ui_th);
+    x = max(ui_menu_right+8*ui_s+ui_tw/2,min(ui_window_left-8*ui_s-ui_tw/2,ui_w/2));
+    ui_text(x-ui_tw/2,ty,"mtt_TimbreLink",C_TEXT);
+  );
+  ui_previous_mouse = mouse_cap;
+);

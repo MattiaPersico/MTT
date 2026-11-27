@@ -1,0 +1,174 @@
+desc:mtt_TimbreLink
+// Version: 0.12.0 - experimental spectral matching for sound design.
+// Private named shared memory; no audio routing or external dependencies.
+tags: equalizer spectral sound-design
+options:gmem=mtt_TimbreLink_v2
+options:maxmem=524288
+
+slider1:1<1,64,1>-Link group (unused since 0.4.0)
+slider2:0<0,64,1>-Instance ID (0 = assign automatically)
+slider3:0<0,64,1>-Follow instance (0 = independent)
+slider4:100<0,100,0.1>-Match (%)
+slider5:24<0,48,0.1>-Maximum boost (dB)
+slider6:24<0,48,0.1>-Maximum cut (dB)
+slider7:80<0,2000,1>-Analysis averaging (ms)
+slider8:80<0,2000,1>-Gain response (ms)
+slider9:0<0,1,1{Live,Freeze}>-Reference (unused since 0.4.0, always Live)
+slider10:0<0,1,1{Return to neutral,Hold last profile}>-Missing reference
+slider11:-90<-120,-30,1>-Input silence floor (dBFS)
+slider12:-60<-100,0,1>-Relative band floor (dB)
+slider13:0<-48,12,0.1>-Output trim (dB)
+slider14:16<4,128,1>-Bands
+slider15:0<0,1,1{Continuous,Hold correction below guide threshold}>-Update mode (only with pre-0.4.0 guides)
+slider16:-120<-120,0,1>-Threshold (dBFS, set on the guide; -90 or lower = Off)
+slider17:100<0,100,0.1>-Low Match (%)
+slider18:100<0,100,0.1>-Mid Match (%)
+slider19:100<0,100,0.1>-High Match (%)
+slider20:250<50,12000,1:log>-Low-Mid split (Hz)
+slider21:2500<80,18000,1:log>-Mid-High split (Hz)
+slider22:1<0,1,1{Off,On}>-Peak guard (unused since 0.6.0, always on)
+slider23:0<0,1,1{Off,On}>-Smooth curve (unused since 0.6.0)
+slider24:0<0,1,1{Off,On}>-Envelope (unused since 0.6.0)
+slider25:0<0,1,1{Off,On}>-4x overlap (unused since 0.6.0)
+slider26:0<0,1,1{Off,On}>-Short window (unused since 0.6.0)
+slider27:0<0,1,1{Off,On}>-Soft range (unused since 0.6.0)
+slider28:0<0,1,1{Off,On}>-Soft guard (unused since 0.6.0)
+slider29:0<0,1,1{Long,Short}>-Window
+slider30:0<0,63,1>-Engine overrides (testing only, 0 = normal)
+slider31:0<0,100,1>-Detail (unused since 0.8.0)
+slider32:100<0,100,1>-Frequency smoothing (%)
+slider33:0<0,1,1{Off,On}>-Invert
+slider34:2<0,3,1{6 dB/oct,12 dB/oct,24 dB/oct,48 dB/oct}>-Low-Mid crossover slope
+slider35:2<0,3,1{6 dB/oct,12 dB/oct,24 dB/oct,48 dB/oct}>-Mid-High crossover slope
+slider36:0<0,1,1{Minimum,Linear}>-Phase
+
+in_pin:Left
+in_pin:Right
+out_pin:Left
+out_pin:Right
+
+import network.jsfx-inc
+import spectral.jsfx-inc
+import interface.jsfx-inc
+
+@init
+ext_noinit = 1;
+ext_nodenorm = 1;
+// FFT pairs stay within individual 65536-word pages.
+// Stereo is packed into fft_l (left + i*right); fft_r's page holds only map tails.
+fft_l = 0; fft_r = 65536;
+ring_l = 131072; ring_r = 163840;
+ola_l = 196608; ola_r = 229376;
+// Window/map arrays use the unused tails of the FFT pages: see setup().
+owner == 0 ? owner = atomic_add(gmem[1],1);
+LINK_GROUP = 1;
+live_threshold_db = -120;
+net_group = 0; net_id = 0; net_addr = 0;
+reset_pending = 1; last_play_state = -1;
+slider_show(2^36-1,0);
+
+@slider
+slider2 = floor(max(0,min(64,slider2)));
+// Freeze was removed in 0.4.0: the reference is always live.
+slider9 = 0;
+slider3 = floor(max(0,min(64,slider3)));
+slider14 = floor(max(4,min(128,slider14)));
+
+@block
+// Engine (0.8.0). Window: Long (about 85 ms) or Short (about 43 ms). Smoothing sets
+// the width of the spectral averaging (100% timbre only, 0% every band on its own).
+// Smooth curve, 4x overlap, soft Range and the soft Peak guard are always on. slider30 is a hidden bitmask that disables them for testing:
+// 1 Smooth, 2 4x overlap, 4 soft Range, 8 soft guard knee, 16 Envelope, 32 guard.
+eng = floor(max(0,min(63,slider30)));
+f_smooth = !(eng & 1); f_overlap = !(eng & 2); f_softrange = !(eng & 4);
+f_softguard = !(eng & 8); f_guard = !(eng & 32);
+f_short = slider29 >= 0.5;
+// Phase of the curve filter (0.12.0): Minimum (default) or Linear; same latency.
+f_linear = slider36 >= 0.5;
+// Averaging width from Smoothing 0..100%; override bit 16 forces raw profiles.
+env_amount = (eng & 16) ? 0 : max(0,min(100,slider32))/100;
+// Rate, Character or overlap changes rebuild the analysis (brief gap).
+(srate != configured_rate || f_short != configured_short || f_overlap != configured_overlap) ? setup();
+// Clear history on seeks and transport changes, never carry old audio across them.
+(play_state != last_play_state ||
+ ((play_state & 1) && have_position && abs(play_position-expected_position) > 2/srate)) ? reset_pending = 1;
+last_play_state = play_state;
+expected_position = play_position + samplesblock/srate;
+have_position = 1;
+reset_pending ? reset_audio();
+block_offset = 0;
+net_tick();
+pdc_delay = fft_size;
+pdc_bot_ch = 0; pdc_top_ch = 2;
+ext_tail_size = fft_size*2;
+analysis_alpha = slider7 <= 0 ? 0 : exp(-hop/(srate*slider7*0.001));
+gain_alpha = slider8 <= 0 ? 0 : exp(-hop/(srate*slider8*0.001));
+peak_release = exp(-1/(srate*0.05));
+atomic_set(display_peak_reduction,20*log10(max(0.000000000001,peak_gain)));
+trim_target = exp(slider13*log(10)/20);
+trim_alpha = exp(-1/(srate*0.01));
+
+@sample
+// Read output before inserting the next frame: constant N-sample latency.
+out_l = ola_l[ring_pos]; out_r = ola_r[ring_pos];
+ola_l[ring_pos] = 0; ola_r[ring_pos] = 0;
+ring_l[ring_pos] = spl0; ring_r[ring_pos] = spl1;
+ring_pos = (ring_pos+1) % fft_size;
+hop_count += 1; block_offset += 1;
+hop_count >= hop ? (
+  hop_count = 0;
+  frame_position = play_position + block_offset/srate;
+  process_frame();
+);
+trim_gain = trim_target + trim_alpha*(trim_gain-trim_target);
+spl0 = out_l*trim_gain; spl1 = out_r*trim_gain;
+// Linked stereo peak guard, no extra latency. No effect on independent instances.
+f_guard && parent > 0 ? (
+  peak_level = max(0.000000000001,max(abs(spl0),abs(spl1)));
+  f_softguard ? (
+    // 6 dB soft knee centred on -1 dBFS. The output
+    // still never exceeds -1 dBFS: above the knee the reduction equals the excess.
+    peak_over = 20*log10(peak_level)+1;
+    peak_gr = peak_over <= -3 ? 0 : peak_over >= 3 ? peak_over : sqr(peak_over+3)/12;
+    peak_target = exp(-peak_gr*log(10)/20);
+  ) : peak_target = min(1,0.891250938/peak_level);
+  peak_target < peak_gain ? peak_gain = peak_target :
+    peak_gain = peak_target + peak_release*(peak_gain-peak_target);
+  spl0 *= peak_gain; spl1 *= peak_gain;
+) : peak_gain = 1;
+
+@serialize
+// Keep the v1 16-band prefix; append a versioned fine-resolution profile.
+serial_writing = file_avail(0) < 0;
+serial_writing ? (
+  memset(261000,0,16); serial_i = 0;
+  loop(226,
+    serial_b = serial_i == 0 ? 0 : serial_i == 225 ? 15 : 1+floor((serial_i-1)/16);
+    261000[serial_b] += 267000[serial_i]; serial_i += 1;
+  );
+);
+file_var(0,frozen_valid); file_var(0,frozen_group); file_var(0,frozen_parent);
+file_mem(0,261000,16);
+serial_writing ? (
+  serial_version = 2; file_var(0,serial_version); file_mem(0,267000,226);
+) : (
+  serial_version = 0;
+  file_var(0,serial_version);
+  serial_read = 0;
+  serial_version == 2 ? serial_read = file_mem(0,267000,226);
+  serial_read != 226 ? (
+    // Legacy snapshots have no finer detail; preserve their 16-band sums.
+    serial_i = 0;
+    loop(226,
+      serial_b = serial_i == 0 ? 0 : serial_i == 225 ? 15 : 1+floor((serial_i-1)/16);
+      267000[serial_i] = 261000[serial_b]/(serial_i == 0 || serial_i == 225 ? 1 : 16);
+      serial_i += 1;
+    );
+  );
+  held_valid = 0;
+  // Groups were removed in 0.4.0: keep frozen profiles saved in another group.
+  frozen_group = LINK_GROUP;
+);
+
+@gfx 600 300
+draw_interface();

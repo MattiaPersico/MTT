@@ -1,0 +1,138 @@
+@init
+// gmem[0] is one non-blocking registry mutex; gmem[1] is the token counter.
+// The v2 layout has 64 groups of 64 records of 320 words, starting at word 2.
+// Since 0.4.0 every instance uses group 1 (LINK_GROUP); the layout is unchanged so
+// 0.3.0 instances in group 1 still interoperate.
+// Record: token, lease, accepted parent, sequence, profile time, sample rate,
+// valid, transport state, raw input dBFS, guide threshold dBFS, threshold-present
+// flag (0.4.0+), reserved[5], normalized fine powers[226].
+// No spinlocks: a busy registry skips the exchange and retains local data.
+function address(group,id) ( 2 + (group-1)*20480 + (id-1)*320; );
+
+function net_tick() local(now,wanted,slot,a,k,candidate,node,steps,cycle,old_parent) (
+  now = time_precise();
+  atomic_setifequal(gmem[0],0,owner) == 0 ? (
+    // Release our old reservation before changing group or explicit identity.
+    net_id && slider2 != net_id ? (
+      gmem[net_addr] == owner ? (
+        gmem[net_addr+6] = 0;
+        gmem[net_addr] = 0;
+      );
+      net_id = 0; net_addr = 0;
+      frozen_valid = 0; held_valid = 0; bound_token = 0; live_valid = 0; reference_valid = 0;
+    );
+    net_group = LINK_GROUP;
+    net_id && gmem[net_addr] != owner ? (
+      net_id = 0; net_addr = 0; bound_token = 0; live_valid = 0; reference_valid = 0;
+    );
+    !net_id ? (
+      slot = 0; wanted = slider2;
+      wanted > 0 ? (
+        a = address(net_group,wanted);
+        (!gmem[a] || gmem[a] == owner || now-gmem[a+1] > 10) ? slot = wanted;
+      );
+      !slot ? (
+        k = 1;
+        loop(64,
+          a = address(net_group,k);
+          !slot && (!gmem[a] || now-gmem[a+1] > 10) ? slot = k;
+          k += 1;
+        );
+      );
+      slot ? (
+        net_id = slot; net_addr = address(net_group,slot);
+        k = 0; loop(320, gmem[net_addr+k] = 0; k += 1;);
+        gmem[net_addr] = owner;
+        slider2 = net_id; sliderchange(slider2);
+        bound_token = 0; live_valid = 0; reference_valid = 0; seen_sequence = -1;
+      );
+    );
+    net_id ? (
+      gmem[net_addr+1] = now;
+      invalidate_publish ? (gmem[net_addr+6] = 0; invalidate_publish = 0;);
+      candidate = slider3; old_parent = gmem[net_addr+2];
+      // Validate and commit under the same mutex: simultaneous edits cannot
+      // admit A->B and B->A, nor any longer cycle. Missing ancestors end a path.
+      node = candidate; steps = 0; cycle = 0;
+      while(node > 0 && steps < 64 && !cycle) (
+        node == net_id ? cycle = 1 : (
+          a = address(net_group,node);
+          node = gmem[a] ? gmem[a+2] : 0;
+        );
+        steps += 1;
+      );
+      node > 0 && steps >= 64 ? cycle = 1;
+      cycle ? (
+        slider3 = old_parent; sliderchange(slider3);
+        reject_until = now+3;
+      ) : gmem[net_addr+2] = candidate;
+      parent = gmem[net_addr+2];
+      (parent != previous_parent || net_group != previous_group) ? (
+        held_valid = 0;
+        bound_token = 0; live_valid = 0; reference_valid = 0; seen_sequence = -1; missing_samples = srate;
+        // Restored frozen profiles are valid only for their saved link.
+        (frozen_group != net_group || frozen_parent != parent) ? frozen_valid = 0;
+        previous_parent = parent; previous_group = net_group; live_threshold_db = -120;
+      );
+      // Publish UI-only membership snapshots; gfx never mutates registry/audio.
+      k = 1; followers = 0;
+      loop(64,
+        a = address(net_group,k);
+        (gmem[a] && now-gmem[a+1] <= 10 && gmem[a+2] == net_id) ? followers += 1;
+        atomic_set(members[k-1],gmem[a] && now-gmem[a+1] <= 10);
+        k += 1;
+      );
+    ) : (followers = 0; parent = 0; live_valid = 0; reference_valid = 0;);
+    atomic_set(gmem[0],0);
+  );
+);
+
+function exchange_profile() local(i,a,seq,ok,now,exchanged) (
+  missing_samples += hop; exchanged = 0;
+  live_valid = 0; reference_valid = 0;
+  now = time_precise();
+  net_id && atomic_setifequal(gmem[0],0,owner) == 0 ? (
+    exchanged = 1;
+    gmem[net_addr] == owner ? (
+      gmem[net_addr+1] = now;
+      gmem[net_addr+3] += 1;
+      gmem[net_addr+4] = frame_position;
+      gmem[net_addr+5] = srate;
+      gmem[net_addr+6] = input_valid;
+      gmem[net_addr+7] = play_state;
+      gmem[net_addr+8] = 10*log10(max((10^-30),frame_power));
+      // The guide owns the Hold threshold for all of its followers.
+      gmem[net_addr+9] = slider16; gmem[net_addr+10] = 1;
+      i = 0; loop(226, gmem[net_addr+16+i] = fine_profile[i]; i += 1;);
+      parent > 0 ? (
+        a = address(net_group,parent);
+        ok = gmem[a] && now-gmem[a+1] <= 10 && gmem[a+6] &&
+          gmem[a+5] == srate && gmem[a+7] == play_state &&
+          (!(play_state & 1) || abs(frame_position-gmem[a+4]) <= max(0.5,2*fft_size/srate));
+        // A reused slot must never silently become a different reference.
+        !bound_token && ok ? bound_token = gmem[a];
+        ok = ok && bound_token == gmem[a];
+        seq = gmem[a+3];
+        ok && seq != seen_sequence ? (
+          seen_sequence = seq; missing_samples = 0;
+          live_level_db = gmem[a+8];
+          // Guides older than 0.4.0 publish no threshold: use this instance's
+          // own Update mode and threshold. -120 (at or below -90) means Off.
+          live_threshold_db = gmem[a+10] == 1 ? gmem[a+9] : slider15 == 1 ? slider16 : -120;
+          i = 0; loop(226, live_profile[i] = gmem[a+16+i]; i += 1;);
+        );
+        live_valid = ok && missing_samples <= srate*0.5;
+      );
+    );
+    atomic_set(gmem[0],0);
+  );
+  // Retain a previously coherent snapshot over brief lock contention only.
+  !exchanged && missing_samples < hop*2 && bound_token ? live_valid = 1;
+  live_valid && slider9 == 0 ? (
+    memcpy(frozen_profile,live_profile,226);
+    frozen_valid = 1; frozen_group = net_group; frozen_parent = parent;
+  );
+  reference_valid = parent > 0 && frozen_valid &&
+    frozen_group == net_group && frozen_parent == parent &&
+    (slider9 == 1 || live_valid || slider10 == 1);
+);

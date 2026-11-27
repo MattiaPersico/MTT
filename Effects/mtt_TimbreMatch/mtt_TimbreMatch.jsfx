@@ -1,0 +1,290 @@
+desc:mtt_TimbreMatch
+// Version: 0.2.1 - minimum-phase offline spectral match with optional attack/body split.
+tags: equalizer spectral offline
+options:gmem=mtt_TimbreMatch_v2
+options:maxmem=1048576
+slider1:100<0,100,0.1>Match (%)
+slider2:0<-48,12,0.1>Output trim (dB)
+slider3:0<0,31,1>-Transfer slot
+slider4:0<0,16777215,1>-Profile token
+in_pin:Left
+in_pin:Right
+out_pin:Left
+out_pin:Right
+
+@init
+// Memory map. FFT buffers sit in 65536-aligned regions and never cross a boundary.
+CEP=0;                       // 32768 complex: cepstrum work for the minimum-phase design
+H0A=65536;  H0B=98304;       // filter spectra, set 0 (attack, body), 2L <= 16384 complex each
+H1A=131072; H1B=163840;      // filter spectra, set 1 (double buffer for click-free changes)
+XA0=196608; XB0=229376;      // block spectra (attack/body part), set 0
+XA1=262144; XB1=294912;      // block spectra, set 1 (previous block)
+Y0=327680; Y1=360448; Y2=393216; // inverse-FFT work
+OUT=458752;                  // out L (L items), out R (L), overlap L (L), overlap R (L)
+DLY=491520;                  // look-ahead delay: left 2048, right 2048
+PROF_B=524288; PROF_A=PROF_B+16385; // saved body/static and attack curves (dB)
+M=32768; LN10_20=log(10)/20; STRIDE=65568; ATTACK_OFFSET=16+16385;
+
+// No file access or cross-instance dependencies: the mailbox is used only at import.
+function valid_n(x) (x==1024 || x==2048 || x==4096 || x==8192 || x==16384 || x==32768);
+function receive_profile() local(base,tok,nn,sr,att,count,i,ok,v) (
+  base=min(31,max(0,floor(slider3)))*STRIDE; tok=floor(slider4);
+  tok>0 && tok!=loaded_token && gmem[base]==tok ? (
+    nn=gmem[base+1]; sr=gmem[base+2]; att=gmem[base+4]; count=nn/2+1;
+    ok=valid_n(nn) && sr>=8000 && sr<=384000 && att>=0 && att<=200;
+    ok ? (
+      i=0;
+      loop(count,
+        v=gmem[base+16+i];
+        (v!=v || abs(v)>48.001) ? ok=0;
+        att>0 ? (
+          v=gmem[base+ATTACK_OFFSET+i];
+          (v!=v || abs(v)>48.001) ? ok=0;
+        );
+        i+=1;
+      );
+      ok && gmem[base]==tok ? (
+        i=0;
+        loop(count,
+          PROF_B[i]=gmem[base+16+i];
+          PROF_A[i]=att>0 ? gmem[base+ATTACK_OFFSET+i] : 0;
+          i+=1;
+        );
+        profile_n=nn; profile_sr=sr; attack_ms=att; loaded_token=tok;
+        curve_dirty=1;
+        gmem[base+3]=tok;
+      );
+    );
+  );
+);
+// Curve value (dB) for bin `bin` of a `size`-point transform at the current rate.
+function curve_db(prof,bin,size) local(f,x,a,b,db) (
+  f=min(bin,size-bin)*srate/size; db=0;
+  profile_n>=1024 && f<=profile_sr/2 ? (
+    x=min(profile_n/2,f*profile_n/profile_sr);
+    a=floor(x); b=min(profile_n/2,a+1);
+    db=prof[a]+(prof[b]-prof[a])*(x-a);
+  );
+  db;
+);
+// Minimum-phase FIR (homomorphic/cepstral method) of length L from a dB curve, faded
+// over its last quarter, stored as a 2L-point spectrum in FFT (permuted) order with the
+// inverse-FFT 1/(2L) scale folded in. No pre-ringing: all energy follows the input.
+function build_filter(prof,dest,amount) local(i,a,b,fade0,flen,v) (
+  i=0;
+  loop(M, CEP[2*i]=curve_db(prof,i,M)*amount*LN10_20; CEP[2*i+1]=0; i+=1;);
+  fft_ipermute(CEP,M); ifft(CEP,M);
+  // Real cepstrum (scaled by 1/M) folded onto positive quefrencies.
+  CEP[0]/=M; CEP[1]=0;
+  i=1; loop(M/2-1, CEP[2*i]*=2/M; CEP[2*i+1]=0; i+=1;);
+  CEP[M]/=M; CEP[M+1]=0;
+  memset(CEP+M+2,0,M-2);
+  fft(CEP,M); fft_permute(CEP,M);
+  i=0;
+  loop(M, a=exp(CEP[2*i]); b=CEP[2*i+1]; CEP[2*i]=a*cos(b); CEP[2*i+1]=a*sin(b); i+=1;);
+  fft_ipermute(CEP,M); ifft(CEP,M);
+  flen=L/4; fade0=L-flen;
+  i=0;
+  loop(L,
+    v=CEP[2*i]/M;
+    i>=fade0 ? v*=0.5+0.5*cos($pi*(i-fade0)/flen);
+    dest[2*i]=v/(2*L); dest[2*i+1]=0;
+    i+=1;
+  );
+  memset(dest+2*L,0,2*L);
+  fft(dest,2*L);
+);
+function set_pointers() (
+  HA=cur ? H1A : H0A; HB=cur ? H1B : H0B;
+  HAn=cur ? H0A : H1A; HBn=cur ? H0B : H1B;
+);
+function reset_audio() (
+  memset(XA0,0,4*L); memset(XB0,0,4*L); memset(XA1,0,4*L); memset(XB1,0,4*L);
+  XA=XA0; XB=XB0; XAp=XA1; XBp=XB1;
+  memset(OUT,0,4*L); memset(DLY,0,4096);
+  bi=0; dpos=0; ef=0; es=0; hold=0; gate=0;
+);
+function setup_engine() (
+  L=srate<=64000 ? 4096 : 8192;
+  D=max(1,floor(0.004*srate+0.5));
+  g_fast=1-exp(-1/(0.002*srate)); g_slow=1-exp(-1/(0.060*srate));
+  g_hold=floor(attack_ms*srate/1000+0.5);
+  g_rise=1/max(1,floor(0.002*srate+0.5)); g_fall=1/max(1,floor(0.010*srate+0.5));
+  split=profile_n>=1024 && attack_ms>0;
+  cur=0; set_pointers(); pending=0;
+  built_amount=slider1/100;
+  build_filter(PROF_B,HB,built_amount);
+  split ? build_filter(PROF_A,HA,built_amount);
+  reset_audio();
+  pdc_delay=L+D; pdc_bot_ch=0; pdc_top_ch=2;
+  engine_sr=srate; engine_token=loaded_token;
+  trim=10^(slider2/20);
+);
+// y = xa*ha + xb*hb (complex, permuted order). Stereo is packed as left + i*right;
+// the filters are real, so each channel is filtered independently.
+function mix(y,xa,xb,ha,hb) local(i,j,ar,ai,br,bim) (
+  i=0;
+  split ? (
+    loop(2*L,
+      j=2*i; ar=xa[j]; ai=xa[j+1]; br=xb[j]; bim=xb[j+1];
+      y[j]=ar*ha[j]-ai*ha[j+1]+br*hb[j]-bim*hb[j+1];
+      y[j+1]=ar*ha[j+1]+ai*ha[j]+br*hb[j+1]+bim*hb[j];
+      i+=1;
+    );
+  ) : (
+    loop(2*L,
+      j=2*i; br=xb[j]; bim=xb[j+1];
+      y[j]=br*hb[j]-bim*hb[j+1];
+      y[j+1]=br*hb[j+1]+bim*hb[j];
+      i+=1;
+    );
+  );
+);
+// Overlap-add block convolution, once every L samples.
+function process_block() local(i,r,t) (
+  split ? fft(XA,2*L);
+  fft(XB,2*L);
+  mix(Y0,XA,XB,HA,HB); ifft(Y0,2*L);
+  pending ? (
+    // Crossfade to the new filters over this block. The new path includes the tail
+    // of the previous block filtered with the new filters, so both paths are exact.
+    mix(Y1,XA,XB,HAn,HBn); ifft(Y1,2*L);
+    mix(Y2,XAp,XBp,HAn,HBn); ifft(Y2,2*L);
+    i=0;
+    loop(L,
+      r=(i+0.5)/L;
+      OUT[i]=(1-r)*(Y0[2*i]+OUT[2*L+i])+r*(Y1[2*i]+Y2[2*(L+i)]);
+      OUT[L+i]=(1-r)*(Y0[2*i+1]+OUT[3*L+i])+r*(Y1[2*i+1]+Y2[2*(L+i)+1]);
+      OUT[2*L+i]=Y1[2*(L+i)]; OUT[3*L+i]=Y1[2*(L+i)+1];
+      i+=1;
+    );
+    cur=1-cur; set_pointers(); pending=0;
+  ) : (
+    i=0;
+    loop(L,
+      OUT[i]=Y0[2*i]+OUT[2*L+i]; OUT[L+i]=Y0[2*i+1]+OUT[3*L+i];
+      OUT[2*L+i]=Y0[2*(L+i)]; OUT[3*L+i]=Y0[2*(L+i)+1];
+      i+=1;
+    );
+  );
+  t=XA; XA=XAp; XAp=t; t=XB; XB=XBp; XBp=t;
+  memset(XA,0,4*L); memset(XB,0,4*L);
+);
+receive_profile();
+setup_engine(); curve_dirty=0; have_position=0;
+
+@slider
+receive_profile();
+trim_target=10^(slider2/20);
+
+@block
+receive_profile();
+transport_reset=have_position && (play_state!=last_play_state ||
+  ((play_state&1) && abs(play_position-expected_position)>2/srate));
+last_play_state=play_state; expected_position=play_position+samplesblock/srate; have_position=1;
+(engine_sr!=srate || engine_token!=loaded_token || curve_dirty) ? (
+  setup_engine(); curve_dirty=0;
+) : (
+  transport_reset ? reset_audio();
+  // Match changes: design the new filters here, crossfade at the next block boundary.
+  !pending && slider1/100!=built_amount ? (
+    built_amount=slider1/100;
+    build_filter(PROF_B,HBn,built_amount);
+    split ? build_filter(PROF_A,HAn,built_amount);
+    pending=1;
+  );
+);
+trim_target=10^(slider2/20);
+trim_coeff=exp(-1/(0.01*srate));
+
+@sample
+// Transient detector on the undelayed input (same constants as match_core.lua:
+// 2/60 ms followers, 10 dB rise above -60 dBFS).
+split ? (
+  det_p=(spl0*spl0+spl1*spl1)*0.5;
+  ef+=g_fast*(det_p-ef); es+=g_slow*(det_p-es);
+  ef>es*10 && ef>0.000001 ? (hold=g_hold;) : (hold>0 ? hold-=1;);
+  gate=hold>0 ? min(1,gate+g_rise) : max(0,gate-g_fall);
+);
+// The audio path is delayed by D, so the gate is open before the onset arrives.
+in_l=DLY[dpos]; in_r=DLY[2048+dpos];
+DLY[dpos]=spl0; DLY[2048+dpos]=spl1;
+dpos+=1; dpos>=D ? dpos=0;
+XA[2*bi]=gate*in_l; XA[2*bi+1]=gate*in_r;
+XB[2*bi]=in_l-gate*in_l; XB[2*bi+1]=in_r-gate*in_r;
+trim=trim_target+(trim-trim_target)*trim_coeff;
+spl0=OUT[bi]*trim; spl1=OUT[L+bi]*trim;
+bi+=1;
+bi>=L ? (process_block(); bi=0;);
+
+@serialize
+// Import on SAVE as well: inactive take FX must be persistent before first playback.
+PROF_B=524288; PROF_A=PROF_B+16385;
+reading_state=file_avail(0)>=0;
+!reading_state ? receive_profile();
+format_version=2;
+file_var(0,format_version);
+file_var(0,profile_n); file_var(0,profile_sr); file_var(0,loaded_token);
+// Version 1 (0.1.0) states hold one static curve and no attack hold.
+format_version>=2 ? (file_var(0,attack_ms);) : (attack_ms=0;);
+valid_state=(format_version==1 || format_version==2) &&
+  (profile_n==1024 || profile_n==2048 || profile_n==4096 || profile_n==8192 || profile_n==16384 || profile_n==32768)
+  && profile_sr>=8000 && profile_sr<=384000 && attack_ms>=0 && attack_ms<=200;
+valid_state ? (
+  got=file_mem(0,PROF_B,profile_n/2+1);
+  got!=profile_n/2+1 ? valid_state=0;
+  valid_state && attack_ms>0 ? (
+    got=file_mem(0,PROF_A,profile_n/2+1);
+    got!=profile_n/2+1 ? valid_state=0;
+  );
+  reading_state && valid_state ? (
+    serial_i=0;
+    loop(profile_n/2+1,
+      serial_v=PROF_B[serial_i];
+      (serial_v!=serial_v || abs(serial_v)>48.001) ? valid_state=0;
+      attack_ms>0 ? (
+        serial_v=PROF_A[serial_i];
+        (serial_v!=serial_v || abs(serial_v)>48.001) ? valid_state=0;
+      );
+      serial_i+=1;
+    );
+  );
+  !valid_state ? (profile_n=0; loaded_token=0; attack_ms=0;);
+) : (profile_n=0; loaded_token=0; attack_ms=0;);
+reading_state ? curve_dirty=1;
+
+@gfx 660 250
+gfx_clear=1512211;
+gfx_setfont(1,"Arial",18);
+gfx_set(0.85,0.9,0.95); gfx_x=16; gfx_y=14;
+gfx_drawstr("mtt_TimbreMatch");
+gfx_setfont(1,"Arial",13); gfx_x=16; gfx_y=40;
+profile_n>=1024 ? (
+  attack_ms>0 ? (
+    sprintf(#status,"Attack + body (hold %.0f ms) | FFT %d | %.0f Hz | latency %.1f ms",attack_ms,profile_n,profile_sr,1000*pdc_delay/srate);
+  ) : (
+    sprintf(#status,"Static curve | FFT %d | %.0f Hz | latency %.1f ms",profile_n,profile_sr,1000*pdc_delay/srate);
+  );
+) : strcpy(#status,"No profile - use the companion Lua action to analyze and apply.");
+gfx_drawstr(#status);
+gfx_set(0.3,0.34,0.38); gfx_line(16,145,gfx_w-16,145);
+ui_pass=attack_ms>0 && profile_n>=1024 ? 2 : 1;
+loop(ui_pass,
+  ui_prof=ui_pass==2 ? PROF_A : PROF_B;
+  ui_i=0; ui_lastx=16; ui_lasty=145;
+  loop(max(1,gfx_w-32),
+    ui_f=20*(1000^(ui_i/max(1,gfx_w-33)));
+    ui_x=min(max(0,profile_n/2),ui_f*profile_n/max(1,profile_sr));
+    ui_a=floor(ui_x); ui_b=min(profile_n/2,ui_a+1);
+    ui_db=profile_n>=1024 && ui_f<=profile_sr/2 ? (ui_prof[ui_a]+(ui_prof[ui_b]-ui_prof[ui_a])*(ui_x-ui_a))*slider1/100 : 0;
+    ui_y=145-ui_db*1.6;
+    ui_pass==2 ? gfx_set(0.95,0.55,0.35) : gfx_set(0.3,0.85,0.73);
+    gfx_line(ui_lastx,ui_lasty,16+ui_i,ui_y);
+    ui_lastx=16+ui_i; ui_lasty=ui_y; ui_i+=1;
+  );
+  ui_pass-=1;
+);
+gfx_set(0.7,0.75,0.8); gfx_x=16; gfx_y=gfx_h-24;
+attack_ms>0 && profile_n>=1024 ?
+  gfx_drawstr("20 Hz              Body (green) / attack (orange) correction              20 kHz") :
+  gfx_drawstr("20 Hz                         Correction curve                         20 kHz");
