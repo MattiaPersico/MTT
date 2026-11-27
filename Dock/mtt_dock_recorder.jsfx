@@ -1,0 +1,440 @@
+desc:mtt_dock recorder
+// mtt_dock_recorder.jsfx — the loopback recorder of mtt_dock.
+//
+// Goes LAST in the master FX chain. Keeps the last N seconds of what passes
+// the master, on all of its channels, but only while the signal is above a
+// threshold: silence is never written, so the buffer holds sound only, one
+// segment per burst. When mtt_dock asks, it plays that recording back into
+// the master output (hold-to-listen in the dock) and hands chunks of it over
+// for the drag-out to the timeline.
+//
+// All exchange with mtt_dock.lua goes through gmem "mtt_dock": the G_*/L_*
+// slots below must match the ones in mtt_dock.lua.
+//
+// Several projects open, each with its recorder: every instance records into
+// its own memory, and only while its project is the active one. gmem has one
+// owner at a time: when the owner falls silent (its project went to the
+// background, or it was removed), the instance now running takes over after
+// 0.3 s and publishes its own recording (header, peaks, segments) with a new
+// generation, so the dock starts over on it.
+// mtt_dock protocol: 2
+
+options:gmem=mtt_dock maxmem=128000000
+in_pin:in 1
+in_pin:in 2
+in_pin:in 3
+in_pin:in 4
+in_pin:in 5
+in_pin:in 6
+in_pin:in 7
+in_pin:in 8
+in_pin:in 9
+in_pin:in 10
+in_pin:in 11
+in_pin:in 12
+in_pin:in 13
+in_pin:in 14
+in_pin:in 15
+in_pin:in 16
+in_pin:in 17
+in_pin:in 18
+in_pin:in 19
+in_pin:in 20
+in_pin:in 21
+in_pin:in 22
+in_pin:in 23
+in_pin:in 24
+in_pin:in 25
+in_pin:in 26
+in_pin:in 27
+in_pin:in 28
+in_pin:in 29
+in_pin:in 30
+in_pin:in 31
+in_pin:in 32
+in_pin:in 33
+in_pin:in 34
+in_pin:in 35
+in_pin:in 36
+in_pin:in 37
+in_pin:in 38
+in_pin:in 39
+in_pin:in 40
+in_pin:in 41
+in_pin:in 42
+in_pin:in 43
+in_pin:in 44
+in_pin:in 45
+in_pin:in 46
+in_pin:in 47
+in_pin:in 48
+in_pin:in 49
+in_pin:in 50
+in_pin:in 51
+in_pin:in 52
+in_pin:in 53
+in_pin:in 54
+in_pin:in 55
+in_pin:in 56
+in_pin:in 57
+in_pin:in 58
+in_pin:in 59
+in_pin:in 60
+in_pin:in 61
+in_pin:in 62
+in_pin:in 63
+in_pin:in 64
+out_pin:out 1
+out_pin:out 2
+out_pin:out 3
+out_pin:out 4
+out_pin:out 5
+out_pin:out 6
+out_pin:out 7
+out_pin:out 8
+out_pin:out 9
+out_pin:out 10
+out_pin:out 11
+out_pin:out 12
+out_pin:out 13
+out_pin:out 14
+out_pin:out 15
+out_pin:out 16
+out_pin:out 17
+out_pin:out 18
+out_pin:out 19
+out_pin:out 20
+out_pin:out 21
+out_pin:out 22
+out_pin:out 23
+out_pin:out 24
+out_pin:out 25
+out_pin:out 26
+out_pin:out 27
+out_pin:out 28
+out_pin:out 29
+out_pin:out 30
+out_pin:out 31
+out_pin:out 32
+out_pin:out 33
+out_pin:out 34
+out_pin:out 35
+out_pin:out 36
+out_pin:out 37
+out_pin:out 38
+out_pin:out 39
+out_pin:out 40
+out_pin:out 41
+out_pin:out 42
+out_pin:out 43
+out_pin:out 44
+out_pin:out 45
+out_pin:out 46
+out_pin:out 47
+out_pin:out 48
+out_pin:out 49
+out_pin:out 50
+out_pin:out 51
+out_pin:out 52
+out_pin:out 53
+out_pin:out 54
+out_pin:out 55
+out_pin:out 56
+out_pin:out 57
+out_pin:out 58
+out_pin:out 59
+out_pin:out 60
+out_pin:out 61
+out_pin:out 62
+out_pin:out 63
+out_pin:out 64
+
+@init
+ext_noinit = 1;   // keep the recording when the transport starts
+ext_nodenorm = 1; // record the input untouched
+
+// gmem slots written here (G_) and by the dock (L_)
+G_MAGIC = 0; G_PROTO = 1; G_HB = 2; G_GEN = 3; G_SRATE = 4; G_NCH = 5;
+G_CAP = 6; G_W = 7; G_K = 8; G_NB = 9; G_GATE = 10; G_LEVEL = 11;
+G_SEGTOT = 12; G_PLAYPOS = 13; G_EXPDONE = 14; G_EXPN = 15; G_EXPSTART = 16;
+G_INST = 17;                           // the owner instance's id
+L_HB = 20; L_THR = 21; L_PRE = 22; L_HOLD = 23; L_LEN = 24; L_PAUSE = 25;
+L_PLAY = 26; L_PLAYID = 27; L_PLAYFROM = 28; L_EXPID = 29; L_EXPSTART = 30;
+L_EXPN = 31; L_CLEAR = 32; L_CFG = 33;
+SEG_BASE = 64; SEGN = 2048;            // segment ring: (start, end) frame pairs, end = -1 while open
+PK_BASE = SEG_BASE + 2 * SEGN;         // peak ring: (max, min) per bin of K frames
+NB_MAX = 480000;                       // keeps the peak ring under EXP_BASE
+EXP_BASE = 1048576; EXP_FLOATS = 131072; // one export chunk, interleaved
+MAGIC = 7741; PROTO = 2;
+TAKEOVER = 0.3;                        // s of owner silence before another instance takes gmem
+
+// Local memory: one frame of input at TMP, this instance's own copies of the
+// segment and peak rings (gmem holds the owner's), the pre-roll ring, then the
+// main ring (interleaved frames). Frames are counted from the last reset (W);
+// wi / pre_wi / bslot / seg_slot are the matching ring positions, kept by
+// increment so no modulo runs on large numbers.
+TMP = 0;
+LSEG = 64;
+LPK = LSEG + 2 * SEGN;
+PRE_BASE = LPK + 2 * NB_MAX;
+
+// An id no other instance has: its start time (ms) and a random part.
+inst_id = floor(time_precise() * 1000) * 1000 + floor(rand(1000)) + 1;
+own = 0; owner_hb = -1; owner_quiet = 0;
+
+cur_srate = 0; nch = 0; cur_len = 0;   // reset() runs on the first block
+play_id = gmem[L_PLAYID]; exp_id = gmem[L_EXPID]; clear_id = gmem[L_CLEAR];
+lua_hb = gmem[L_HB]; lua_quiet = 1000000000;
+
+// This instance's recording into gmem: header, peaks, segments; then a new
+// generation, so the dock reads it all again.
+function publish_all() local(i)
+(
+  gmem[G_SRATE] = srate; gmem[G_NCH] = nch; gmem[G_CAP] = cap;
+  gmem[G_K] = K; gmem[G_NB] = nb;
+  i = 0;
+  loop(2 * nb, gmem[PK_BASE + i] = LPK[i]; i += 1;);
+  i = 0;
+  loop(2 * SEGN, gmem[SEG_BASE + i] = LSEG[i]; i += 1;);
+  gmem[G_SEGTOT] = seg_tot; gmem[G_W] = W;
+  gmem[G_INST] = inst_id;
+  gmem[G_GEN] += 1;
+);
+
+function reset() local(i)
+(
+  cur_srate = srate; nch = nch_host; cur_len = want_len;
+  K = max(16, floor(srate / 750));
+  PRE_MAX = ceil(0.5 * srate);
+  BUF = PRE_BASE + PRE_MAX * nch;
+  cap = min(floor(cur_len * srate), floor((__memtop() - BUF) / nch));
+  nb = min(floor(cap / K), NB_MAX);
+  cap = nb * K;
+  W = 0; wi = 0; kc = 0; bslot = 0; pmax = 0; pmin = 0;
+  rec = 0; hold = 0; pre_wi = 0; pre_count = 0; last_end_valid = 0;
+  seg_tot = 0; seg_slot = 0; last_slot = 0;
+  playing = 0; pgain = 0; rp = 0;
+  i = 0;
+  loop(2 * nb, LPK[i] = 0; i += 1;);
+  i = 0;
+  loop(2 * SEGN, LSEG[i] = 0; i += 1;);
+  own ? publish_all();
+);
+
+// One peak bin (slot b) into the local ring and, for the owner, into gmem.
+function put_bin(b, hi, lo)
+(
+  LPK[2 * b] = hi; LPK[2 * b + 1] = lo;
+  own ? ( gmem[PK_BASE + 2 * b] = hi; gmem[PK_BASE + 2 * b + 1] = lo; );
+);
+
+// One segment field (slot s, k = 0 start / 1 end) likewise.
+function put_seg(s, k, v)
+(
+  LSEG[2 * s + k] = v;
+  own ? gmem[SEG_BASE + 2 * s + k] = v;
+);
+
+// Appends the frame at p to the main ring and to the current peak bin.
+function main_put(p) local(c, v, q)
+(
+  q = BUF + wi * nch;
+  c = 0;
+  loop(nch,
+    v = p[c];
+    q[c] = v;
+    v > pmax ? pmax = v;
+    v < pmin ? pmin = v;
+    c += 1;
+  );
+  wi += 1; wi >= cap ? wi = 0;
+  W += 1;
+  kc += 1;
+  kc >= K ? (
+    put_bin(bslot, pmax, pmin);
+    bslot += 1; bslot >= nb ? bslot = 0;
+    kc = 0; pmax = 0; pmin = 0;
+  );
+);
+
+// Keeps the frame at p in the pre-roll ring (what came just before the gate opened).
+function pre_put(p) local(c, q)
+(
+  q = PRE_BASE + pre_wi * nch;
+  c = 0;
+  loop(nch, q[c] = p[c]; c += 1;);
+  pre_wi += 1; pre_wi >= PRE_MAX ? pre_wi = 0;
+  pre_count < PRE_MAX ? pre_count += 1;
+);
+
+function start_segment() local(n, r, s)
+(
+  n = min(pre_count, pre_frames);
+  s = W;
+  r = pre_wi - n; r < 0 ? r += PRE_MAX;
+  loop(n,
+    main_put(PRE_BASE + r * nch);
+    r += 1; r >= PRE_MAX ? r = 0;
+  );
+  last_end_valid && pre_count <= pre_frames ? (
+    // The whole gap since the last segment fit in the pre-roll and is now
+    // recorded: the last segment simply goes on.
+    put_seg(last_slot, 1, -1);
+  ) : (
+    last_slot = seg_slot;
+    put_seg(last_slot, 0, s);
+    put_seg(last_slot, 1, -1);
+    seg_slot += 1; seg_slot >= SEGN ? seg_slot = 0;
+    seg_tot += 1;
+    own ? gmem[G_SEGTOT] = seg_tot;
+  );
+  rec = 1; hold = hold_frames; pre_count = 0;
+);
+
+function end_segment()
+(
+  put_seg(last_slot, 1, W);
+  rec = 0; last_end_valid = 1; pre_count = 0;
+);
+
+@block
+hp_chain = 0; hp_flags = 0;
+get_host_placement(hp_chain, hp_flags);
+idle = hp_flags & 4; // an inactive project's recorder neither records nor touches gmem
+
+!idle ? (
+  nch_host = get_host_numchan();
+  nch_host < 1 ? nch_host = 2;
+  nch_host > 64 ? nch_host = 64;
+
+  // Settings come from the dock once it has written them (L_CFG = 1).
+  cfg = gmem[L_CFG] == 1;
+  want_len = cfg ? gmem[L_LEN] : 60;
+  want_len = max(5, min(600, want_len));
+  thr = cfg ? gmem[L_THR] : -74;
+  thr = max(-150, min(0, thr));
+  pre_ms = cfg ? gmem[L_PRE] : 50;
+  pre_ms = max(0, min(500, pre_ms));
+  hold_ms = cfg ? gmem[L_HOLD] : 300;
+  hold_ms = max(0, min(5000, hold_ms));
+
+  // Ownership of gmem: the owner beats G_HB every block; another instance
+  // takes over once that beat has stood still for TAKEOVER seconds.
+  own = gmem[G_INST] == inst_id;
+  !own ? (
+    gmem[G_HB] != owner_hb ? ( owner_hb = gmem[G_HB]; owner_quiet = 0; ) : owner_quiet += samplesblock;
+    owner_quiet > TAKEOVER * srate && cur_srate > 0 ? ( own = 1; publish_all(); );
+  );
+
+  own && gmem[L_CLEAR] != clear_id ? cur_srate = 0;
+  clear_id = gmem[L_CLEAR];
+  srate != cur_srate || nch_host != nch || want_len != cur_len ? reset();
+
+  thr_lin = 10 ^ (thr / 20);
+  pre_frames = min(PRE_MAX, floor(pre_ms * 0.001 * srate));
+  hold_frames = floor(hold_ms * 0.001 * srate);
+  fstep = 1 / (0.005 * srate); // 5 ms fades on playback start/stop
+
+  // The dock counts as present while its heartbeat moves: if it stops (the
+  // script crashed or was closed mid-play), playback and pause are dropped.
+  gmem[L_HB] != lua_hb ? ( lua_hb = gmem[L_HB]; lua_quiet = 0; ) : lua_quiet += samplesblock;
+  lua_alive = lua_quiet < srate;
+  paused = own && lua_alive && gmem[L_PAUSE] > 0;
+
+  own ? (
+    gmem[G_MAGIC] = MAGIC; gmem[G_PROTO] = PROTO; gmem[G_HB] += 1;
+
+    lua_alive && gmem[L_PLAY] > 0 ? (
+      gmem[L_PLAYID] != play_id ? (
+        play_id = gmem[L_PLAYID];
+        rp = floor(gmem[L_PLAYFROM]);
+        playing = 1;
+      );
+    ) : (
+      playing = 0;
+    );
+
+    // Export: copy the requested frames (one chunk) into gmem for the dock.
+    gmem[L_EXPID] != exp_id ? (
+      exp_id = gmem[L_EXPID];
+      es = floor(gmem[L_EXPSTART]);
+      en = min(floor(gmem[L_EXPN]), floor(EXP_FLOATS / nch));
+      oldest = max(0, W - cap);
+      es < oldest || en < 1 || es + en > W ? (
+        en = -1;
+      ) : (
+        idx = wi - (W - es); idx < 0 ? idx += cap;
+        j = 0;
+        loop(en,
+          p = BUF + idx * nch;
+          c = 0;
+          loop(nch, gmem[EXP_BASE + j] = p[c]; j += 1; c += 1;);
+          idx += 1; idx >= cap ? idx = 0;
+        );
+      );
+      gmem[G_EXPSTART] = es; gmem[G_EXPN] = en; gmem[G_EXPDONE] = exp_id;
+    );
+
+    gmem[G_W] = W;
+    gmem[G_GATE] = rec;
+    gmem[G_LEVEL] = blk_peak;
+    gmem[G_PLAYPOS] = playing || pgain > 0 ? rp : -1;
+  ) : (
+    // Not the owner: the dock's requests are someone else's; keep up with
+    // their ids so none is answered late after a takeover.
+    play_id = gmem[L_PLAYID]; exp_id = gmem[L_EXPID];
+    playing = 0;
+  );
+  blk_peak = 0;
+  // The bin being filled, so the live edge shows before the bin completes.
+  kc > 0 ? put_bin(bslot, pmax, pmin);
+);
+
+@sample
+!idle ? (
+  c = 0; lvl = 0;
+  loop(nch, v = spl(c); TMP[c] = v; v = abs(v); v > lvl ? lvl = v; c += 1;);
+  lvl > blk_peak ? blk_peak = lvl;
+
+  rec ? (
+    paused ? end_segment() : (
+      lvl >= thr_lin ? hold = hold_frames : (
+        hold -= 1;
+        hold <= 0 ? end_segment();
+      );
+    );
+  ) : (
+    !paused && lvl >= thr_lin ? start_segment();
+  );
+  rec ? main_put(TMP) : pre_put(TMP);
+
+  // Playback goes into the output only (after the input was recorded).
+  playing || pgain > 0 ? (
+    pgain = playing ? min(1, pgain + fstep) : max(0, pgain - fstep);
+    oldest = max(0, W - cap);
+    rp < oldest ? rp = oldest;
+    rp < W ? (
+      idx = wi - (W - rp); idx < 0 ? idx += cap;
+      p = BUF + idx * nch;
+      c = 0;
+      loop(nch, spl(c) += p[c] * pgain; c += 1;);
+      rp += 1;
+    ) : (
+      playing = 0; pgain = 0;
+    );
+  );
+);
+
+@gfx 420 64
+gfx_set(0.85, 0.86, 0.84);
+gfx_x = 10; gfx_y = 10;
+idle ? (
+  gfx_drawstr("mtt_dock recorder: inactive project");
+) : (
+  sprintf(#line1, "mtt_dock recorder   %d ch   %.0f s buffer%s", nch, cur_srate > 0 ? cap / cur_srate : 0,
+    own ? "" : "   (another recorder is shown in the dock)");
+  gfx_drawstr(#line1);
+  gfx_x = 10; gfx_y = 30;
+  sprintf(#line2, "%s   %.1f s recorded", rec ? "recording" : "waiting for sound", min(W, cap) / max(1, cur_srate));
+  gfx_drawstr(#line2);
+);
