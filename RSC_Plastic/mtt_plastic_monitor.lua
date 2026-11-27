@@ -1,7 +1,7 @@
 -- mtt_plastic_monitor.lua
 -- Monitor sempre attivo: SOLO un pallino colorato sopra la GUI di REAPER.
 --
---   click sinistro  -> menu con azioni (Check-In / Check-Out / Revert / ...)
+--   click sinistro  -> menu con azioni (Check-In / Check-Out / Release Lock / Revert / ...)
 --   trascina        -> riposiziona (posizione ricordata)
 --   hover           -> tooltip con stato
 --
@@ -24,7 +24,7 @@
 --   viola   : progetto nuovo, da importare al check-in
 
 local major_version = 1
-local minor_version = 4
+local minor_version = 5
 
 local script_dir = debug.getinfo(1, 'S').source:match('@(.*)[/\\]')
 local LIB = dofile(script_dir .. '/mtt_plastic_lib.lua')
@@ -244,12 +244,16 @@ local function drawMenu(proj_path)
   local can_checkout = state == S.AVAILABLE or state == S.OUT_OF_DATE
   local can_checkin  = state == S.CHECKED_OUT or state == S.NEW_PROJECT
   local can_revert   = in_repo
+  local can_release  = state == S.CHECKED_OUT
 
   if reaper.ImGui_MenuItem(ctx, 'Check-Out', nil, false, can_checkout) then
     pending_action = 'checkout'
   end
   if reaper.ImGui_MenuItem(ctx, 'Check-In', nil, false, can_checkin) then
     pending_action = 'checkin'
+  end
+  if reaper.ImGui_MenuItem(ctx, 'Release Lock', nil, false, can_release) then
+    pending_action = 'releaselock'
   end
   if reaper.ImGui_MenuItem(ctx, 'Revert', nil, false, can_revert) then
     pending_action = 'revert'
@@ -379,6 +383,7 @@ local function loop()
     if     act == 'checkout' then LIB.doCheckoutInteractive(proj_path)
     elseif act == 'checkin'  then LIB.doCheckinFlow(proj_path)
     elseif act == 'revert'   then LIB.doRevertFlow(proj_path)
+    elseif act == 'releaselock' then LIB.doReleaseLockFlow(proj_path)
     elseif act == 'settings' then LIB.doSettingsFlow()
     end
   end

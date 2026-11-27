@@ -315,6 +315,13 @@ function M.undoCheckout(dir)
   return M.run(M.cmq() .. ' partial undocheckout ' .. M.q(dir))
 end
 
+-- Undo the checkout (releases the exclusive lock) WITHOUT touching the files
+-- on disk: --keepchanges leaves any local edit in place as a plain "changed"
+-- item. No close / reopen of the project is needed.
+function M.releaseLock(dir)
+  return M.run(M.cmq() .. ' partial undocheckout ' .. M.q(dir) .. ' --keepchanges')
+end
+
 function M.checkout(dir)
   local code, out = M.run(M.cmq() .. ' co -R ' .. M.q(dir))
   if M.containsExclusiveCheckout(out) then
@@ -537,6 +544,39 @@ function M.doCheckoutInteractive(proj_path)
     return
   end
 
+  -- Up-to-date check, run on every checkout (not only from the save flow):
+  -- the .rpp local changeset vs its latest changeset on the server (same rough
+  -- test as mtt_plastic_save and the monitor). When the workspace is already
+  -- at the latest revision, the close / discard / update / reopen cycle is
+  -- useless: checkout + lock directly, leaving the open project untouched
+  -- (unsaved edits and local files are kept).
+  -- Check not possible (no history, private file, cm error) -> full flow below.
+  local head = info and info.local_cs and M.serverHead(proj_path) or nil
+  if head and head <= info.local_cs then
+    local ok, who, out = M.checkout(M.dirname(proj_path))
+    M.markDirty()
+    if ok then
+      reaper.ShowMessageBox(
+        'Project already at the latest version (cs:' .. tostring(info.local_cs) .. ').\n' ..
+        'Checked out directly (lock acquired), no reload needed.', title, 0)
+      return
+    end
+    if who then
+      reaper.ShowMessageBox('Project locked by: ' .. who, title, 0)
+      return
+    end
+    local a = reaper.ShowMessageBox(
+      'Direct checkout failed:\n\n' .. tostring(out) .. '\n\n' ..
+      'Run the full flow instead?\n' ..
+      '(discard local changes, update to server version, checkout + lock, reopen)',
+      title, 4) -- Yes / No
+    if a == 6 then
+      local _, msg = M.doCheckoutFlow(proj_path)
+      reaper.ShowMessageBox(msg, title, 0)
+    end
+    return
+  end
+
   local answer = reaper.ShowMessageBox(
     'This operation will:\n' ..
     '  1. discard uncommitted local changes\n' ..
@@ -548,6 +588,61 @@ function M.doCheckoutInteractive(proj_path)
 
   local _, msg = M.doCheckoutFlow(proj_path)
   reaper.ShowMessageBox(msg, title, 0)
+end
+
+-- Release the lock of a checkout taken by mistake. Allowed only when the
+-- local version matches the server one (same rough .rpp changeset test as the
+-- checkout): then nothing has to be updated or reloaded, the checkout + lock
+-- is simply undone and the open project stays as it is.
+function M.doReleaseLockFlow(proj_path)
+  local title = 'MTT Plastic Release Lock'
+
+  if not proj_path or proj_path == '' then
+    reaper.ShowMessageBox('The project has never been saved.', title, 0)
+    return
+  end
+
+  if not M.isInWorkspace(proj_path) then
+    reaper.ShowMessageBox('The project is not inside a Plastic workspace.', title, 0)
+    return
+  end
+
+  local info = M.fileInfo(proj_path)
+  if not info or not info.checked_out then
+    reaper.ShowMessageBox('The project is not checked out: no lock to release.', title, 0)
+    return
+  end
+
+  local head = info.local_cs and M.serverHead(proj_path) or nil
+  if not (head and head <= info.local_cs) then
+    local detail = head
+      and ('local cs:' .. tostring(info.local_cs) .. ' / server cs:' .. tostring(head))
+      or  'versions could not be compared'
+    reaper.ShowMessageBox(
+      'Local and server versions do not match (' .. detail .. ').\n\n' ..
+      'Use Revert instead.', title, 0)
+    return
+  end
+
+  local answer = reaper.ShowMessageBox(
+    'Release the lock on this project?\n\n' ..
+    'Local and server versions match (cs:' .. tostring(info.local_cs) .. ').\n' ..
+    'Only the checkout + lock is undone: the project stays open as it is\n' ..
+    'and local changes are kept on disk (not committed).\n\n' ..
+    'Continue?', title, 1) -- OK / Cancel
+  if answer ~= 1 then return end
+
+  local _, out = M.releaseLock(M.dirname(proj_path))
+  M.markDirty()
+
+  -- Trust the resulting state, not the exit code: the lock is released only
+  -- if the .rpp is no longer checked out.
+  local after = M.fileInfo(proj_path)
+  if after and not after.checked_out then
+    reaper.ShowMessageBox('Lock released. Project left as it is.', title, 0)
+  else
+    reaper.ShowMessageBox('Release lock FAILED:\n\n' .. tostring(out), title, 0)
+  end
 end
 
 function M.doRevertFlow(proj_path)

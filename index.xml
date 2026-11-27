@@ -38,7 +38,7 @@
   </category>
   <category name="RSC_Plastic">
     <reapack name="mtt_plastic_monitor.lua" type="script" desc="RSC Plastic - Plastic SCM Integration for REAPER">
-      <version name="1.4" author="Mattia Persico" time="2026-09-15T18:19:17Z">
+      <version name="1.5" author="Mattia Persico" time="2026-11-27T09:35:14Z">
           <source main="main" file="mtt_plastic_monitor.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_monitor.lua</source>
           <source file="mtt_plastic_lib.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_lib.lua</source>
           <source file="mtt_plastic_checkin.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/RSC_Plastic/mtt_plastic_checkin.lua</source>
