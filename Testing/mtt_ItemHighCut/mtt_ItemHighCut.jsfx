@@ -1,0 +1,64 @@
+desc:MTT Item High Cut
+// Version: 1.0
+// Gentle high cut (low-pass) meant as a take FX: the cutoff is drawn as a take envelope
+// by mtt_ItemHighCut.lua. Zero-delay-feedback (TPT) filters, so a moving cutoff stays
+// click-free; the cutoff glides in the log domain (~5 ms) between envelope updates.
+tags:filter lowpass highcut
+// :log maps the parameter (and so the envelope) logarithmically: 632 Hz sits mid-height.
+slider1:cutoff=20000<20,20000,1:log=632>Cutoff (Hz)
+slider2:slope=0<0,1,1{6 dB/oct,12 dB/oct}>Slope
+
+@init
+MAXCH = 64;
+ST1 = 0;          // per-channel filter state 1: slots 0..63
+ST2 = 64;         // per-channel filter state 2: slots 64..127
+memset(ST1, 0, MAXCH * 2);
+smooth = 1 - exp(-1 / (0.005 * srate));
+inited = 0;
+prev_slope = -1;
+update = 1;
+
+@slider
+ltarget = log(max(cutoff, 20));
+!inited ? ( lcur = ltarget; inited = 1; );
+// A slope change reuses the same state slots: clear them instead of carrying a bad state.
+slope != prev_slope ? ( memset(ST1, 0, MAXCH * 2); prev_slope = slope; );
+update = 1;
+
+@sample
+lcur != ltarget ? (
+  lcur += (ltarget - lcur) * smooth;
+  abs(ltarget - lcur) < 0.00001 ? lcur = ltarget;
+  update = 1;
+);
+update ? (
+  f = min(exp(lcur), 0.49 * srate);
+  gw = tan($pi * f / srate);
+  // 12 dB/oct: Butterworth state-variable filter (k = 1/Q, Q = 0.707: no resonance bump).
+  k = sqrt(2);
+  a1 = 1 / (1 + gw * (gw + k));
+  a2 = gw * a1;
+  a3 = gw * a2;
+  // 6 dB/oct: one-pole TPT low-pass.
+  g1 = gw / (1 + gw);
+  update = 0;
+);
+nch = min(num_ch, MAXCH);
+ch = 0;
+loop(nch,
+  x = spl(ch);
+  slope ? (
+    v3 = x - ST2[ch];
+    v1 = a1 * ST1[ch] + a2 * v3;
+    v2 = ST2[ch] + a2 * ST1[ch] + a3 * v3;
+    ST1[ch] = 2 * v1 - ST1[ch];
+    ST2[ch] = 2 * v2 - ST2[ch];
+    spl(ch) = v2;
+  ) : (
+    v = (x - ST1[ch]) * g1;
+    y = v + ST1[ch];
+    ST1[ch] = y + v;
+    spl(ch) = y;
+  );
+  ch += 1;
+);
