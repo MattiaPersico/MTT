@@ -1,10 +1,16 @@
 # mtt_Shelf — where we left off
 
-updated: 2026-11-19
+updated: 2026-11-26
 - Done:
-  - `insert_fx`: the FX now lands only on the active take of each target item (`reaper.GetActiveTake`), not on every take of the item.
-  - Left scrollbar: the grab keeps LEFT_SB_GRAB_MARGIN_Y from the track outline at both ends while scrolling too (it touched it at the top and bottom). Buttons rectangular (FrameRounding 0, was 3).
+  - Link favorites: a third favorite type, saved as `L||<url or path>|<name>` in the project shelf file and in the presets file (a `|` inside the target is stored as `%7C`). A click opens it with CF_ShellExecute (SWS): URLs in the default browser, local files and folders in their default app. Amber border, hand cursor, the target in the hover tooltip, Alt+click removes it like the other types, duplicates are skipped by target.
+  - Adding: a "Link" button in the top row (after Fx) opens a popup with a Link field (URL or path), File... (GetUserFileNameForRead, starting in the project folder) and Folder... (only with js_ReaScriptAPI), an optional Name (default: the host for a URL, the file name without extension for a path) and Add / Cancel. Files dragged from Finder/Explorer onto the shelf become links too: an InvisibleButton drop target covering the window, submitted only while a file drag is in progress.
+  - Missing link: clicking a link whose local path no longer exists opens a "Missing link" modal (the user chose absolute paths and this prompt over relative paths): new path (field, File..., Folder...) with "Save and open", "Remove from shelf", or Cancel. URLs are not checked.
+  - Menu look: the user said the first Link popup did not match the menus of mtt_dock and FMOD Sync Mini. Every popup of the shelf (Fx, Preset, Link, Missing link) is now drawn inside push_menu_style/pop_menu_style: FMOD Sync Mini's palette and theme shades (col_main_bg), square corners, sans-serif 13, its padding and spacing, no frame borders, the orange accent on the primary button, labels in a left column with tooltips, English labels in the Link and Missing link popups. The shelf's own buttons and top row are unchanged; the Fx and Preset popups keep their Italian labels and layout.
+  - Parsing, saving, presets round-trip, path cleaning, default names and the missing-path check were run outside REAPER with a mocked `reaper` table (all passed); the ReaImGui and SWS function names were checked against their sources. Push/pop balance of the menu look checked with a counting mock. The UI (popups, drop target, modal) was not run in REAPER.
 - Not done:
+  - The top-row redesign (wanted #1) was not touched: "Link" is a fourth text button in the existing row.
 - Waiting on:
+  - User to test in REAPER: the look of the Fx, Preset, Link and Missing link popups next to mtt_dock / FMOD Sync Mini (dark and light theme); Link popup (paste a Google Docs URL, pick a file, pick a folder), dragging one or more files from Finder onto the shelf (docked and undocked), clicking each kind of link, renaming/moving a linked file and clicking it (Missing link: new path, delete, cancel), saving and loading a preset with links.
+  - User to test (from 2026-11-24): action buttons running their own action after a REAPER restart and with a preset saved before that change.
   - User to test: dropping an FX on a multi-take item adds it only to the active take (click on a selected multi-take item too, and the drag-drop path).
   - User to test: the first separator sits at the top border (docked mode still has a ~1px Dummy + item-spacing below it); bottom margin is now gone too.

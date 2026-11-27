@@ -5,7 +5,7 @@
 
 ## What it is
 
-A per-project shelf of the actions and effects the user reaches for most: a small window of buttons where a click runs an action and a drag drops an FX onto the track under the cursor, so the frequent operations of the current session are one click away instead of a trip through the action list or the FX chain picker. Each project keeps its own favorites, so the shelf is tailored to the work it sits next to.
+A per-project shelf of the actions, effects and documents the user reaches for most: a small window of buttons where a click runs an action, opens a link (an online document or a local file or folder) and a drag drops an FX onto the track under the cursor, so the frequent operations and references of the current session are one click away instead of a trip through the action list, the FX chain picker or the browser. Each project keeps its own favorites, so the shelf is tailored to the work it sits next to.
 
 ## Ruled out
 

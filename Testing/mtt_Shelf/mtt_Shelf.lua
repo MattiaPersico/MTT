@@ -44,6 +44,42 @@ local preset_names = {}       -- nomi ordinati, per l'elenco in UI
 local preset_name_input = ""  -- campo "salva come"
 local open_preset_popup = false
 
+-- Link: bottoni che aprono un URL (browser) o un file/cartella locale (app
+-- predefinita). Popup "Link" per aggiungerne uno; popup "Missing link" quando
+-- il percorso locale di un link non esiste più (nuovo percorso o elimina).
+local open_link_popup = false
+local link_target_input = ""
+local link_name_input = ""
+local open_missing_popup = false
+local missing_link_fav = nil      -- il favorite (tabella, non indice) col percorso mancante
+local missing_target_input = ""
+
+-- Menu look: the shelf's popups (Fx, Preset, Link, Missing link) take the look
+-- of FMOD Sync Mini and mtt_dock docked next to it: square corners, sans-serif
+-- 13, their spacing, mtt_FmodSync's palette with the orange accent, and the
+-- REAPER theme background a little lighter for popup, frames and buttons
+-- (darker on a light theme). The buttons of the shelf itself keep their look.
+local MENU_FONT_SIZE = 13
+local MENU_ACCENT = 0xE89B3CFF
+local MENU_SELECTED = 0x9A6322FF
+local MENU_SELECTED_HOVER = 0xAE7229FF
+local MENU_SELECTED_ACTIVE = 0x84541AFF
+local MENU_LABEL_W = 70      -- left column of the label/field rows
+local MENU_FIELD_W = 320
+local menu_font = nil
+do
+    local ok, f = pcall(function()
+        local font = reaper.ImGui_CreateFont("sans-serif")
+        reaper.ImGui_Attach(ctx, font)
+        return font
+    end)
+    if ok then
+        menu_font = f
+    end
+end
+local menu_pushed_colors = 0
+local menu_pushed_vars = 0
+
 -- Dimensioni del layout a scaffale: altezza fissa dei bottoni favorite (la
 -- larghezza la definisce il testo), distanza orizzontale tra due bottoni della
 -- stessa riga e effetto "rilievo" all'hover: font a 1.1x e 4px di altezza in più.
@@ -96,7 +132,7 @@ local current_hovered_idx = -1   -- indice del button attualmente hoverato (fram
 local pressed_favorite_idx = -1  -- indice del button premuto (frame precedente, per il feedback di pressione)
 local current_pressed_idx = -1   -- indice del button attualmente premuto (frame corrente)
 local hovered_upper_btn = 0      -- Action/Fx/Preset hoverato (frame precedente, testo più chiaro)
-local current_upper_btn = 0      -- Action/Fx/Preset hoverato (frame corrente); 0=nessuno, 1=Action 2=Fx 3=Preset
+local current_upper_btn = 0      -- Action/Fx/Preset/Link hoverato (frame corrente); 0=nessuno, 1=Action 2=Fx 3=Preset 4=Link
 local isDraggingFx = false       -- un favorite FX è trattenuto (drag in corso)
 local draggedFx = nil            -- favorite in corso di drag
 local DRAG_PREVIEW_OFFSET_Y = 20 -- preview sotto il cursore: tiene il puntatore fuori dalla finestra
@@ -219,6 +255,224 @@ function get_action_name(action_id)
     return name
 end
 
+-- Script, SWS and custom actions get a new numeric command ID at every REAPER
+-- launch (assigned in registration order), so a saved number can point to a
+-- different action in the next session. Such actions are stored by their named
+-- command ("_RS…", "_SWS_…") and re-resolved with NamedCommandLookup; only native
+-- actions keep their number, which is stable.
+local main_section = reaper.SectionFromUniqueID(MAIN_SECTION)
+local action_ids_by_name = nil   -- lazy name -> id map, built once per resolve pass
+
+function named_command_of(id)
+    local named = reaper.ReverseNamedCommandLookup(id)
+    if named and named ~= "" then
+        return "_" .. named
+    end
+    return nil
+end
+
+function find_action_id_by_name(name)
+    if not action_ids_by_name then
+        action_ids_by_name = {}
+        local idx = 0
+        while true do
+            local cmd = reaper.kbd_enumerateActions(main_section, idx)
+            if not cmd or cmd == 0 then
+                break
+            end
+            local text = reaper.kbd_getTextFromCmd(cmd, main_section)
+            if text and text ~= "" and not action_ids_by_name[text] then
+                action_ids_by_name[text] = cmd
+            end
+            idx = idx + 1
+        end
+    end
+    return action_ids_by_name[name]
+end
+
+-- Sets fav.id to this session's command ID (0 = action not available now; the
+-- entry stays on the shelf, inert, so it comes back if the script is reinstalled).
+-- Returns true when fav.named was filled in, i.e. the file needs rewriting.
+function resolve_action(fav)
+    if fav.named then
+        fav.id = reaper.NamedCommandLookup(fav.named)
+        return false
+    end
+    -- No named command: a native action, or an entry saved by the old format
+    -- (number only). A number that is not native is stale: find it by name.
+    local id = fav.id or 0
+    if id > 0 and not reaper.ReverseNamedCommandLookup(id)
+       and (reaper.kbd_getTextFromCmd(id, main_section) or "") ~= "" then
+        return false
+    end
+    local found = fav.name and find_action_id_by_name(fav.name)
+    if found then
+        fav.id = found
+        fav.named = named_command_of(found)
+        return fav.named ~= nil
+    end
+    fav.id = 0
+    return false
+end
+
+-- Action fields shared by the favorites file and the presets file:
+-- A|<id>|<named command or empty>|<name>
+function parse_action_line(part2, part3, name_val)
+    local id_val = tonumber(part2) or 0
+    local named = (part3 ~= "" and part3) or nil
+    if not name_val then
+        return nil
+    end
+    return {type = "action", id = id_val, named = named, name = name_val}
+end
+
+function format_action_line(fav)
+    return string.format("A|%d|%s|%s\n", fav.id or 0, fav.named or "", fav.name)
+end
+
+-- Link fields shared by the favorites file and the presets file:
+-- L||<url or path>|<name>. A "|" inside the target is stored as %7C, so the
+-- line still splits on the field separators (the name, last, may hold "|").
+function parse_link_line(part3, name_val)
+    if not part3 or part3 == "" or not name_val then
+        return nil
+    end
+    return {type = "link", target = (part3:gsub("%%7C", "|")), name = name_val}
+end
+
+function format_link_line(fav)
+    return "L||" .. (fav.target:gsub("|", "%%7C")) .. "|" .. fav.name .. "\n"
+end
+
+-- Un URL (schema://... o mailto:) si apre nel browser; tutto il resto è un
+-- percorso locale (file o cartella), aperto con l'app predefinita.
+function is_url(target)
+    return target:match("^%a[%w+.-]*://") ~= nil or target:match("^mailto:") ~= nil
+end
+
+-- Pulisce quanto incollato nel campo: spazi e virgolette attorno, "www."
+-- senza schema diventa https://, "~/" diventa la home (`os` è ombreggiato
+-- da reaper.GetOS() in questo file: la libreria è _G.os).
+function clean_link_target(s)
+    s = (s or ""):match("^%s*(.-)%s*$")
+    s = s:match('^"(.*)"$') or s:match("^'(.*)'$") or s
+    if s:match("^www%.") then
+        s = "https://" .. s
+    elseif s:match("^~[/\\]") then
+        local home = _G.os.getenv("HOME") or _G.os.getenv("USERPROFILE")
+        if home then
+            s = home .. s:sub(2)
+        end
+    end
+    return s
+end
+
+-- Un percorso locale esiste se è un file o una cartella (io.open apre anche
+-- una cartella su macOS; EnumerateFiles/Subdirectories la coprono altrove,
+-- tranne una cartella vuota).
+function link_exists(path)
+    if reaper.file_exists(path) then
+        return true
+    end
+    local f = io.open(path, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return reaper.EnumerateFiles(path, 0) ~= nil or reaper.EnumerateSubdirectories(path, 0) ~= nil
+end
+
+-- Nome di default del bottone: l'host per un URL (senza "www."), il nome del
+-- file senza estensione (o della cartella) per un percorso locale.
+function default_link_name(target)
+    if is_url(target) then
+        local host = target:match("^%a[%w+.-]*://([^/?#:]+)")
+        if host then
+            return (host:gsub("^www%.", ""))
+        end
+        return target
+    end
+    local base = target:match("([^/\\]+)[/\\]*$") or target
+    local stem = base:gsub("%.%w+$", "")
+    if stem == "" then
+        return base
+    end
+    return stem
+end
+
+function add_link_favorite(target, name)
+    target = clean_link_target(target)
+    if target == "" or has_favorite(favorites, "link", target) then
+        return
+    end
+    name = (name or ""):match("^%s*(.-)%s*$")
+    if name == "" then
+        name = default_link_name(target)
+    end
+    table.insert(favorites, {type = "link", target = target, name = name})
+    save_favorites()
+end
+
+-- Click su un link: un percorso locale che non esiste più apre il popup
+-- "Missing link" invece di passare un percorso morto al sistema. Gli URL non
+-- si verificano. CF_ShellExecute (SWS, già richiesto dallo script per
+-- BR_*AtMouseCursor) apre URL e file con l'app predefinita del sistema.
+function open_link(fav)
+    if not is_url(fav.target) and not link_exists(fav.target) then
+        missing_link_fav = fav
+        missing_target_input = fav.target
+        open_missing_popup = true
+        return
+    end
+    if reaper.APIExists("CF_ShellExecute") then
+        reaper.CF_ShellExecute(fav.target)
+    end
+end
+
+-- Dialoghi nativi per scegliere il bersaglio; la cartella solo con
+-- js_ReaScriptAPI (il dialogo file di REAPER non sceglie cartelle).
+function browse_link_file(initial_dir)
+    local ok, path = reaper.GetUserFileNameForRead(initial_dir or "", "Link a file", "")
+    if ok and path ~= "" then
+        return path
+    end
+end
+
+function browse_link_folder(initial_dir)
+    if not reaper.APIExists("JS_Dialog_BrowseForFolder") then
+        return
+    end
+    local ok, path = reaper.JS_Dialog_BrowseForFolder("Link a folder", initial_dir or "")
+    if ok == 1 and path ~= "" then
+        return path
+    end
+end
+
+-- Row "Link" (URL or path) + File... / Folder... under it, shared by the Link
+-- and Missing link popups: returns the updated value of the field.
+function draw_link_target_field(id, value, initial_dir)
+    menu_label("Link", "A web address (a Google Doc, a page...) or a file or folder on this computer.")
+    reaper.ImGui_SetNextItemWidth(ctx, MENU_FIELD_W)
+    local _, buf = reaper.ImGui_InputTextWithHint(ctx, "##" .. id, "URL or path", value)
+    reaper.ImGui_SetCursorPosX(ctx, MENU_LABEL_W)
+    if reaper.ImGui_Button(ctx, "File...##" .. id) then
+        buf = browse_link_file(initial_dir) or buf
+    end
+    menu_tip("Pick a file.")
+    if reaper.APIExists("JS_Dialog_BrowseForFolder") then
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Folder...##" .. id) then
+            buf = browse_link_folder(initial_dir) or buf
+        end
+        menu_tip("Pick a folder.")
+    end
+    return buf
+end
+
+function parent_dir(path)
+    return path:match("^(.*)[/\\][^/\\]*$") or ""
+end
+
 function load_favorites()
     local path = reaper.GetProjectPath()
     if not path or path == "" then
@@ -241,20 +495,25 @@ function load_favorites()
             goto continue
         end
 
-        -- Try new format first: A|id||name  OR  F||ident|name
-        local fav_type, part2, part3, name_val = line:match("^([AF])|([^|]*)|([^|]*)|(.+)$")
+        -- Try new format first: A|id|named|name  OR  F||ident|name  OR  L||target|name
+        local fav_type, part2, part3, name_val = line:match("^([AFL])|([^|]*)|([^|]*)|(.+)$")
 
         if fav_type then
             if fav_type == "A" then
-                local id_val = tonumber(part2)
-                if id_val and id_val > 0 then
-                    table.insert(favorites, {type = "action", id = id_val, name = name_val})
+                local fav = parse_action_line(part2, part3, name_val)
+                if fav then
+                    table.insert(favorites, fav)
                 end
             elseif fav_type == "F" then
                 -- part2 should be empty for FX, ident is in part3
                 local fx_ident = part3
                 if fx_ident and fx_ident ~= "" then
                     table.insert(favorites, {type = "fx", ident = fx_ident, name = name_val})
+                end
+            elseif fav_type == "L" then
+                local fav = parse_link_line(part3, name_val)
+                if fav then
+                    table.insert(favorites, fav)
                 end
             end
             goto continue
@@ -267,6 +526,17 @@ function load_favorites()
         end
 
         ::continue::
+    end
+
+    action_ids_by_name = nil
+    local migrated = false
+    for _, fav in ipairs(favorites) do
+        if fav.type == "action" and resolve_action(fav) then
+            migrated = true
+        end
+    end
+    if migrated then
+        save_favorites()
     end
 end
 
@@ -283,12 +553,15 @@ function save_favorites()
     end
 
     for _, fav in ipairs(favorites) do
-        if fav.type == "action" and fav.id and fav.id > 0 and fav.name then
-            -- Format: A|id||name
-            file:write(string.format("A|%d||%s\n", fav.id, fav.name))
+        if fav.type == "action" and fav.name then
+            -- Format: A|id|named|name (named empty for native actions). An action not
+            -- found this session (id 0) is kept, so it resolves again if it returns.
+            file:write(format_action_line(fav))
         elseif fav.type == "fx" and fav.ident and fav.name then
             -- Format: F||ident|name
             file:write(string.format("F||%s|%s\n", fav.ident, fav.name))
+        elseif fav.type == "link" and fav.target and fav.name then
+            file:write(format_link_line(fav))
         end
     end
     file:close()
@@ -330,7 +603,7 @@ end
 
 -- Preset: un file globale in resource path, condiviso tra tutti i progetti.
 -- Formato: una riga "P|<nome>" apre un blocco, seguito dalle favorite in formato
--- identico a quello del file dei favorites (A|id||nome / F||ident|nome).
+-- identico a quello del file dei favorites (A|id|named|nome / F||ident|nome / L||target|nome).
 function preset_path()
     return reaper.GetResourcePath() .. "/" .. PRESETS_FILENAME
 end
@@ -364,21 +637,39 @@ function load_presets()
 
         -- Favorite del preset corrente (stesso formato del file dei favorites)
         if current then
-            local fav_type, part2, part3, name_val = line:match("^([AF])|([^|]*)|([^|]*)|(.+)$")
+            local fav_type, part2, part3, name_val = line:match("^([AFL])|([^|]*)|([^|]*)|(.+)$")
             if fav_type == "A" then
-                local id_val = tonumber(part2)
-                if id_val and id_val > 0 then
-                    table.insert(presets[current], {type = "action", id = id_val, name = name_val})
+                local fav = parse_action_line(part2, part3, name_val)
+                if fav then
+                    table.insert(presets[current], fav)
                 end
             elseif fav_type == "F" then
                 local fx_ident = part3
                 if fx_ident and fx_ident ~= "" then
                     table.insert(presets[current], {type = "fx", ident = fx_ident, name = name_val})
                 end
+            elseif fav_type == "L" then
+                local fav = parse_link_line(part3, name_val)
+                if fav then
+                    table.insert(presets[current], fav)
+                end
             end
         end
 
         ::continue::
+    end
+
+    action_ids_by_name = nil
+    local migrated = false
+    for _, name in ipairs(preset_names) do
+        for _, fav in ipairs(presets[name]) do
+            if fav.type == "action" and resolve_action(fav) then
+                migrated = true
+            end
+        end
+    end
+    if migrated then
+        save_presets_file()
     end
 end
 
@@ -391,10 +682,12 @@ function save_presets_file()
     for _, name in ipairs(preset_names) do
         file:write(string.format("P|%s\n", name))
         for _, fav in ipairs(presets[name]) do
-            if fav.type == "action" and fav.id and fav.id > 0 and fav.name then
-                file:write(string.format("A|%d||%s\n", fav.id, fav.name))
+            if fav.type == "action" and fav.name then
+                file:write(format_action_line(fav))
             elseif fav.type == "fx" and fav.ident and fav.name then
                 file:write(string.format("F||%s|%s\n", fav.ident, fav.name))
+            elseif fav.type == "link" and fav.target and fav.name then
+                file:write(format_link_line(fav))
             end
         end
     end
@@ -414,7 +707,7 @@ function save_current_as_preset(name)
 
     local copy = {}
     for _, fav in ipairs(favorites) do
-        table.insert(copy, {type = fav.type, id = fav.id, ident = fav.ident, name = fav.name})
+        table.insert(copy, {type = fav.type, id = fav.id, named = fav.named, ident = fav.ident, target = fav.target, name = fav.name})
     end
 
     local is_new = not has_preset(name)
@@ -435,7 +728,7 @@ function load_preset(name)
 
     favorites = {}
     for _, fav in ipairs(p) do
-        table.insert(favorites, {type = fav.type, id = fav.id, ident = fav.ident, name = fav.name})
+        table.insert(favorites, {type = fav.type, id = fav.id, named = fav.named, ident = fav.ident, target = fav.target, name = fav.name})
     end
     save_favorites()
 end
@@ -571,7 +864,7 @@ function remove_favorite(index)
     end
 end
 
--- Identificatore unico del favorite: id per un'azione, ident per un FX. Prima di
+-- Identificatore unico del favorite: id per un'azione, ident per un FX, target per un link. Prima di
 -- aggiungerne uno nuovo si controlla che non esista già un favorite dello stesso tipo
 -- con lo stesso identificatore; se è già presente l'inserimento viene scarto senza alcun
 -- aviso, così un duplicato non si accumula nella lista.
@@ -580,6 +873,10 @@ function has_favorite(fav_list, fav_type, key)
         if fav.type == fav_type then
             if fav_type == "action" then
                 if fav.id == key then
+                    return true
+                end
+            elseif fav_type == "link" then
+                if fav.target == key then
                     return true
                 end
             elseif fav.ident == key then
@@ -666,7 +963,7 @@ function update_action_selection_state()
         end
 
         if not has_favorite(favorites, "action", pending_action_id) then
-            table.insert(favorites, {type = "action", id = pending_action_id, name = action_name})
+            table.insert(favorites, {type = "action", id = pending_action_id, named = named_command_of(pending_action_id), name = action_name})
             --reaper.ShowConsoleMsg("[MTT_Shelf] Nuovo Action Favorite: type='action', id=" .. pending_action_id .. ", name='" .. action_name .. "'\n")
         end
 
@@ -803,6 +1100,12 @@ function render_favorite_button(i, btn_w, btn_h)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.1, 0.2, 0.15, 0))
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.15, 0.3, 0.2, 0.2))
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.05, 0.15, 0.1, 0))
+    else
+        -- Bordo colorato, interno trasparente (Link — Ambra)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.75, 0.58, 0.3, 1))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), col_convert(0.3, 0.22, 0.1, 0))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), col_convert(0.4, 0.3, 0.15, 0.2))
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.15, 0.05, 0))
     end
 
     -- Se questo è il button hoverato nell'frame precedente: font ingrandito
@@ -831,9 +1134,12 @@ function render_favorite_button(i, btn_w, btn_h)
         if fav.type == "action" then
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.7, 0.75, 0.9, 1))
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.28, 0.4, 0.35))
-        else
+        elseif fav.type == "fx" then
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.45, 0.75, 0.5, 1))
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.2, 0.4, 0.25, 0.35))
+        else
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Border(), col_convert(0.95, 0.8, 0.5, 1))
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), col_convert(0.4, 0.3, 0.15, 0.35))
         end
         n_pushed_col = n_pushed_col + 2
     end
@@ -861,6 +1167,11 @@ function render_favorite_button(i, btn_w, btn_h)
     reaper.ImGui_PopStyleVar(ctx, 1)
     local rect_min_x, rect_min_y = reaper.ImGui_GetItemRectMin(ctx)
     local rect_max_x, rect_max_y = reaper.ImGui_GetItemRectMax(ctx)
+
+    -- Link: il bersaglio (URL o percorso) nel tooltip, col ritardo standard
+    if fav.type == "link" then
+        reaper.ImGui_SetItemTooltip(ctx, fav.target)
+    end
 
     -- Traccia il button premuto nel frame corrente: il feedback si applica dal
     -- frame prossimo, come per l'hover
@@ -914,11 +1225,17 @@ function render_favorite_button(i, btn_w, btn_h)
         if is_alt then
             table.insert(hasToBeRemoved, i)
             else
-                if fav.type == "action" and fav.id and fav.id > 0 then
-                    --reaper.ShowConsoleMsg("[MTT_Shelf] Action clicked: type='" .. fav.type .. "', id=" .. fav.id .. ", name='" .. fav.name .. "'\n")
-                    reaper.defer(function() reaper.Main_OnCommand(fav.id, -1) end)
+                if fav.type == "action" then
+                    -- Named actions are looked up again at click time: the number
+                    -- cached at load is only valid for this REAPER session.
+                    local cmd = fav.named and reaper.NamedCommandLookup(fav.named) or fav.id or 0
+                    if cmd > 0 then
+                        reaper.defer(function() reaper.Main_OnCommand(cmd, -1) end)
+                    end
                 elseif fav.type == "fx" and fav.ident then
                     insert_fx(fav.ident)
+                elseif fav.type == "link" and fav.target then
+                    open_link(fav)
                 end
             end
         end
@@ -967,7 +1284,7 @@ end
 -- Bottone "solo testo" della riga superiore (Action/Fx/Preset): il label si
 -- illumina all'hover, con lo stesso schema a due frame dei favorite
 -- (hovered_upper_btn = frame precedente, current_upper_btn = frame corrente).
--- idx: 1=Action 2=Fx 3=Preset. Sfondo e bordo già trasparenti dal chiamante.
+-- idx: 1=Action 2=Fx 3=Preset 4=Link. Sfondo e bordo già trasparenti dal chiamante.
 local function draw_upper_text_button(label, idx)
     -- Il testo del tema è già bianco pieno: per far "crescere" la luminosità
     -- all'hover si abbassa quella a riposo (grigio) e si torna a bianco sotto il cursore.
@@ -986,7 +1303,7 @@ local function draw_upper_text_button(label, idx)
 end
 
 -- Barra di controllo fissa in cima alla finestra, tra due linee grigie: la
--- label "Add:" + i bottoni Action/Fx a sinistra (per aggiungere favorite) e
+-- label "Add:" + i bottoni Action/Fx/Link a sinistra (per aggiungere favorite) e
 -- Preset allineato al bordo destro, tenuti separati dai bottoni del scaffale.
 function draw_action_fx_buttons()
     -- Linea grigia sopra la riga (colore da ImGui_Col_Separator)
@@ -1024,6 +1341,15 @@ function draw_action_fx_buttons()
     if draw_upper_text_button("Fx", 2) then
         open_fx_popup = true
         fx_filter = ""
+    end
+
+    reaper.ImGui_SameLine(ctx, 0, UPPER_BTN_SP_X)
+
+    -- Apre il popup Link (flag consumato in main_loop, a livello window)
+    if draw_upper_text_button("Link", 4) then
+        open_link_popup = true
+        link_target_input = ""
+        link_name_input = ""
     end
 
     -- Preset allineato al bordo destro della regione di contenuto:
@@ -1315,6 +1641,254 @@ function render_fx_drag_preview()
     reaper.ImGui_PopStyleVar(ctx, 3)
 end
 
+-- Colours of the menu look: mtt_FmodSync's palette, then the theme shades
+-- over it (as theme_palette in FMOD Sync Mini, read every time: the theme may
+-- change while the shelf is open).
+function menu_style_colors()
+    local out = {
+        {reaper.ImGui_Col_WindowBg(), 0x191A1BFF}, {reaper.ImGui_Col_PopupBg(), 0x202223FF},
+        {reaper.ImGui_Col_TitleBg(), 0x202223FF}, {reaper.ImGui_Col_TitleBgActive(), 0x292B2CFF},
+        {reaper.ImGui_Col_Text(), 0xECEEEBFF}, {reaper.ImGui_Col_TextDisabled(), 0xA6AAA8FF},
+        {reaper.ImGui_Col_Separator(), 0x464A49FF}, {reaper.ImGui_Col_Border(), 0x464A49FF},
+        {reaper.ImGui_Col_FrameBg(), 0x2D3031FF}, {reaper.ImGui_Col_FrameBgHovered(), 0x373B3CFF},
+        {reaper.ImGui_Col_FrameBgActive(), 0x3C4142FF}, {reaper.ImGui_Col_Button(), 0x303435FF},
+        {reaper.ImGui_Col_ButtonHovered(), 0x414948FF}, {reaper.ImGui_Col_ButtonActive(), 0x4D5956FF},
+        {reaper.ImGui_Col_CheckMark(), MENU_ACCENT}, {reaper.ImGui_Col_Header(), 0x3A3328FF},
+        {reaper.ImGui_Col_HeaderHovered(), 0x4D4129FF}, {reaper.ImGui_Col_HeaderActive(), MENU_SELECTED},
+        {reaper.ImGui_Col_TextSelectedBg(), 0xE89B3C66},
+        {reaper.ImGui_Col_ScrollbarBg(), 0x00000000},
+        {reaper.ImGui_Col_ScrollbarGrab(), 0x58534AFF}, {reaper.ImGui_Col_ScrollbarGrabHovered(), 0x756A4FFF},
+        {reaper.ImGui_Col_ScrollbarGrabActive(), MENU_ACCENT},
+    }
+    local native = reaper.GetThemeColor("col_main_bg", 0)
+    if not native or native == -1 then
+        return out
+    end
+    local r, g, b = reaper.ColorFromNative(native)
+    local light = (0.299 * r + 0.587 * g + 0.114 * b) > 128
+    local function shade(d)
+        if light then
+            d = -d
+        end
+        local function c(v)
+            return math.max(0, math.min(255, v + d))
+        end
+        return (c(r) << 24) | (c(g) << 16) | (c(b) << 8) | 0xFF
+    end
+    local theme = {
+        {reaper.ImGui_Col_WindowBg(), shade(0)}, {reaper.ImGui_Col_PopupBg(), shade(10)},
+        {reaper.ImGui_Col_FrameBg(), shade(20)}, {reaper.ImGui_Col_FrameBgHovered(), shade(30)},
+        {reaper.ImGui_Col_FrameBgActive(), shade(36)},
+        {reaper.ImGui_Col_Button(), shade(26)}, {reaper.ImGui_Col_ButtonHovered(), shade(38)},
+        {reaper.ImGui_Col_ButtonActive(), shade(48)},
+        {reaper.ImGui_Col_Separator(), shade(34)}, {reaper.ImGui_Col_Border(), shade(30)},
+    }
+    for _, pair in ipairs(theme) do
+        out[#out + 1] = pair
+    end
+    if light then
+        out[#out + 1] = {reaper.ImGui_Col_Text(), 0x1E1F20FF}
+        out[#out + 1] = {reaper.ImGui_Col_TextDisabled(), 0x5E6260FF}
+    end
+    return out
+end
+
+-- Pushed before the popups open (window padding, rounding and colours are
+-- read at BeginPopup) and popped after the last one ends. Overrides the
+-- docked shelf's bordered frames (FrameBorderSize 1, FramePadding 4,1).
+function push_menu_style()
+    reaper.ImGui_PushFont(ctx, menu_font, MENU_FONT_SIZE)
+    local colors = menu_style_colors()
+    for _, pair in ipairs(colors) do
+        reaper.ImGui_PushStyleColor(ctx, pair[1], pair[2])
+    end
+    menu_pushed_colors = #colors
+    local vars = {
+        {reaper.ImGui_StyleVar_WindowRounding(), 0}, {reaper.ImGui_StyleVar_ChildRounding(), 0},
+        {reaper.ImGui_StyleVar_PopupRounding(), 0}, {reaper.ImGui_StyleVar_ScrollbarRounding(), 0},
+        {reaper.ImGui_StyleVar_GrabRounding(), 0}, {reaper.ImGui_StyleVar_FrameRounding(), 0},
+        {reaper.ImGui_StyleVar_FrameBorderSize(), 0}, {reaper.ImGui_StyleVar_PopupBorderSize(), 1},
+        {reaper.ImGui_StyleVar_WindowPadding(), 10, 8},
+        {reaper.ImGui_StyleVar_ItemSpacing(), 8, 5},
+        {reaper.ImGui_StyleVar_FramePadding(), 9, 3},
+    }
+    for _, v in ipairs(vars) do
+        if v[3] then
+            reaper.ImGui_PushStyleVar(ctx, v[1], v[2], v[3])
+        else
+            reaper.ImGui_PushStyleVar(ctx, v[1], v[2])
+        end
+    end
+    menu_pushed_vars = #vars
+end
+
+function pop_menu_style()
+    reaper.ImGui_PopStyleVar(ctx, menu_pushed_vars)
+    reaper.ImGui_PopStyleColor(ctx, menu_pushed_colors)
+    reaper.ImGui_PopFont(ctx)
+end
+
+-- The primary button of a menu, in the accent (accent_button in mtt_FmodSync).
+function menu_accent_button(label)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), MENU_SELECTED)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), MENU_SELECTED_HOVER)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), MENU_SELECTED_ACTIVE)
+    local clicked = reaper.ImGui_Button(ctx, label)
+    reaper.ImGui_PopStyleColor(ctx, 3)
+    return clicked
+end
+
+-- Tooltip for the item just drawn, also while disabled (tip in mtt_FmodSync).
+function menu_tip(text)
+    if reaper.ImGui_IsItemHovered(ctx, reaper.ImGui_HoveredFlags_AllowWhenDisabled()) then
+        if reaper.ImGui_BeginTooltip(ctx) then
+            reaper.ImGui_PushTextWrapPos(ctx, reaper.ImGui_GetFontSize(ctx) * 30)
+            reaper.ImGui_Text(ctx, text)
+            reaper.ImGui_PopTextWrapPos(ctx)
+            reaper.ImGui_EndTooltip(ctx)
+        end
+    end
+end
+
+-- Label in the left column, the control after it (setting_label in mtt_FmodSync).
+function menu_label(text, help)
+    reaper.ImGui_AlignTextToFramePadding(ctx)
+    reaper.ImGui_Text(ctx, text)
+    if help then
+        menu_tip(help)
+    end
+    reaper.ImGui_SameLine(ctx, MENU_LABEL_W)
+end
+
+-- File trascinati dal Finder/Explorer sulla shelf: ognuno diventa un link
+-- (nome = nome del file, duplicati scartati). ReaImGui non ha un bersaglio
+-- di drop a livello finestra (nessun BeginDragDropTargetCustom): serve un
+-- item. Il bersaglio è un InvisibleButton grande quanto la finestra,
+-- sottomesso solo mentre un drag di file è in corso (GetDragDropPayloadFile
+-- risponde true solo allora): fuori dal drag non ruba hover e click ai
+-- bottoni né lo spostamento della finestra dallo sfondo. Sottomesso nella
+-- finestra principale anche da docked: BeginDragDropTarget confronta la
+-- root della finestra hoverata, quindi vale anche col mouse sulla child.
+function draw_file_drop_target()
+    if not reaper.ImGui_GetDragDropPayloadFile(ctx, 0) then
+        return
+    end
+    local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
+    local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
+    -- Entro il padding orizzontale: il bordo destro non allarga il contenuto
+    local pad_x = reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_WindowPadding())
+    reaper.ImGui_SetCursorScreenPos(ctx, win_x + pad_x, win_y)
+    reaper.ImGui_InvisibleButton(ctx, "##shelf_file_drop", math.max(1, win_w - 2 * pad_x), math.max(1, win_h))
+    if reaper.ImGui_BeginDragDropTarget(ctx) then
+        local ok, count = reaper.ImGui_AcceptDragDropPayloadFiles(ctx)
+        if ok then
+            for i = 0, count - 1 do
+                local got, file = reaper.ImGui_GetDragDropPayloadFile(ctx, i)
+                if got then
+                    add_link_favorite(file)
+                end
+            end
+        end
+        reaper.ImGui_EndDragDropTarget(ctx)
+    end
+end
+
+-- Link popup (adding) and Missing link modal (local path gone): opened at
+-- window level as the FX and Preset popups, inside push_menu_style.
+function draw_link_popups()
+    if open_link_popup then
+        reaper.ImGui_OpenPopup(ctx, "##LinkPopup")
+        open_link_popup = false
+    end
+
+    if reaper.ImGui_BeginPopup(ctx, "##LinkPopup") then
+        reaper.ImGui_SeparatorText(ctx, "Add a link")
+        if reaper.ImGui_IsWindowAppearing(ctx) then
+            -- Focus on the Link field (the next widget after its label)
+            reaper.ImGui_SetKeyboardFocusHere(ctx, 0)
+        end
+        link_target_input = draw_link_target_field("link_target", link_target_input, reaper.GetProjectPath())
+
+        menu_label("Name", "The text of the button. Empty: the file name, or the site for a web address.")
+        reaper.ImGui_SetNextItemWidth(ctx, MENU_FIELD_W)
+        local _, name_buf = reaper.ImGui_InputTextWithHint(ctx, "##link_name", "from the link", link_name_input)
+        link_name_input = name_buf
+
+        reaper.ImGui_Spacing(ctx)
+        reaper.ImGui_SetCursorPosX(ctx, MENU_LABEL_W)
+        local empty = clean_link_target(link_target_input) == ""
+        reaper.ImGui_BeginDisabled(ctx, empty)
+        if menu_accent_button("Add") then
+            add_link_favorite(link_target_input, link_name_input)
+            reaper.ImGui_CloseCurrentPopup(ctx)
+        end
+        reaper.ImGui_EndDisabled(ctx)
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Cancel##link") or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+            reaper.ImGui_CloseCurrentPopup(ctx)
+        end
+
+        reaper.ImGui_EndPopup(ctx)
+    end
+
+    if open_missing_popup then
+        reaper.ImGui_OpenPopup(ctx, "Missing link##shelf_missing")
+        open_missing_popup = false
+    end
+
+    if reaper.ImGui_BeginPopupModal(ctx, "Missing link##shelf_missing", nil, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+        -- The favorite is looked up by reference: if it was removed meanwhile
+        -- or the project changed (list reloaded), the modal closes.
+        local idx = nil
+        for i, fav in ipairs(favorites) do
+            if fav == missing_link_fav then
+                idx = i
+                break
+            end
+        end
+
+        if not idx then
+            missing_link_fav = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+        else
+            local fav = missing_link_fav
+            reaper.ImGui_PushTextWrapPos(ctx, MENU_LABEL_W + MENU_FIELD_W)
+            reaper.ImGui_Text(ctx, string.format('"%s" is no longer there:', fav.name))
+            reaper.ImGui_TextDisabled(ctx, fav.target)
+            reaper.ImGui_PopTextWrapPos(ctx)
+            reaper.ImGui_Spacing(ctx)
+
+            missing_target_input = draw_link_target_field("missing_target", missing_target_input, parent_dir(fav.target))
+
+            reaper.ImGui_Spacing(ctx)
+            reaper.ImGui_SetCursorPosX(ctx, MENU_LABEL_W)
+            local new_target = clean_link_target(missing_target_input)
+            reaper.ImGui_BeginDisabled(ctx, new_target == "")
+            if menu_accent_button("Save and open") then
+                fav.target = new_target
+                save_favorites()
+                missing_link_fav = nil
+                reaper.ImGui_CloseCurrentPopup(ctx)
+                open_link(fav)
+            end
+            reaper.ImGui_EndDisabled(ctx)
+            reaper.ImGui_SameLine(ctx)
+            if reaper.ImGui_Button(ctx, "Remove from shelf") then
+                remove_favorite(idx)
+                missing_link_fav = nil
+                reaper.ImGui_CloseCurrentPopup(ctx)
+            end
+            reaper.ImGui_SameLine(ctx)
+            if reaper.ImGui_Button(ctx, "Cancel##missing") or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+                missing_link_fav = nil
+                reaper.ImGui_CloseCurrentPopup(ctx)
+            end
+        end
+
+        reaper.ImGui_EndPopup(ctx)
+    end
+end
+
 function main_loop()
     -- I bottoni (e quindi IsItemHovered) vengono renderizzati solo se la
     -- finestra è visible: senza reset, un indice stale di un frame visible
@@ -1414,6 +1988,8 @@ function main_loop()
             draw_left_scrollbar()
         end
 
+        draw_file_drop_target()
+
         -- Rimozione DOPO il loop, in ordine inverso per non sballare gli indici
         for j = #hasToBeRemoved, 1, -1 do
             remove_favorite(hasToBeRemoved[j])
@@ -1467,6 +2043,10 @@ function main_loop()
                 end
             end
         end
+
+        -- Menu look for every popup below (Fx, Preset, Link, Missing link):
+        -- pushed before their Begin, popped after the last End.
+        push_menu_style()
 
         -- Apertura popup a livello window (ID stack coerente con BeginPopup)
         if open_fx_popup then
@@ -1598,6 +2178,10 @@ function main_loop()
             reaper.ImGui_EndPopup(ctx)
         end
 
+        draw_link_popups()
+
+        pop_menu_style()
+
         if docked then
             reaper.ImGui_PopStyleVar(ctx, 4)
         end
@@ -1626,7 +2210,7 @@ function main_loop()
     -- main_loop, e l'hover che conta è quello sincronizzato.
     local cursor = reaper.ImGui_MouseCursor_Arrow()
     local hovered_fav = favorites[hovered_favorite_idx]
-    if isDraggingFx or (hovered_fav and hovered_fav.type == "fx") then
+    if isDraggingFx or (hovered_fav and (hovered_fav.type == "fx" or hovered_fav.type == "link")) then
         cursor = reaper.ImGui_MouseCursor_Hand()
     end
     reaper.ImGui_SetMouseCursor(ctx, cursor)
