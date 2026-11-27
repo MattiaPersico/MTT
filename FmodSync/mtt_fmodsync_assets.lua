@@ -24,7 +24,7 @@ M.WILDCARDS = {
   { '$author', 'Project Settings > Notes > Author' },
   { '$track', 'the name of the top-level folder track' },
   { '$item', "the name of the take's folder item (or of its first item)" },
-  { '$index', 'the take number, two digits (01, 02..., or 00, 01... with Settings > Numbering); takes marked "Same line" count as one' },
+  { '$index', 'the take number, two digits (01, 02..., or 00, 01... with Settings > Numbering)' },
 }
 
 -- Merges intervals {s, e, label} (any order) whose distance is <= gap. Returns

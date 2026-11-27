@@ -207,7 +207,7 @@
   </category>
   <category name="FmodSync">
     <reapack name="mtt_FmodSync.lua" type="script" desc="FMOD Sync">
-      <version name="0.1" author="Mattia Persico" time="2026-11-27T09:00:00Z">
+      <version name="0.2" author="Mattia Persico" time="2026-11-27T11:59:59Z">
           <source main="main" file="mtt_FmodSync.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_FmodSync.lua</source>
           <source main="main" file="mtt_FmodSync_Mini.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_FmodSync_Mini.lua</source>
           <source file="mtt_fmodsync_assets.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/mtt_fmodsync_assets.lua</source>
@@ -218,6 +218,26 @@
           <source file="dkjson.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/dkjson.lua</source>
           <source file="socket module/socket/core.dll">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/socket%20module/socket/core.dll</source>
           <source file="socket module/socket/core.so">https://raw.githubusercontent.com/MattiaPersico/MTT/main/FmodSync/socket%20module/socket/core.so</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="mtt_TimbreMatch">
+    <reapack name="mtt_TimbreMatch.jsfx" type="effect" desc="mtt_TimbreMatch">
+      <version name="0.2.1" author="Mattia Persico" time="2026-11-27T11:19:29Z">
+          <source type="script" file="analyzer.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreMatch/analyzer.lua</source>
+          <source type="script" file="match_core.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreMatch/match_core.lua</source>
+          <source main="main" file="mtt_TimbreMatch.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreMatch/mtt_TimbreMatch.jsfx</source>
+          <source type="script" main="main" file="mtt_TimbreMatch.lua">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreMatch/mtt_TimbreMatch.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="mtt_TimbreLink">
+    <reapack name="mtt_TimbreLink.jsfx" type="effect" desc="mtt_TimbreLink">
+      <version name="0.12.0" author="Mattia Persico" time="2026-11-27T11:19:29Z">
+          <source file="interface.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreLink/interface.jsfx-inc</source>
+          <source main="main" file="mtt_TimbreLink.jsfx">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreLink/mtt_TimbreLink.jsfx</source>
+          <source file="network.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreLink/network.jsfx-inc</source>
+          <source file="spectral.jsfx-inc">https://raw.githubusercontent.com/MattiaPersico/MTT/main/Effects/mtt_TimbreLink/spectral.jsfx-inc</source>
       </version>
     </reapack>
   </category>

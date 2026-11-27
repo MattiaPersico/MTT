@@ -16,9 +16,10 @@
 -- mtt_FmodSync_Mini.lua opens it docked (FMOD Sync Mini). Docking or floating
 -- the window switches between the two views.
 -- 0.1: first release.
+-- 0.2: no "Use track settings" button, no "Same line".
 
 local major_version = 0
-local minor_version = 1
+local minor_version = 2
 local VERSION = major_version .. '.' .. minor_version
 
 if not reaper.APIExists('ImGui_GetBuiltinPath') then
@@ -625,60 +626,19 @@ local function asset_template(a)
   return default_template()
 end
 
--- Takes of one line: takes marked together in the panel ("Same line",
--- takes[key].group, 2 or more in the asset) get "_01", "_02"... in time order
--- after their name. In an asset with such a line, $index counts lines in time
--- order: the line is one (its takes share it), any other take one each, so
--- the take after House_02_01.._02_04 is House_03. Other assets keep the take
--- number. Returns { [block key] = take number in its line }, { [block key] =
--- $index } (empty when the asset has no line).
-local function take_numbers(a)
-  local blocks = {}
-  for i, b in ipairs(a.blocks) do blocks[i] = b end
-  table.sort(blocks, function(x, y) return (x[1] or 0) < (y[1] or 0) end)
-  local size = {}
-  for _, b in ipairs(blocks) do
-    local t = S.cfg.takes[b.key]
-    if t and t.group then size[t.group] = (size[t.group] or 0) + 1 end
-  end
-  local grp, any = {}, false
-  for _, b in ipairs(blocks) do
-    local t = S.cfg.takes[b.key]
-    -- A line of one take left (the others deleted) is a plain take.
-    if t and t.group and size[t.group] >= 2 then grp[b.key] = t.group; any = true end
-  end
-  local count, out, line, first, n = {}, {}, {}, {}, 0
-  for _, b in ipairs(blocks) do
-    local g = grp[b.key]
-    if g then
-      count[g] = (count[g] or 0) + 1
-      out[b.key] = count[g]
-    end
-    if any then
-      if g then
-        if not first[g] then n = n + 1; first[g] = n end
-        line[b.key] = first[g]
-      else
-        n = n + 1
-        line[b.key] = n
-      end
-    end
-  end
-  return out, line
-end
-
--- The first number of $index and of a line's "_NN": 1, or 0 with Settings >
--- Numbering (cfg.index_start = 0). Takes are counted from 1 inside the
--- script (block.index, line numbers); only names are written from 0.
+-- The first number of $index: 1, or 0 with Settings > Numbering
+-- (cfg.index_start = 0). Takes are counted from 1 inside the script
+-- (block.index); only names are written from 0.
+-- "Same line" (takes of one line named _01, _02... with $index counting lines)
+-- was removed in 0.2: the user found no use for it. takes[key].group, if
+-- still in a project's config, is ignored.
 local function index_start() return (S.cfg and S.cfg.index_start == 0) and 0 or 1 end
 local function index_number(n) return (n or 1) - 1 + index_start() end
 local function index_text(n) return string.format('%02d', index_number(n)) end
 
--- A take's file name: its template expanded, and "_NN" after it for a take of a line.
-local function take_name(template, vars, n)
-  local name, unknown = assets_mod.expand(template, vars)
-  if n then name = name .. '_' .. index_text(n) end
-  return name, unknown
+-- A take's file name: its template expanded.
+local function take_name(template, vars)
+  return assets_mod.expand(template, vars)
 end
 
 local function rescan_assets()
@@ -875,13 +835,11 @@ local function build_rows()
   end
   for ai, a in ipairs(S.assets) do
     local acfg = S.cfg.assets[a.guid]
-    -- Takes of a line ("Same line"): their number in it.
-    local takes_n, line_n = take_numbers(a)
     for _, b in ipairs(a.blocks) do
       local tcfg = S.cfg.takes[b.key]
       local template = (tcfg and tcfg.name) or asset_template(a)
-      vars.track, vars.item, vars.index = a.name, b.label or '', index_text(line_n[b.key] or b.index)
-      local name, unknown = take_name(template, vars, takes_n[b.key])
+      vars.track, vars.item, vars.index = a.name, b.label or '', index_text(b.index)
+      local name, unknown = take_name(template, vars)
       local folder
       if tcfg and tcfg.folder ~= nil then folder = tcfg.folder or nil else folder = acfg and acfg.folder end
       -- The take's own render settings win over its asset's (track's).
@@ -1052,18 +1010,6 @@ local function set_name(rows, template)
   for _, r in ipairs(rows) do
     local t = take_cfg(r.key)
     if template == '' or template == default_template() then t.name = nil else t.name = template end
-    prune_take(r.key)
-  end
-  save_cfg()
-end
-
--- Marks the takes as one line of several takes (on = true), per asset, or
--- takes them out of their line.
-local function set_same_line(rows, on)
-  local id = string.format('%x', math.floor(reaper.time_precise() * 1000))
-  for _, r in ipairs(rows) do
-    local t = take_cfg(r.key)
-    t.group = on and (id .. '-' .. r.asset.guid) or nil
     prune_take(r.key)
   end
   save_cfg()
@@ -2047,14 +1993,6 @@ local function set_render(rows, k, v)
   save_cfg()
 end
 
--- Drops the takes' own render settings: they render with their track's again.
-local function clear_take_render(rows)
-  for _, r in ipairs(rows) do
-    if S.cfg.takes[r.key] then S.cfg.takes[r.key].render = nil; prune_take(r.key) end
-  end
-  save_cfg()
-end
-
 -- Tail the reverbs of an asset's stem suggest (render.reverb_tail), read
 -- again at most once a second: seconds or nil (no reverb), and what was found.
 local TAIL_NO_REVERB = 1 -- what ticking Tail sets when there is no reverb
@@ -2239,9 +2177,8 @@ local function draw_adopt_question(by_key)
   end
   local st = r.st
   local dir, template = adoption(r)
-  local tn, ln = take_numbers(r.asset)
-  local vars = { track = r.asset.name, item = r.block.label or '', index = index_text(ln[r.key] or r.index) }
-  local new_name = take_name(template or r.template, vars, tn[r.key])
+  local vars = { track = r.asset.name, item = r.block.label or '', index = index_text(r.index) }
+  local new_name = take_name(template or r.template, vars)
   local fch = S.audio_ch and S.audio_ch[st.path]
   ImGui.Text(ctx, 'Is this take the file already in FMOD?')
   ImGui.Spacing(ctx)
@@ -2357,19 +2294,7 @@ local function draw_selection_panel(sel, side, mini)
   else
     field('Name', 'Name', wildcard_help(), 0)
   end
-  -- Same line: the selected takes are takes of one line (see take_numbers).
-  -- Shown with 2+ takes selected, or 1 take in a line (to take it out).
-  local g1 = S.cfg.takes[sel[1].key] and S.cfg.takes[sel[1].key].group
-  local same = g1 ~= nil
-  for i = 2, n do
-    local t = S.cfg.takes[sel[i].key]
-    if not (t and t.group == g1) then same = false end
-  end
-  local same_label = 'Same line'
-  local show_same = n >= 2 or g1 ~= nil
-  local inner_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemInnerSpacing)
-  local same_w = show_same and (ImGui.GetFrameHeight(ctx) + inner_x + ImGui.CalcTextSize(ctx, same_label) + ITEM_SPACING_X) or 0
-  ImGui.SetNextItemWidth(ctx, -(button_width(default_label) + ITEM_SPACING_X + same_w))
+  ImGui.SetNextItemWidth(ctx, -(button_width(default_label) + ITEM_SPACING_X))
   if S.panel_name_key ~= sel[1].key .. n or not S.panel_name_active then
     S.panel_name, S.panel_name_key = tmixed and '' or template, sel[1].key .. n
   end
@@ -2378,14 +2303,6 @@ local function draw_selection_panel(sel, side, mini)
   S.panel_name_active = ImGui.IsItemActive(ctx)
   if ImGui.IsItemDeactivatedAfterEdit(ctx) then set_name(sel, S.panel_name); S.panel_name_active = false end
   tip(wildcard_help() .. '\nEmpty: the project\'s name.')
-  if show_same then
-    ImGui.SameLine(ctx)
-    local c, v = ImGui.Checkbox(ctx, same_label, same)
-    if c then set_same_line(sel, v and n >= 2) end
-    tip(n >= 2 and ('Takes of one line: each gets _01, _02... after its name, in time order.'
-      .. ' The line counts as one for $index: the take after it has the next number.')
-      or 'This take is in a line with other takes: unticked, it leaves it.')
-  end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, default_label) then
     set_name(sel, '')
@@ -2515,19 +2432,7 @@ local function draw_selection_panel(sel, side, mini)
   level('normalize', 'Normalize', 'Norm', 'LUFS-I', -24, 'Normalizes every file to this integrated loudness (LUFS-I).', -60, 0)
   level('limit', 'Limiter', 'Limit', 'dB', 0, 'Brickwall limiter at this ceiling, after the normalization.', -30, 0)
 
-  -- Takes with settings of their own: back to their track's.
-  if panel_scope == 'take' then
-    local own = false
-    for _, r in ipairs(sel) do if r.own_render then own = true end end
-    if own then
-      -- In line with the render settings: after Limiter, or flowing in Mini.
-      local label = 'Use track settings##take_render'
-      if flow_right then field('', '', nil, button_width('Use track settings'))
-      else ImGui.SameLine(ctx, 0, 14) end
-      if ImGui.Button(ctx, label) then clear_take_render(sel) end
-      tip('Drops the render settings of the selected takes: they render with their track\'s again.')
-    end
-  end
+  -- No "Use track settings" button (removed 2026-11-27, the user did not like it).
 
   flow_right, flow_indent = nil, nil
   if cols then ImGui.EndTable(ctx) end
@@ -3065,7 +2970,7 @@ local function draw_settings()
   ImGui.TextDisabled(ctx, (assets_mod.expand(default_template(), {
     project = config.basename(S.rpp):gsub('%.[Rr][Pp][Pp]$', ''), title = project_info('PROJECT_TITLE'),
     author = project_info('PROJECT_AUTHOR'), track = 'Track', item = 'Item', index = index_text(1) })))
-  setting_label('Numbering', 'The first number of $index, and of the "_NN" after takes marked "Same line".\n'
+  setting_label('Numbering', 'The first number of $index.\n'
     .. 'A folder item whose name ends with a number keeps that number: with 00 first, "_00" is its first take.')
   local c_ix, zero = ImGui.Checkbox(ctx, 'Start at 00##index_start', S.cfg.index_start == 0)
   if c_ix then
